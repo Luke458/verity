@@ -15,12 +15,29 @@ built into the engine.
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import signal
 import subprocess
+import threading
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
-from .decisions import DecisionSet
+from .decisions import CAUSE_VALUES, DecisionSet
+
+# Environment variables passed to an agent command by default. Everything else
+# (cloud credentials, API keys, tokens) is withheld unless explicitly listed in
+# ``CommandAgent.env``.
+ENV_ALLOWLIST: tuple[str, ...] = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "VIRTUAL_ENV",
+    "PYTHONPATH",
+)
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "root_cause": "string",
@@ -379,8 +396,22 @@ class InvestigationAgent(Protocol):
     def investigate(self, brief: InvestigationBrief) -> InvestigationResult: ...
 
 
+def _string_list(value: Any, name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"{name} must be a list of strings")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{name} must contain only strings")
+        result.append(item)
+    return result
+
+
 def parse_investigation_result(
-    payload: dict[str, Any], run_id: str, agent: str
+    payload: dict[str, Any],
+    run_id: str,
+    agent: str,
+    allowed_evidence_ids: Sequence[str] | None = None,
 ) -> InvestigationResult:
     if not isinstance(payload, dict):
         raise ValueError("investigation response must be a JSON object")
@@ -391,20 +422,42 @@ def parse_investigation_result(
     ]
     if missing:
         raise ValueError(f"investigation response missing keys: {missing}")
-    confidence = float(payload["confidence"])
+    root_cause = payload["root_cause"]
+    if not isinstance(root_cause, str) or root_cause not in CAUSE_VALUES:
+        raise ValueError(
+            f"root_cause {root_cause!r} is not one of {sorted(CAUSE_VALUES)}"
+        )
+    confidence = payload["confidence"]
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("confidence must be a number")
+    confidence = float(confidence)
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("confidence must be in [0, 1]")
-    evidence_ids = [str(value) for value in payload.get("evidence_ids", [])]
-    actions = [str(value) for value in payload.get("recommended_actions", [])]
-    questions = [str(value) for value in payload.get("follow_up_questions", [])]
+    summary = payload["summary"]
+    if not isinstance(summary, str):
+        raise ValueError("summary must be a string")
+    evidence_ids = _string_list(payload.get("evidence_ids", []), "evidence_ids")
+    if allowed_evidence_ids is not None:
+        allowed = {str(value) for value in allowed_evidence_ids}
+        fabricated = sorted(set(evidence_ids) - allowed)
+        if fabricated:
+            raise ValueError(
+                f"response cites unknown evidence ids: {fabricated}"
+            )
+    actions = _string_list(
+        payload.get("recommended_actions", []), "recommended_actions"
+    )
+    questions = _string_list(
+        payload.get("follow_up_questions", []), "follow_up_questions"
+    )
     return InvestigationResult(
         run_id=run_id,
         agent=agent,
-        root_cause=str(payload["root_cause"]),
+        root_cause=root_cause,
         confidence=confidence,
         evidence_ids=evidence_ids,
         recommended_actions=actions,
-        summary=str(payload["summary"]),
+        summary=summary,
         follow_up_questions=questions,
         raw=payload,
     )
@@ -433,24 +486,105 @@ class CommandAgent:
     command: str
     timeout: float = 300.0
     name: str = "command"
+    max_output_bytes: int = 4 * 1024 * 1024
+    env: dict[str, str] = field(default_factory=dict)
+
+    def _environment(self) -> dict[str, str]:
+        environment = {
+            key: os.environ[key] for key in ENV_ALLOWLIST if key in os.environ
+        }
+        environment.update({str(k): str(v) for k, v in self.env.items()})
+        return environment
+
+    def _read_capped(self, stream: Any, sink: list[str]) -> None:
+        total = 0
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > self.max_output_bytes:
+                sink.append("\n[output truncated: limit exceeded]")
+                while stream.read(65536):
+                    pass
+                break
+            sink.append(chunk)
 
     def investigate(self, brief: InvestigationBrief) -> InvestigationResult:
-        completed = subprocess.run(
-            self.command,
-            shell=True,
-            input=json.dumps(brief.to_dict()),
-            capture_output=True,
+        try:
+            argv = shlex.split(self.command)
+        except ValueError as error:
+            raise ValueError(f"invalid agent command: {error}") from error
+        if not argv:
+            raise ValueError("agent command is empty")
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=self.timeout,
+            start_new_session=True,
+            env=self._environment(),
         )
-        if completed.returncode != 0:
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+        readers = [
+            threading.Thread(
+                target=self._read_capped, args=(process.stdout, stdout_parts)
+            ),
+            threading.Thread(
+                target=self._read_capped, args=(process.stderr, stderr_parts)
+            ),
+        ]
+        for reader in readers:
+            reader.daemon = True
+            reader.start()
+
+        def write_stdin() -> None:
+            try:
+                assert process.stdin is not None
+                process.stdin.write(json.dumps(brief.to_dict()))
+                process.stdin.close()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+
+        writer = threading.Thread(target=write_stdin, daemon=True)
+        writer.start()
+
+        timed_out = False
+        try:
+            returncode = process.wait(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            returncode = -1
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                process.kill()
+            process.wait()
+        for reader in readers:
+            reader.join(timeout=5)
+        writer.join(timeout=5)
+
+        if timed_out:
             raise RuntimeError(
-                f"agent command failed ({completed.returncode}): {completed.stderr.strip()}"
+                f"agent command timed out after {self.timeout} seconds"
+            )
+        stdout = "".join(stdout_parts)
+        stderr = "".join(stderr_parts)
+        if returncode != 0:
+            raise RuntimeError(
+                f"agent command failed ({returncode}): {stderr.strip()[:2000]}"
             )
         try:
-            payload = json.loads(completed.stdout)
+            payload = json.loads(stdout)
         except json.JSONDecodeError as error:
             raise ValueError(
                 f"agent command did not return JSON: {error}"
             ) from error
-        return parse_investigation_result(payload, brief.run_id, self.name)
+        return parse_investigation_result(
+            payload,
+            brief.run_id,
+            self.name,
+            allowed_evidence_ids=brief.evidence_ids,
+        )

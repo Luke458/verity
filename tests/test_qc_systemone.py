@@ -176,6 +176,44 @@ def test_systemone_rejects_unknown_choice(endpoint, case):
     _Handler.response = CANNED_RESPONSE
 
 
+def test_systemone_rejects_invalid_probabilities(endpoint, case):
+    negative = json.loads(json.dumps(CANNED_RESPONSE))
+    negative["answers"]["likely_cause"]["probabilities"]["BACKFILL"] = -0.5
+    _Handler.response = negative
+    with pytest.raises(ValueError, match="in \\[0, 1\\]"):
+        SystemOneDecisionProvider(url=endpoint).decide(case)
+
+    over_one = json.loads(json.dumps(CANNED_RESPONSE))
+    over_one["answers"]["severity"]["probabilities"]["2"] = 1.7
+    _Handler.response = over_one
+    with pytest.raises(ValueError, match="in \\[0, 1\\]"):
+        SystemOneDecisionProvider(url=endpoint).decide(case)
+    _Handler.response = CANNED_RESPONSE
+
+
+def test_systemone_response_size_is_capped(endpoint, case):
+    with pytest.raises(ValueError, match="exceeded"):
+        SystemOneDecisionProvider(
+            url=endpoint, max_response_bytes=16
+        ).decide(case)
+
+
+def test_fallback_keeps_local_fields_remote_omits(case):
+    local = _decision_set("UNKNOWN", 0.4, True, "local")
+    remote_values = dict(local.values)
+    remote_values.pop("severity")
+    remote = _StubProvider(
+        DecisionSet("run", "remote", remote_values, True)
+    )
+    provider = FallbackDecisionProvider(
+        local=_StubProvider(local), remote=remote, escalate_below=0.85
+    )
+    decision = provider.decide(case)
+    assert decision.get("likely_cause").value == "UNKNOWN"  # remote answered
+    assert decision.get("severity") is not None  # local field preserved
+    assert decision.get("severity").value == "HIGH"
+
+
 def test_evidence_state_is_bounded(case):
     state = build_evidence_state(case, max_chars=2000)
     assert len(state) <= 2000
@@ -183,6 +221,17 @@ def test_evidence_state_is_bounded(case):
     assert "historical_revision" in payload
     assert "events" in payload
     assert "raw" not in payload
+
+
+def test_evidence_state_never_slices_json(case):
+    # Every size must still parse as JSON; the old code cut the string.
+    for max_chars in (2000, 600, 300, 120):
+        state = build_evidence_state(case, max_chars=max_chars)
+        payload = json.loads(state)
+        assert len(state) <= max_chars
+        assert payload["run_id"] == case.run_id
+    with pytest.raises(ValueError, match="cannot fit"):
+        build_evidence_state(case, max_chars=20)
 
 
 class _StubProvider:

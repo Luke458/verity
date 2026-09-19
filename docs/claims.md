@@ -26,17 +26,17 @@ Statuses:
 | C Temporal intelligence / forecast calibration | `plumbing-only` | Synthetic-only; conformal/prequential fixes land in M3. |
 | 11 TSPulse adapter + benchmark | `research` | Weekly-length suitability gate unresolved; never production-eligible. |
 | D Typed decisions / labels / training | `plumbing-only` | Trained on synthetic oracle labels; real-label accuracy pending. |
-| D Incident memory / agent handoff | `plumbing-only` | Draft contamination and untrusted-output handling fixes land in M4. |
+| D Incident memory / agent handoff | `validated-synthetic` | Confirmed-only retrieval, no-shell agent execution, env allowlist, output caps, strict response validation (M4); real-agent accuracy unmeasured. |
 | C+ Relationships / reports / Delta source | `validated-synthetic` | Benjamini-Hochberg correction, active-week requirement, stable entity-set hashing (M2); reports/Delta still plumbing. |
 | Evaluation cohorts / conformal / prequential | `validated-synthetic` | Conformal p-values, finite guards, scope partitioning, paired champion tests, complete gate sets and plan-hash pinning (M3); real-label cohort still pending. |
-| Operations store / drift monitoring | `plumbing-only` | Provenance defaults and non-atomic weekly writes land in M4. |
+| Operations store / drift monitoring | `validated-synthetic` | WAL/busy-timeout, schema versioning, provenance CHECK with no analyst default, latest-confirmed view, UPSERT relationships, atomic weekly writes and locking (M4); real load still pending. |
 | Substrates ModernBERT-class text probe | `research` | Token-oracle tests only; real-label semantic benchmark pending. |
 | Champion provider bake-off | `validated-synthetic` | Complete gates, homogeneous cohorts, fail-closed identity, provenance without overrides, paired selection (M3); real-label selection pending. |
 | Onboarding | `plumbing-only` | Never executed against a real production table. |
 | Feedback simulation (synthetic analyst) | `research` | Feedback-loop plumbing; provenance must remain `synthetic`. |
 | Verity spine (replay/expectations/reference/RCA) | `plumbing-only` | Leakage guards are advisory until M3/M4. |
-| Weekly run orchestrator | `plumbing-only` | Idempotency is directory-existence based until M4. |
-| Integration Jev/systemone remote provider | `plumbing-only` | Protocol validation fixes land in M4. |
+| Weekly run orchestrator | `validated-synthetic` | flock, completed-marker idempotency, atomic temp-dir swap, config-hash run_id, reference never reads ahead (M4). |
+| Integration Jev/systemone remote provider | `validated-synthetic` | Probability validation, response byte caps, evidence-state structural truncation, fallback keeps local fields (M4). |
 
 ## Not claimed
 

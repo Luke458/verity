@@ -34,6 +34,7 @@ class IncidentRecord:
     affected_entities: list[str] = field(default_factory=list)
     temporal_embedding: list[float] | None = None
     confirmed: bool = False
+    provenance: str = "unknown"
     created_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -60,6 +61,7 @@ class IncidentRecord:
                 else None
             ),
             confirmed=bool(data.get("confirmed", False)),
+            provenance=str(data.get("provenance", "unknown")),
             created_at=data.get("created_at"),
         )
 
@@ -97,11 +99,20 @@ class IncidentStore:
         tags: Sequence[str] | None = None,
         embedding: Sequence[float] | None = None,
         embedding_weight: float = 0.5,
+        confirmed_only: bool = True,
+        max_records: int = 1000,
     ) -> list[tuple[IncidentRecord, float]]:
+        """Similarity retrieval over confirmed incidents only.
+
+        Unconfirmed drafts are never retrieved, so an agent cannot be prompted
+        with its own unverified output. Scores are clamped to [0, 1].
+        """
         query_vector = np.asarray(features, dtype=float)
         query_tags = {str(tag) for tag in (tags or [])}
         scored: list[tuple[IncidentRecord, float]] = []
-        for record in self.load():
+        for record in self.load()[:max_records]:
+            if confirmed_only and not record.confirmed:
+                continue
             vector = np.asarray(record.features, dtype=float)
             if len(vector) != len(query_vector):
                 continue
@@ -125,7 +136,7 @@ class IncidentStore:
                     len(query_tags & record_tags) / len(union) if union else 0.0
                 )
                 score += 0.1 * overlap
-            scored.append((record, score))
+            scored.append((record, min(1.0, max(0.0, score))))
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[:k]
 
@@ -174,5 +185,6 @@ def build_incident_record(
         feature_version=encoder.feature_version,
         affected_entities=sorted(set(entities)),
         confirmed=bool(feedback.get("confirmed", False)),
+        provenance=str(feedback.get("provenance", "unknown")),
         created_at=feedback.get("created_at"),
     )

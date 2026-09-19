@@ -7,18 +7,34 @@ created exclusively, so an existing run is never overwritten.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from .agent import InvestigationBrief
+from .jsonutil import dumps as json_dumps
+
+
+def _cell(value: Any) -> str:
+    """Escape untrusted text for a Markdown table cell."""
+    text = str(value)
+    return (
+        text.replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
+
+
+def _line(value: Any) -> str:
+    """Flatten untrusted text for a Markdown bullet."""
+    return " ".join(str(value).replace("\r", "\n").splitlines())
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
     lines = ["| " + " | ".join(headers) + " |"]
     lines.append("|" + "|".join("---" for _ in headers) + "|")
     for row in rows:
-        lines.append("| " + " | ".join(str(value) for value in row) + " |")
+        lines.append("| " + " | ".join(_cell(value) for value in row) + " |")
     return "\n".join(lines)
 
 
@@ -99,10 +115,10 @@ def render_markdown(
         )
         lines.append("")
     if result.reconciliation is not None:
-        lines.append(f"## Reconciliation: {result.reconciliation.status}")
+        lines.append(f"## Reconciliation: {_line(result.reconciliation.status)}")
         for check in result.reconciliation.checks:
             if not check.passed:
-                lines.append(f"- FAILED {check.name}: {check.detail}")
+                lines.append(f"- FAILED {_line(check.name)}: {_line(check.detail)}")
         if result.reconciliation.ratio_flags:
             lines.append(
                 f"- ratio outliers on {len(result.reconciliation.ratio_flags)} week(s)"
@@ -111,7 +127,7 @@ def render_markdown(
     if result.lineage is not None:
         lines.append("## Lineage")
         lines.append(
-            f"- first divergence: {result.lineage.first_divergence or 'none'}"
+            f"- first divergence: {_line(result.lineage.first_divergence or 'none')}"
         )
         lines.append("")
 
@@ -217,7 +233,7 @@ def render_markdown(
     if result.reasons:
         lines.append("## Reasons")
         for reason in result.reasons:
-            lines.append(f"- {reason}")
+            lines.append(f"- {_line(reason)}")
         lines.append("")
 
     if brief is not None:
@@ -225,7 +241,7 @@ def render_markdown(
         if brief.open_questions:
             lines.append("### Open questions")
             for question in brief.open_questions:
-                lines.append(f"- {question}")
+                lines.append(f"- {_line(question)}")
         if brief.recommended_queries:
             lines.append("")
             lines.append("### Recommended first queries")
@@ -277,6 +293,6 @@ def write_report(
     machine_path = path / "report.json"
     markdown_path.write_text(render_markdown(result, brief))
     machine_path.write_text(
-        json.dumps(result.machine, indent=2, sort_keys=True, default=str)
+        json_dumps(result.machine, indent=2, sort_keys=True, default=str)
     )
     return {"markdown": markdown_path, "machine": machine_path}

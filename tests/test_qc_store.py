@@ -108,10 +108,21 @@ def test_relationships_are_deduplicated_and_filterable(store):
         confidence=0.95,
     )
     assert store.add_relationship(relationship) is True
-    assert store.add_relationship(relationship) is False
+    # Re-adding updates in place (so a candidate can later be promoted).
+    assert store.add_relationship(relationship) is True
     assert store.relationships() == [relationship]
     assert store.relationships(confirmed_only=True) == []
-    assert store.for_entity("store", ["A"]) == [relationship]
+    promoted = EntityRelationship(
+        source_id="A",
+        target_id="C",
+        entity_type="store",
+        relationship="replaced_by",
+        confirmed=True,
+        confidence=0.95,
+    )
+    store.add_relationship(promoted)
+    assert store.relationships(confirmed_only=True) == [promoted]
+    assert store.for_entity("store", ["A"]) == [promoted]
     assert store.for_entity("store", ["Z"]) == []
 
 

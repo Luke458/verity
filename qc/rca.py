@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .agent import CAUSE_TOOL_PLANS
-from .evidence_query import ALLOWED_QUERIES, query_evidence
+from .evidence_query import ALLOWED_QUERIES, MAX_LIMIT, query_evidence
 
 Selector = Callable[[Any, list["RCAStep"], tuple[str, ...]], tuple[str, dict] | None]
 
@@ -73,6 +73,8 @@ def investigate(
 ) -> RCAResult:
     if max_steps < 1:
         raise ValueError("max_steps must be >= 1")
+    max_steps = min(max_steps, len(ALLOWED_QUERIES))
+    limit = min(limit, MAX_LIMIT)
     selector = selector or default_selector
     trace: list[RCAStep] = []
     remaining = tuple(ALLOWED_QUERIES)

@@ -209,6 +209,7 @@ def test_store_labels_are_confirmed_only(tmp_path):
             likely_origin="SOURCE",
             severity="HIGH",
             requires_investigation=True,
+            provenance="analyst",
         )
         store.record_result(draft_result)
         store.record_outcome("case-2", root_cause="CODING", confirmed=False)
@@ -221,6 +222,25 @@ def test_store_labels_are_confirmed_only(tmp_path):
     assert record.labels["likely_origin"] == "SOURCE"
     assert record.labels["requires_investigation"] == "True"
     assert record.text and "status=" in record.text
+
+
+def test_outcome_without_provenance_is_not_analyst(tmp_path):
+    from qc.labels import records_from_store
+
+    case = build_scenario(
+        suite_config("tiny"),
+        0,
+        tmp_path,
+        "missing_stores",
+        ("source", "coded", "warehouse", "report"),
+    )
+    result = run_qc(ScenarioSource(case.directory), "V0002", "V0001", run_id="case-x")
+    database = tmp_path / "unknown.db"
+    with SqliteStore(database) as store:
+        store.record_result(result)
+        store.record_outcome("case-x", root_cause="MISSING_STORES", confirmed=True)
+    records = records_from_store(database)
+    assert records and records[0].source == "unknown"
 
 
 def test_cli_champion(cohorts, tmp_path, capsys):

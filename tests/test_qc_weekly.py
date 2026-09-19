@@ -144,6 +144,44 @@ def test_weekly_force_rerun_notes_duplicate_run(tmp_path):
     assert any("already recorded" in note for note in forced.notes)
 
 
+def test_weekly_lock_prevents_overlap(tmp_path):
+    import fcntl
+
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31, 32))
+    config = replace(DatasetConfig(), name="weekly-lock")
+    out = tmp_path / "weekly"
+    out.mkdir(parents=True, exist_ok=True)
+    lock_path = out / ".weekly-lock.lock"
+    handle = lock_path.open("w")
+    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        result = run_weekly(str(path), config=config, out_root=out)
+        assert result.status == "LOCKED"
+        assert result.skipped is True
+    finally:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
+
+    after = run_weekly(str(path), config=config, out_root=out)
+    assert after.status in ("PASS", "PASS_WITH_EXPLANATION")
+
+
+def test_incomplete_report_directory_is_reprocessed(tmp_path):
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31, 32))
+    config = replace(DatasetConfig(), name="weekly-partial")
+    out = tmp_path / "weekly"
+    report_dir = out / config.name / "2"
+    report_dir.mkdir(parents=True)
+    (report_dir / "report.md").write_text("stale partial output")
+
+    result = run_weekly(str(path), config=config, out_root=out)
+    assert result.skipped is False
+    assert any("incomplete report" in note for note in result.notes)
+    assert (report_dir / "weekly.json").exists()
+
+
 def test_records_from_result_match_temporal_series(tmp_path):
     path = tmp_path / "fact"
     _write_versions(path, (30, 31))

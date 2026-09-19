@@ -90,7 +90,71 @@ def test_command_agent_roundtrip(case, tmp_path):
 def test_command_agent_failure(case):
     _, brief = case
     with pytest.raises(RuntimeError):
-        CommandAgent("exit 1").investigate(brief)
+        CommandAgent(f"{shlex.quote(sys.executable)} -c 'raise SystemExit(1)'").investigate(
+            brief
+        )
+
+
+def test_shell_metacharacters_are_inert(case, tmp_path):
+    _, brief = case
+    marker = tmp_path / "pwned"
+    command = f"echo {{}} ; touch {marker}"
+    with pytest.raises(ValueError):
+        CommandAgent(command).investigate(brief)
+    assert not marker.exists()
+
+
+def test_env_is_allowlisted(case, tmp_path, monkeypatch):
+    _, brief = case
+    monkeypatch.setenv("QC_SECRET_TOKEN", "hunter2")
+    script = (
+        "import json, os, sys\n"
+        "json.load(sys.stdin)\n"
+        "print(json.dumps({'root_cause': 'UNKNOWN', 'confidence': 0.1, "
+        "'summary': json.dumps(sorted(os.environ))}))\n"
+    )
+    path = tmp_path / "env_probe.py"
+    path.write_text(script)
+    command = f"{shlex.quote(sys.executable)} {shlex.quote(str(path))}"
+    result = CommandAgent(command).investigate(brief)
+    assert "QC_SECRET_TOKEN" not in result.summary
+
+
+def test_command_timeout_kills_the_process(case):
+    _, brief = case
+    command = f"{shlex.quote(sys.executable)} -c 'import time; time.sleep(30)'"
+    with pytest.raises(RuntimeError, match="timed out"):
+        CommandAgent(command, timeout=0.5).investigate(brief)
+
+
+def test_fabricated_evidence_ids_rejected(case):
+    _, brief = case
+    with pytest.raises(ValueError, match="unknown evidence ids"):
+        parse_investigation_result(
+            {
+                "root_cause": "UNKNOWN",
+                "confidence": 0.5,
+                "summary": "s",
+                "evidence_ids": ["not-a-real-id"],
+            },
+            "run",
+            "agent",
+            allowed_evidence_ids=brief.evidence_ids,
+        )
+
+
+def test_string_evidence_ids_rejected():
+    with pytest.raises(ValueError, match="list of strings"):
+        parse_investigation_result(
+            {
+                "root_cause": "UNKNOWN",
+                "confidence": 0.5,
+                "summary": "s",
+                "evidence_ids": "abc",
+            },
+            "run",
+            "agent",
+        )
 
 
 def test_parse_rejects_invalid_payloads():

@@ -49,9 +49,38 @@ def test_historical_residuals_include_total(case):
 
 
 def test_all_allowlisted_queries_run(case):
+    # Each query must return a real, shape-checked answer, not just echo its
+    # own name: a stub returning an empty Outcome would pass a name check.
+    expected_keys = {
+        "lifecycle_changes": {"entity_type", "entity_id", "classification"},
+        "historical_residuals": {"entity_type", "delta"},
+        "temporal_anomalies": {"series_id", "week"},
+        "first_divergence": {"stage", "row_count_delta"},
+        "contract_failures": {"name", "detail"},
+        "contributors": {"entity_type", "delta"},
+        "relationships": {"source_id", "target_id", "relationship"},
+    }
+    assert set(expected_keys) == set(ALLOWED_QUERIES)
     for query in ALLOWED_QUERIES:
         outcome = query_evidence(case, query, limit=5)
         assert outcome.query == query
+        assert outcome.total_rows >= 0
+        if query == "lifecycle_changes":
+            assert outcome.rows, "missing_stores must produce lifecycle events"
+        for row in outcome.rows:
+            assert expected_keys[query] <= set(row), (query, row)
+
+
+def test_unknown_filters_rejected(case):
+    with pytest.raises(ValueError, match="unknown filter keys"):
+        query_evidence(case, "lifecycle_changes", not_a_column="x")
+
+
+def test_limit_is_capped(case):
+    from qc.evidence_query import MAX_LIMIT
+
+    outcome = query_evidence(case, "lifecycle_changes", limit=10**9)
+    assert len(outcome.rows) <= MAX_LIMIT
 
 
 def test_cli_evidence(case, capsys, tmp_path):

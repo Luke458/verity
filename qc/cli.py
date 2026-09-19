@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -42,6 +43,7 @@ from .drift import monitor_drift
 from .evidence_query import ALLOWED_QUERIES, query_evidence
 from .expectations import apply_expectations, load_expectations
 from .incidents import IncidentStore, build_incident_record, symptom_tags_for
+from .jsonutil import dumps as _json_dumps
 from .labels import LabelStore, build_oracle_labels, records_from_store
 from .prequential import PrequentialStore, prequential_sequence
 from .rca import investigate
@@ -235,7 +237,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         config = replace(config, decision_enabled=False)
     result = _run_scenario(args, config, _load_provider(args.provider))
     if args.json:
-        print(json.dumps(result.machine, indent=2, default=_json_default))
+        print(_json_dumps(result.machine, indent=2, default=_json_default))
     else:
         _print_human(result)
     return 0
@@ -246,7 +248,7 @@ def _cmd_decide(args: argparse.Namespace) -> int:
     result = _run_scenario(args, config, _load_provider(args.provider))
     if args.json:
         print(
-            json.dumps(
+            _json_dumps(
                 {
                     "run_id": result.run_id,
                     "status": result.status,
@@ -291,7 +293,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
         )
         text_provider.save(args.out)
         (Path(args.out) / "metrics.json").write_text(
-            json.dumps(metrics, indent=2, sort_keys=True)
+            _json_dumps(metrics, indent=2, sort_keys=True)
         )
         trained: Any = text_provider
     else:
@@ -304,7 +306,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
         save_training_run(feature_provider, metrics, args.out)
         trained = feature_provider
     if args.json:
-        print(json.dumps(metrics, indent=2, sort_keys=True))
+        print(_json_dumps(metrics, indent=2, sort_keys=True))
         return 0
     print(
         f"trained decision provider on {len(records)} records -> {args.out}"
@@ -362,7 +364,7 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
 
     if args.json:
         print(
-            json.dumps(
+            _json_dumps(
                 {
                     "brief": brief.to_dict(),
                     "investigation": investigation.to_dict(),
@@ -402,10 +404,10 @@ def _cmd_tspulse_bench(args: argparse.Namespace) -> int:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, default=_json_default)
+            _json_dumps(payload, indent=2, sort_keys=True, default=_json_default)
         )
     if args.json:
-        print(json.dumps(payload, indent=2, default=_json_default))
+        print(_json_dumps(payload, indent=2, default=_json_default))
         return 0
     print(
         f"tspulse benchmark suite={result.suite_id} "
@@ -439,7 +441,7 @@ def _cmd_incidents(args: argparse.Namespace) -> int:
     records = store.load()
     if args.json:
         print(
-            json.dumps(
+            _json_dumps(
                 [record.to_dict() for record in records],
                 indent=2,
                 default=_json_default,
@@ -512,7 +514,7 @@ def _cmd_relationships(args: argparse.Namespace) -> int:
     records = store.load()
     if args.json:
         print(
-            json.dumps(
+            _json_dumps(
                 [record.to_dict() for record in records],
                 indent=2,
                 default=_json_default,
@@ -558,7 +560,7 @@ def _cmd_delta_info(args: argparse.Namespace) -> int:
     options = json.loads(args.storage_options) if args.storage_options else None
     info = describe_delta_table(args.uri, options)
     if args.json:
-        print(json.dumps(info, indent=2, default=_json_default))
+        print(_json_dumps(info, indent=2, default=_json_default))
         return 0
     print(f"delta table {info['uri']}")
     print(
@@ -606,7 +608,7 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
         decision_provider=_load_provider(args.provider),
     )
     if args.json:
-        print(json.dumps(result.machine, indent=2, default=_json_default))
+        print(_json_dumps(result.machine, indent=2, default=_json_default))
     else:
         _print_human(result)
     for warning in getattr(source, "warnings", []):
@@ -626,14 +628,14 @@ def _cmd_evidence(args: argparse.Namespace) -> int:
         filters[key] = value
     outcome = query_evidence(result, args.query, limit=args.limit, **filters)
     if args.json:
-        print(json.dumps(outcome.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(outcome.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"query={outcome.query} rows={len(outcome.rows)}/{outcome.total_rows} "
         f"truncated={outcome.truncated}"
     )
     for row in outcome.rows:
-        print("  " + json.dumps(row, default=_json_default, sort_keys=True))
+        print("  " + _json_dumps(row, default=_json_default, sort_keys=True))
     return 0
 
 
@@ -665,7 +667,7 @@ def _cmd_prequential(args: argparse.Namespace) -> int:
         )
         print(f"  percentile={percentile}")
         print(f"  lower_p_value={lower_p}")
-        print(f"  interval={json.dumps(interval.to_dict(), default=_json_default)}")
+        print(f"  interval={_json_dumps(interval.to_dict(), default=_json_default)}")
     return 0
 
 
@@ -690,7 +692,7 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
         plan_path=args.plan,
     )
     if args.json:
-        print(json.dumps(result.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"cohort cases={result.metrics['cases']} "
@@ -785,7 +787,7 @@ def _cmd_store_list(args: argparse.Namespace) -> int:
     if args.confirmed_only:
         rows = [row for row in rows if row.get("confirmed")]
     if args.json:
-        print(json.dumps(rows, indent=2, default=_json_default))
+        print(_json_dumps(rows, indent=2, default=_json_default))
         return 0
     print(f"runs={len(rows)} store={args.store}")
     for row in rows:
@@ -818,7 +820,7 @@ def _cmd_store_incidents(args: argparse.Namespace) -> int:
             ),
         )
     if args.json:
-        print(json.dumps(hits, indent=2, default=_json_default))
+        print(_json_dumps(hits, indent=2, default=_json_default))
         return 0
     print(f"confirmed incidents matching {result.run_id}: {len(hits)}")
     for hit in hits:
@@ -843,7 +845,7 @@ def _cmd_drift(args: argparse.Namespace) -> int:
         scope=getattr(args, "scope", None),
     )
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(report.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"drift status={report.status} usable={report.usable} "
@@ -915,7 +917,7 @@ def _cmd_champion(args: argparse.Namespace) -> int:
     paths = write_champion_report(result, args.out) if args.out else {}
 
     if args.json:
-        print(json.dumps(result.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"champion={result.champion or 'none'} "
@@ -954,7 +956,7 @@ def _cmd_store_import(args: argparse.Namespace) -> int:
     with SqliteStore(args.store) as store:
         report = import_outcomes(store, rows, dry_run=args.dry_run)
     if args.json:
-        print(json.dumps(report, indent=2, default=_json_default))
+        print(_json_dumps(report, indent=2, default=_json_default))
     else:
         print(
             f"imported={report['imported']} errors={len(report['errors'])} "
@@ -1005,7 +1007,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         out.write_text(yaml.safe_dump(proposal, sort_keys=False))
     if args.json:
         print(
-            json.dumps(
+            _json_dumps(
                 {"profile": profile, "assessment": assessment},
                 indent=2,
                 default=_json_default,
@@ -1060,7 +1062,7 @@ def _cmd_simulate_analyst(args: argparse.Namespace) -> int:
         oracle_dir=getattr(args, "oracle_dir", None),
     )
     if args.json:
-        print(json.dumps(summary, indent=2, default=_json_default))
+        print(_json_dumps(summary, indent=2, default=_json_default))
         return 0
     print(
         f"simulated analyst profile={summary['profile']} runs={summary['runs']} "
@@ -1085,7 +1087,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
         storage_options=options,
     )
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(report.to_dict(), indent=2, default=_json_default))
         return 0 if report.passed else 2
     print(
         f"replay cases={len(report.cases)} failed={len(report.failed)} "
@@ -1107,7 +1109,7 @@ def _cmd_rca(args: argparse.Namespace) -> int:
     result = _run_scenario(args, config, _load_provider(args.provider))
     investigation = investigate(result, max_steps=args.steps, limit=args.limit)
     if args.json:
-        print(json.dumps(investigation.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(investigation.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"RCA {investigation.run_id} steps={len(investigation.steps)} "
@@ -1141,7 +1143,7 @@ def _cmd_expectations(args: argparse.Namespace) -> int:
         context={"dataset": result.dataset, "as_of": args.as_of or ""},
     )
     if args.json:
-        print(json.dumps(report, indent=2, default=_json_default))
+        print(_json_dumps(report, indent=2, default=_json_default))
         return 0
     print(
         f"expectations expected={len(report['expected'])} "
@@ -1180,7 +1182,7 @@ def _cmd_prequential_forecast(args: argparse.Namespace) -> int:
     if args.out:
         PrequentialStore(args.out).add(result.pool.records)
     if args.json:
-        print(json.dumps(result.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"prequential scope={result.scope} loads={result.loads} "
@@ -1208,7 +1210,10 @@ def _cmd_prequential_forecast(args: argparse.Namespace) -> int:
 
 def _cmd_weekly(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    options = json.loads(args.storage_options) if args.storage_options else None
+    # Storage credentials may arrive via the environment so they never appear
+    # in the process argument list.
+    options_raw = args.storage_options or os.environ.get("QC_STORAGE_OPTIONS")
+    options = json.loads(options_raw) if options_raw else None
     try:
         result = run_weekly(
             args.uri,
@@ -1235,7 +1240,7 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
         return 1
 
     if args.json:
-        print(json.dumps(result.to_dict(), indent=2, default=_json_default))
+        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
     else:
         print(
             f"weekly dataset={result.dataset} "
@@ -1264,6 +1269,7 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
         return 0
     return {
         "ALREADY_PROCESSED": 0,
+        "LOCKED": 0,
         "PASS": 0,
         "PASS_WITH_EXPLANATION": 0,
         "INVESTIGATE": 2,

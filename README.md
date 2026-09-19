@@ -174,14 +174,14 @@ status and known weaknesses of each row.
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
 | C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; reconciliation and relationships hardened |
 | Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; statistical and gate fixes landed (M3) |
-| Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance and atomicity fixes pending |
+| Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance, locking and atomicity enforced (M4) |
 | Substrates | Frozen-encoder text probe (ModernBERT-class) | research; real-label bake-off pending |
 | Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; paired selection and provenance enforced; real-label selection pending |
 | Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
 | Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research |
 | Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |
-| Weekly run | `qc weekly` orchestrator, idempotent per version, alertable exit codes, cron script | implemented; locking/atomicity pending |
-| Integration | Jev/djev-compatible remote decision provider + fallback | implemented; protocol validation pending |
+| Weekly run | `qc weekly` orchestrator, idempotent per version, alertable exit codes, cron script | implemented; locked and atomic (M4) |
+| Integration | Jev/djev-compatible remote decision provider + fallback | implemented; protocol validation enforced (M4) |
 
 See [docs/engine.md](docs/engine.md) for engine semantics and status codes,
 [docs/semantic-layer.md](docs/semantic-layer.md) for decisions, training and

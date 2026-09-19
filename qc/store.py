@@ -25,7 +25,17 @@ import numpy as np
 from .decisions import FeatureEncoder
 from .evidence_text import evidence_text as build_evidence_text
 from .incidents import cosine_similarity
+from .jsonutil import dumps as json_dumps
 from .relationships import EntityRelationship
+
+SCHEMA_VERSION = 2
+PROVENANCE_VALUES = (
+    "analyst",
+    "synthetic",
+    "imported",
+    "agent_draft",
+    "unknown",
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -45,7 +55,8 @@ CREATE TABLE IF NOT EXISTS outcomes (
     analyst TEXT,
     confirmed INTEGER NOT NULL DEFAULT 0,
     requires_investigation INTEGER,
-    provenance TEXT NOT NULL DEFAULT 'analyst',
+    provenance TEXT NOT NULL
+        CHECK (provenance IN ('analyst','synthetic','imported','agent_draft','unknown')),
     root_cause TEXT,
     likely_origin TEXT,
     severity TEXT,
@@ -117,10 +128,6 @@ def import_outcomes(
             else _as_bool(requires_raw)
         )
         if dry_run:
-            try:
-                store._run_row(run_id)
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-                pass
             if store._run_row(run_id) is None:
                 errors.append({"row": index, "error": f"unknown run {run_id!r}"})
                 continue
@@ -142,7 +149,7 @@ def import_outcomes(
                 ),
                 symptom_tags=tags,
                 requires_investigation=requires,
-                provenance=str(row.get("provenance") or "analyst"),
+                provenance=str(row.get("provenance") or "imported"),
                 created=(
                     str(row["created"]) if row.get("created") not in (None, "") else None
                 ),
@@ -158,27 +165,32 @@ class SqliteStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(str(self.path))
+        self.connection = sqlite3.connect(str(self.path), timeout=30)
         self.connection.row_factory = sqlite3.Row
-        self.connection.executescript(SCHEMA)
-        self._ensure_column("runs", "evidence_text", "evidence_text TEXT")
-        self._ensure_column(
-            "outcomes", "requires_investigation", "requires_investigation INTEGER"
-        )
-        self._ensure_column(
-            "outcomes",
-            "provenance",
-            "provenance TEXT NOT NULL DEFAULT 'analyst'",
-        )
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA busy_timeout=30000")
+        self.connection.execute("PRAGMA foreign_keys=ON")
+        self._migrate()
         self.connection.commit()
 
-    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
-        columns = {
-            row["name"]
-            for row in self.connection.execute(f"PRAGMA table_info({table})")
-        }
-        if column not in columns:
-            self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+    def _migrate(self) -> None:
+        """Create or version-check the schema.
+
+        A store from an older breaking schema is refused rather than silently
+        altered: no production data exists yet, and a silent ALTER cannot add
+        the provenance CHECK constraint.
+        """
+        row = self.connection.execute("PRAGMA user_version").fetchone()
+        version = int(row[0]) if row is not None else 0
+        if version == 0:
+            self.connection.executescript(SCHEMA)
+            self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            return
+        if version != SCHEMA_VERSION:
+            raise ValueError(
+                f"store schema version {version} is not supported by this "
+                f"build (expected {SCHEMA_VERSION}); recreate the store"
+            )
 
     def close(self) -> None:
         self.connection.close()
@@ -204,25 +216,26 @@ class SqliteStore:
         evidence_text: str | None = None,
         created: str | None = None,
     ) -> None:
-        existing = self.connection.execute(
-            "SELECT run_id FROM runs WHERE run_id = ?", (run_id,)
-        ).fetchone()
-        if existing is not None:
-            raise ValueError(f"run {run_id!r} is already recorded; runs are immutable")
-        self.connection.execute(
-            "INSERT INTO runs (run_id, dataset, created, status, features, "
-            "feature_version, evidence_text, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                run_id,
-                dataset,
-                created or "",
-                status,
-                json.dumps(list(features)) if features is not None else None,
-                feature_version,
-                evidence_text,
-                json.dumps(payload, sort_keys=True, default=str),
-            ),
-        )
+        try:
+            self.connection.execute(
+                "INSERT INTO runs (run_id, dataset, created, status, features, "
+                "feature_version, evidence_text, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    dataset,
+                    created or "",
+                    status,
+                    json.dumps(list(features)) if features is not None else None,
+                    feature_version,
+                    evidence_text,
+                    json_dumps(payload, sort_keys=True, default=str),
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise ValueError(
+                f"run {run_id!r} is already recorded; runs are immutable"
+            ) from error
         self.connection.commit()
 
     def record_result(
@@ -278,9 +291,13 @@ class SqliteStore:
         analyst: str | None = None,
         symptom_tags: Sequence[str] = (),
         requires_investigation: bool | None = None,
-        provenance: str = "analyst",
+        provenance: str = "unknown",
         created: str | None = None,
     ) -> int:
+        if provenance not in PROVENANCE_VALUES:
+            raise ValueError(
+                f"provenance {provenance!r} is not one of {PROVENANCE_VALUES}"
+            )
         if self._run_row(run_id) is None:
             raise ValueError(f"unknown run {run_id!r}; record the run first")
         cursor = self.connection.execute(
@@ -323,10 +340,9 @@ class SqliteStore:
             FROM runs AS r
             JOIN outcomes AS o ON o.outcome_id = (
                 SELECT outcome_id FROM outcomes
-                WHERE run_id = r.run_id
+                WHERE run_id = r.run_id AND confirmed = 1
                 ORDER BY outcome_id DESC LIMIT 1
             )
-            WHERE o.confirmed = 1
             """
         ).fetchall()
         return [dict(row) for row in rows]
@@ -424,9 +440,12 @@ class SqliteStore:
         self, relationship: EntityRelationship, created: str | None = None
     ) -> bool:
         cursor = self.connection.execute(
-            "INSERT OR IGNORE INTO relationships (source_id, target_id, "
+            "INSERT INTO relationships (source_id, target_id, "
             "entity_type, relationship, confirmed, created, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (source_id, target_id, entity_type, relationship) "
+            "DO UPDATE SET confirmed = excluded.confirmed, "
+            "created = excluded.created, payload = excluded.payload",
             (
                 relationship.source_id,
                 relationship.target_id,
@@ -434,7 +453,7 @@ class SqliteStore:
                 relationship.relationship,
                 int(relationship.confirmed),
                 created or "",
-                json.dumps(relationship.to_dict(), sort_keys=True),
+                json_dumps(relationship.to_dict(), sort_keys=True),
             ),
         )
         self.connection.commit()

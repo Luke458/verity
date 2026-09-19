@@ -14,6 +14,7 @@ and key are caller-supplied.
 from __future__ import annotations
 
 import json
+import math
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
@@ -98,12 +99,51 @@ def build_evidence_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
     serialized = json.dumps(state, default=str, sort_keys=True)
     if len(serialized) <= max_chars:
         return serialized
+
+    # Reduce structurally, never by slicing the JSON text.
+    state["truncated"] = True
     temporal = state.get("temporal")
     if isinstance(temporal, dict):
         temporal.pop("series", None)
-    state["reasons"] = state["reasons"][:10]
-    trimmed = json.dumps(state, default=str, sort_keys=True)
-    return trimmed[:max_chars]
+    state["reasons"] = list(state.get("reasons", []))[:10]
+    serialized = json.dumps(state, default=str, sort_keys=True)
+    if len(serialized) <= max_chars:
+        return serialized
+
+    events = state.get("events")
+    if isinstance(events, list):
+        trimmed_events = []
+        for event in events[:20]:
+            if isinstance(event, dict):
+                event = dict(event)
+                event["weeks_added"] = list(event.get("weeks_added", []))[:10]
+                event["weeks_removed"] = list(event.get("weeks_removed", []))[:10]
+            trimmed_events.append(event)
+        state["events"] = trimmed_events
+    serialized = json.dumps(state, default=str, sort_keys=True)
+    if len(serialized) <= max_chars:
+        return serialized
+
+    minimal = {
+        "run_id": state.get("run_id"),
+        "status": state.get("status"),
+        "truncated": True,
+        "events": list(state.get("events", []))[:5],
+        "reasons": list(state.get("reasons", []))[:5],
+    }
+    serialized = json.dumps(minimal, default=str, sort_keys=True)
+    if len(serialized) <= max_chars:
+        return serialized
+
+    minimal.pop("events", None)
+    minimal.pop("reasons", None)
+    serialized = json.dumps(minimal, default=str, sort_keys=True)
+    if len(serialized) > max_chars:
+        raise ValueError(
+            f"evidence state cannot fit in {max_chars} characters; "
+            "increase state_limit"
+        )
+    return serialized
 
 
 def _questions(fields: Sequence[FieldSpec]) -> dict[str, dict[str, Any]]:
@@ -144,14 +184,47 @@ def _parse_noul(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
     )
 
 
+def _validated_probabilities(
+    reported: Any, values: Sequence[str], field: str
+) -> dict[str, float]:
+    """Parse reported probabilities, rejecting values outside [0, 1]."""
+    if reported is None:
+        reported = {}
+    if not isinstance(reported, dict):
+        raise ValueError(f"probabilities for {field!r} must be an object")
+    probabilities: dict[str, float] = {}
+    for value in values:
+        raw = reported.get(value, 0.0)
+        try:
+            probability = float(raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"probability for {field!r}/{value!r} is not a number"
+            ) from error
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                f"probability for {field!r}/{value!r} must be in [0, 1]"
+            )
+        probabilities[value] = probability
+    return probabilities
+
+
 def _parse_choice(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
     choice = str(answer.get("choice"))
     if choice not in spec.values:
         raise ValueError(f"choice {choice!r} is not a class of {spec.name!r}")
-    reported = answer.get("probabilities") or {}
-    probabilities = {
-        value: float(reported.get(value, 0.0)) for value in spec.values
-    }
+    probabilities = _validated_probabilities(
+        answer.get("probabilities"), spec.values, spec.name
+    )
+    total = sum(probabilities.values())
+    if total > 0.0:
+        probabilities = {
+            level: value / total for level, value in probabilities.items()
+        }
+    else:
+        probabilities = {
+            level: (1.0 if level == choice else 0.0) for level in spec.values
+        }
     return DecisionValue(
         field=spec.name,
         kind="choice",
@@ -185,6 +258,14 @@ def _parse_score(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
                 )
                 for index, level in enumerate(spec.values)
             }
+            for level, probability in probabilities.items():
+                if (
+                    not math.isfinite(probability)
+                    or not 0.0 <= probability <= 1.0
+                ):
+                    raise ValueError(
+                        f"probability for {spec.name!r}/{level!r} must be in [0, 1]"
+                    )
             total = sum(probabilities.values())
             if total > 0.0:
                 probabilities = {
@@ -214,6 +295,8 @@ def _parse_score(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
             f"score {score} is outside [0, {len(spec.values) - 1}] for {spec.name!r}"
         )
     reported = answer.get("probabilities") or {}
+    if not isinstance(reported, dict):
+        raise ValueError(f"probabilities for {spec.name!r} must be an object")
     probabilities = {}
     for index, level in enumerate(spec.values):
         if str(index) in reported:
@@ -224,6 +307,11 @@ def _parse_score(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
             probabilities[level] = float(reported[level])
         else:
             probabilities[level] = 0.0
+        probability = probabilities[level]
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                f"probability for {spec.name!r}/{level!r} must be in [0, 1]"
+            )
     total = sum(probabilities.values())
     if total <= 0.0:
         nearest = min(
@@ -334,6 +422,7 @@ class SystemOneDecisionProvider:
     timeout: float = 60.0
     fields: tuple[FieldSpec, ...] = field(default_factory=default_fields)
     state_limit: int = STATE_LIMIT
+    max_response_bytes: int = 4 * 1024 * 1024
     name: str = "systemone"
 
     def decide(self, result: Any) -> DecisionSet:
@@ -369,7 +458,7 @@ class SystemOneDecisionProvider:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read().decode("utf-8")
+                raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")[:400]
             raise RuntimeError(
@@ -377,11 +466,15 @@ class SystemOneDecisionProvider:
             ) from error
         except urllib.error.URLError as error:
             raise RuntimeError(f"systemone request failed: {error.reason}") from error
+        if len(raw) > self.max_response_bytes:
+            raise ValueError(
+                f"systemone response exceeded {self.max_response_bytes} bytes"
+            )
+        body = raw.decode("utf-8")
         try:
             return json.loads(body)
         except json.JSONDecodeError as error:
             raise ValueError(f"systemone returned non-JSON: {error}") from error
-
 
 @dataclass
 class FallbackDecisionProvider:
@@ -407,10 +500,15 @@ class FallbackDecisionProvider:
         )
         if local_decision.requires_investigation and confidence < self.escalate_below:
             remote_decision = self.remote.decide(result)
+            # Keep local fields the remote provider did not answer so the
+            # local evidence trail is not lost on escalation.
+            values = dict(remote_decision.values)
+            for name, decision in local_decision.values.items():
+                values.setdefault(name, decision)
             return DecisionSet(
                 run_id=remote_decision.run_id,
                 provider=f"{self.local.name}->{remote_decision.provider}",
-                values=remote_decision.values,
+                values=values,
                 requires_investigation=remote_decision.requires_investigation,
             )
         return local_decision
