@@ -18,12 +18,11 @@ from .config import DatasetConfig
 from .lifecycle import (
     EXPLAINABLE_CLASSES,
     EXTENDED,
-    LifecycleEvent,
     NEW_BACKFILL,
     NEW_RECENT,
-    RECLASSIFIED,
     REMOVED,
     TRUNCATED,
+    LifecycleEvent,
 )
 
 

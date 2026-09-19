@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
-import pytest
-
-from qc.decisions import FeatureEncoder, RuleDecisionProvider
+from qc.decisions import FeatureEncoder
 from qc.incidents import (
     IncidentRecord,
     IncidentStore,

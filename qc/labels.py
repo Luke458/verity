@@ -10,9 +10,10 @@ evidence of semantic accuracy on real refresh behaviour.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .config import DatasetConfig
 from .decisions import FeatureEncoder
@@ -77,7 +78,7 @@ class LabelRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LabelRecord":
+    def from_dict(cls, data: dict[str, Any]) -> LabelRecord:
         return cls(
             run_id=str(data["run_id"]),
             source=str(data["source"]),
@@ -147,8 +148,9 @@ def build_oracle_labels(    suite_dir: str | Path,
     config: DatasetConfig | None = None,
     scenario_ids: Sequence[str] | None = None,
 ) -> list[LabelRecord]:
-    from .run import run_qc
     from qcgen.sources import ScenarioSource
+
+    from .run import run_qc
 
     suite_dir = Path(suite_dir)
     config = config or DatasetConfig()

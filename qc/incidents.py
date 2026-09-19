@@ -10,9 +10,10 @@ symptom-tag overlap bonus. Incidents saved by an agent are drafts
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -39,7 +40,7 @@ class IncidentRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "IncidentRecord":
+    def from_dict(cls, data: dict[str, Any]) -> IncidentRecord:
         return cls(
             incident_id=str(data["incident_id"]),
             run_id=str(data["run_id"]),
@@ -91,7 +92,7 @@ class IncidentStore:
 
     def retrieve(
         self,
-        features: Sequence[float],
+        features: Sequence[float] | np.ndarray,
         k: int = 3,
         tags: Sequence[str] | None = None,
         embedding: Sequence[float] | None = None,

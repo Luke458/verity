@@ -12,9 +12,10 @@ score itself.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from statistics import NormalDist
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
@@ -32,7 +33,8 @@ _NORMAL = NormalDist()
 
 
 class Forecaster(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def predict(
         self,
@@ -329,7 +331,7 @@ class CalibrationMap:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CalibrationMap":
+    def from_dict(cls, data: dict[str, Any]) -> CalibrationMap:
         return cls(
             residuals=[float(v) for v in data.get("residuals", [])],
             coverage={str(k): float(v) for k, v in data.get("coverage", {}).items()},

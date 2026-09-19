@@ -10,9 +10,10 @@ it never writes to the table.
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 WEEK_NAMES = (
     "week",
@@ -291,7 +292,6 @@ def propose_config(
     uri: str,
     production_by_canonical: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    names = {column["name"] for column in columns}
     canonical_names = set(entity_columns) | set(metric_columns)
     if week_column:
         canonical_names.add(week_column)
@@ -323,7 +323,7 @@ def propose_config(
         for column in ("week", primary_metric, "units")
         if column is not None and column in canonical_names
     )
-    payload = {
+    payload: dict[str, Any] = {
         "name": Path(uri.rstrip("/")).name or "dataset",
         "week_column": week_column,
         "metric_columns": list(metric_columns),

@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
-from .versions import VersionPair
 
 
 def _aggregate(

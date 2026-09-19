@@ -9,7 +9,7 @@ clear. Missing metrics or an empty frame are ``INCOMPLETE``, not zero.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -28,7 +28,7 @@ class ReferenceSpec:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ReferenceSpec":
+    def from_dict(cls, data: dict[str, Any]) -> ReferenceSpec:
         return cls(
             reference_id=str(data["reference_id"]),
             dataset=str(data["dataset"]),

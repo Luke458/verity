@@ -11,7 +11,7 @@ from qc.run import run_qc
 
 pytest.importorskip("deltalake")
 
-from deltalake import write_deltalake  # noqa: E402
+from deltalake import write_deltalake
 
 
 def _rows(weeks, stores, metric=10.0):

@@ -18,12 +18,12 @@ from .lifecycle import (
     EXPLAINABLE_CLASSES,
     EXTENDED,
     LATEST_MISSING,
-    LifecycleEvent,
     NEW_BACKFILL,
     NEW_RECENT,
     RECLASSIFIED,
     REMOVED,
     TRUNCATED,
+    LifecycleEvent,
     _entity_type,
 )
 

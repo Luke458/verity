@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
-from .decisions import FEATURE_VERSION, FeatureEncoder
+from .decisions import FeatureEncoder
 from .evidence_text import evidence_text as build_evidence_text
 from .incidents import cosine_similarity
 from .relationships import EntityRelationship
@@ -81,7 +81,7 @@ def _as_bool(value: Any) -> bool:
 
 
 def import_outcomes(
-    store: "SqliteStore",
+    store: SqliteStore,
     rows: Sequence[dict[str, Any]],
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -119,7 +119,7 @@ def import_outcomes(
         if dry_run:
             try:
                 store._run_row(run_id)
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                 pass
             if store._run_row(run_id) is None:
                 errors.append({"row": index, "error": f"unknown run {run_id!r}"})
@@ -183,7 +183,7 @@ class SqliteStore:
     def close(self) -> None:
         self.connection.close()
 
-    def __enter__(self) -> "SqliteStore":
+    def __enter__(self) -> SqliteStore:
         return self
 
     def __exit__(self, *exc_info: Any) -> None:
@@ -333,7 +333,7 @@ class SqliteStore:
 
     def retrieve(
         self,
-        features: Sequence[float],
+        features: Sequence[float] | np.ndarray,
         k: int = 3,
         tags: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:

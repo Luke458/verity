@@ -11,9 +11,10 @@ calibration in ``qc/temporal.py``.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -35,7 +36,7 @@ class CalibrationRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CalibrationRecord":
+    def from_dict(cls, data: dict[str, Any]) -> CalibrationRecord:
         residual = float(data["residual"])
         if residual != residual or residual in (float("inf"), float("-inf")):
             raise ValueError("residual must be finite")
@@ -117,7 +118,7 @@ class CalibrationPool:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CalibrationPool":
+    def from_dict(cls, data: dict[str, Any]) -> CalibrationPool:
         pool = cls(
             max_records=int(data.get("max_records", 100)),
             min_samples=int(data.get("min_samples", 9)),

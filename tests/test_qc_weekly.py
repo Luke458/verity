@@ -8,14 +8,14 @@ import pytest
 
 pytest.importorskip("deltalake")
 
-from deltalake import write_deltalake  # noqa: E402
+from deltalake import write_deltalake
 
-from qc.cli import main  # noqa: E402
-from qc.config import DatasetConfig  # noqa: E402
-from qc.prequential import records_from_result  # noqa: E402
-from qc.run import run_qc  # noqa: E402
-from qc.delta import DeltaSource  # noqa: E402
-from qc.weekly import run_weekly  # noqa: E402
+from qc.cli import main
+from qc.config import DatasetConfig
+from qc.delta import DeltaSource
+from qc.prequential import records_from_result
+from qc.run import run_qc
+from qc.weekly import run_weekly
 
 
 def _series_value(week: int) -> float:

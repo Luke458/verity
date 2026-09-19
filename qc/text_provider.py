@@ -13,9 +13,10 @@ certificate, and synthetic labels validate plumbing only.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -187,7 +188,7 @@ class TextDecisionProvider:
     @classmethod
     def from_dict(
         cls, data: dict[str, Any], embedder: TextEmbedder | None = None
-    ) -> "TextDecisionProvider":
+    ) -> TextDecisionProvider:
         if int(data.get("text_version", -1)) != EVIDENCE_TEXT_VERSION:
             raise ValueError(
                 f"text version mismatch: artifact {data.get('text_version')} "
@@ -208,7 +209,7 @@ class TextDecisionProvider:
     @classmethod
     def load(
         cls, directory: str | Path, embedder: TextEmbedder | None = None
-    ) -> "TextDecisionProvider":
+    ) -> TextDecisionProvider:
         path = Path(directory) / "provider.json"
         return cls.from_dict(json.loads(path.read_text()), embedder=embedder)
 

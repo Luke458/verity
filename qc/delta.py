@@ -15,8 +15,9 @@ rather than silently pretending the requested version existed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -44,7 +45,7 @@ def describe_delta_table(
     table = _delta_table(uri, storage_options, None)
     try:
         history = table.history()
-    except Exception:  # pragma: no cover - tables without history metadata
+    except Exception:  # noqa: BLE001  # pragma: no cover - tables without history metadata
         history = [{"version": table.version()}]
     return {
         "uri": uri,
@@ -109,7 +110,7 @@ class DeltaSource:
                     int(entry.get("version", -1)) for entry in table.history()
                 )
                 versions = [version for version in versions if version >= 0]
-            except Exception:  # pragma: no cover
+            except Exception:  # noqa: BLE001  # pragma: no cover
                 versions = [int(table.version())]
             self._histories[uri] = versions or [int(table.version())]
         return self._histories[uri]
@@ -152,7 +153,7 @@ class DeltaSource:
         uri = self.dim_tables[name]
         try:
             return _delta_table(uri, self.storage_options, int(version)).to_pandas()
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             latest = _delta_table(uri, self.storage_options, None).to_pandas()
             self.warnings.append(
                 f"dimension {name!r} has no version {version}; used latest "

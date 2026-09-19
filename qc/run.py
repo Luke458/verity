@@ -10,8 +10,9 @@ document. It never falls back to a model: semantic decisions are Milestone D.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -22,7 +23,6 @@ from .counterfactual import CounterfactualResult, reconstruct_counterfactual
 from .decisions import DecisionProvider, DecisionSet, RuleDecisionProvider
 from .evidence import EvidenceGraph, build_evidence_graph
 from .lifecycle import (
-    LATEST_MISSING,
     LifecycleEvent,
     classify_entity_changes,
     detect_reclassification,
@@ -32,8 +32,8 @@ from .reconciliation import ReconciliationResult, run_reconciliation
 from .reference import ReferenceSpec, compare_reference, reference_mismatches
 from .relationships import EntityRelationship, detect_relationships
 from .revision import base_keys, build_revision_cube, headline_keys
-from .temporal import TemporalResult, run_temporal_qc
 from .source import VersionSource
+from .temporal import TemporalResult, run_temporal_qc
 from .versions import VersionPair, build_version_pair
 
 _EVENT_REASONS = {

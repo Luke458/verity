@@ -11,7 +11,6 @@ import argparse
 import json
 import sys
 from dataclasses import replace
-from pathlib import Path
 
 from .config import ALL_FAMILIES, STAGES, load_suite_config, suite_config
 from .scenarios import generate_suite

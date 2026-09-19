@@ -6,9 +6,10 @@ tested without configuration; YAML files override any field for real datasets.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 

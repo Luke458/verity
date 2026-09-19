@@ -34,3 +34,23 @@ include = ["qc*", "qcgen*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "unit: fast pure-logic tests",
+    "integration: end-to-end runs over generated scenarios",
+    "slow: tests that take more than a few seconds",
+    "model: tests requiring optional model extras (chronos, tspulse, text)",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "BLE", "RUF100"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = false
+files = ["qc", "qcgen"]

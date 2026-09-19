@@ -11,9 +11,10 @@ real data.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -22,6 +23,11 @@ from .config import DatasetConfig
 from .tspulse import TSPulseResearch
 
 Embedder = Callable[[Sequence[float]], Any]
+
+
+def _embedding(case: Any) -> list[float]:
+    assert case.embedding is not None
+    return case.embedding
 
 
 @dataclass
@@ -187,12 +193,12 @@ def run_tspulse_benchmark(
     intra_similarity, inter_similarity = _similarity_stats(embedded)
     zero_revision = sum(1 for case in embedded if case.is_zero_revision)
     control_norms = [
-        float(np.linalg.norm(case.embedding))
+        float(np.linalg.norm(_embedding(case)))
         for case in embedded
         if case.is_control
     ]
     fault_norms = [
-        float(np.linalg.norm(case.embedding))
+        float(np.linalg.norm(_embedding(case)))
         for case in embedded
         if not case.is_control
     ]
@@ -313,7 +319,7 @@ def _similarity_stats(cases: list[RevisionSeries]) -> tuple[float, float]:
     inter: list[float] = []
     for index, left in enumerate(usable):
         for right in usable[index + 1 :]:
-            similarity = cosine(left.embedding, right.embedding)
+            similarity = cosine(_embedding(left), _embedding(right))
             if left.family == right.family:
                 intra.append(similarity)
             else:

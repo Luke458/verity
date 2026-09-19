@@ -17,8 +17,9 @@ The gates mirror the adapter proven in the predecessor ``verity`` project.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Any, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 MODEL_ID = "ibm-granite/granite-timeseries-tspulse-r1"
 EMBEDDING_REVISION = "tspulse-hybrid-dualhead-512-p8-r1"
@@ -90,8 +91,8 @@ class TSPulseResearch:
     ) -> None:
         self.device = device
         self.expected_dimension = expected_dimension
-        self._embedding_model = None
-        self._anomaly_pipeline = None
+        self._embedding_model: Any = None
+        self._anomaly_pipeline: Any = None
 
     def embed(
         self, values: Sequence[float], allow_resample: bool = False
@@ -110,7 +111,6 @@ class TSPulseResearch:
             )
 
         import torch  # type: ignore
-
         from tsfm_public.models.tspulse import TSPulseForReconstruction  # type: ignore
         from tsfm_public.models.tspulse.utils.helpers import (  # type: ignore
             get_embeddings,

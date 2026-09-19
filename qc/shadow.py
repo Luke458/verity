@@ -12,9 +12,10 @@ generator dependencies.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .config import DatasetConfig
 from .events import load_registry

@@ -17,9 +17,11 @@ trained heads; neither is a calibration certificate.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -120,7 +122,7 @@ class DecisionValue:
     probabilities: dict[str, float] | None
     strategy: str
     probability_kind: str
-    evidence: list[str] = field(default_factory=list)
+    evidence: list[str] = dc_field(default_factory=list)
     index: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -400,7 +402,9 @@ class RuleDecisionProvider:
         if contracts is not None and contracts.status == "DATA_CONTRACT_FAILURE":
             failed = contracts.failed
             stage = failed[0].name.split(":", 1)[0] if failed else "report"
-            evidence = [f"contract:{check.name}" for check in failed]
+            evidence: list[str] = [
+                f"contract:{check.name}" for check in failed
+            ]
             return (
                 "SCHEMA_FAILURE",
                 _stage_origin(stage),
@@ -418,7 +422,7 @@ class RuleDecisionProvider:
         lineage = getattr(result, "lineage", None)
         temporal = getattr(result, "temporal", None)
         first = lineage.first_divergence if lineage is not None else None
-        evidence: list[str] = []
+        evidence = []
 
         merge_candidates = [
             relationship
@@ -537,7 +541,7 @@ class LinearHead:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LinearHead":
+    def from_dict(cls, data: dict[str, Any]) -> LinearHead:
         return cls(
             field=str(data["field"]),
             classes=tuple(str(c) for c in data["classes"]),
@@ -553,7 +557,7 @@ class TrainedDecisionProvider:
     heads: dict[str, LinearHead]
     feature_mean: np.ndarray
     feature_std: np.ndarray
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = dc_field(default_factory=dict)
     name: str = "trained"
 
     def _standardize(self, features: np.ndarray) -> np.ndarray:
@@ -626,7 +630,7 @@ class TrainedDecisionProvider:
         return target
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TrainedDecisionProvider":
+    def from_dict(cls, data: dict[str, Any]) -> TrainedDecisionProvider:
         encoder = FeatureEncoder()
         if int(data.get("feature_version", -1)) != encoder.feature_version:
             raise ValueError(
@@ -648,6 +652,6 @@ class TrainedDecisionProvider:
         )
 
     @classmethod
-    def load(cls, directory: str | Path) -> "TrainedDecisionProvider":
+    def load(cls, directory: str | Path) -> TrainedDecisionProvider:
         path = Path(directory) / "provider.json"
         return cls.from_dict(json.loads(path.read_text()))

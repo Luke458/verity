@@ -79,7 +79,7 @@ class CohortPlan:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CohortPlan":
+    def from_dict(cls, data: dict[str, Any]) -> CohortPlan:
         return cls(
             profile=str(data.get("profile", "tiny")),
             families=tuple(data.get("families", DEFAULT_FAMILIES)),
@@ -93,7 +93,7 @@ class CohortPlan:
         )
 
     @classmethod
-    def from_json(cls, path: str | Path) -> "CohortPlan":
+    def from_json(cls, path: str | Path) -> CohortPlan:
         return cls.from_dict(json.loads(Path(path).read_text()))
 
     def save(self, path: str | Path) -> None:
@@ -274,7 +274,7 @@ def run_cohort(
                     )
                     manifest = built.manifest
                     case = manifest["cases"][0] if manifest.get("cases") else {}
-                    result = run_qc(
+                    run_result = run_qc(
                         ScenarioSource(built.directory),
                         manifest["current_version"],
                         manifest["previous_version"],
@@ -282,8 +282,8 @@ def run_cohort(
                         expected_events=manifest.get("expected_events", []),
                     )
                     historical = (
-                        result.machine["historical_revision"]["status"]
-                        if result.machine.get("historical_revision")
+                        run_result.machine["historical_revision"]["status"]
+                        if run_result.machine.get("historical_revision")
                         else None
                     )
                     cases.append(
@@ -293,27 +293,27 @@ def run_cohort(
                             seed=seed,
                             family=family,
                             is_control=is_control,
-                            engine_status=result.status,
+                            engine_status=run_result.status,
                             historical_status=historical,
                             expected_status=case.get("expected_status"),
                             expected_class=case.get("expected_class"),
                             injection_stage=case.get("injection_stage"),
                             first_divergence=(
-                                result.lineage.first_divergence
-                                if result.lineage is not None
+                                run_result.lineage.first_divergence
+                                if run_result.lineage is not None
                                 else None
                             ),
                             reconstruction_score=(
-                                result.counterfactual.reconciliation_score
-                                if result.counterfactual is not None
+                                run_result.counterfactual.reconciliation_score
+                                if run_result.counterfactual is not None
                                 else None
                             ),
                             explained_fraction=(
-                                result.attribution.explained_fraction
-                                if result.attribution is not None
+                                run_result.attribution.explained_fraction
+                                if run_result.attribution is not None
                                 else 0.0
                             ),
-                            detected=result.status != "PASS",
+                            detected=run_result.status != "PASS",
                             false_positive=(
                                 is_control
                                 and historical not in (None, "PASS")
@@ -326,7 +326,7 @@ def run_cohort(
     metrics = _metrics(heldout)
     metrics["dev"] = _metrics(dev)
     gates = _gate_results(metrics, plan.gates)
-    result = CohortResult(
+    cohort_result = CohortResult(
         plan=plan.to_dict(),
         metrics=metrics,
         gate_results=gates,
@@ -349,10 +349,10 @@ def run_cohort(
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         (out / "cohort.json").write_text(
-            json.dumps(result.to_dict(), indent=2, sort_keys=True, default=str)
+            json.dumps(cohort_result.to_dict(), indent=2, sort_keys=True, default=str)
         )
         (out / "cases.jsonl").write_text(
             "\n".join(json.dumps(case.to_dict(), sort_keys=True) for case in cases)
             + "\n"
         )
-    return result
+    return cohort_result

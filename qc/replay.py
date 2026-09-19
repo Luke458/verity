@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from .config import DatasetConfig
 
@@ -41,7 +42,7 @@ class ReplayCase:
         return payload
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ReplayCase":
+    def from_dict(cls, data: dict[str, Any]) -> ReplayCase:
         return cls(
             case_id=str(data["case_id"]),
             previous_version=str(data["previous_version"]),
@@ -101,11 +102,11 @@ class ReplayPlan:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ReplayPlan":
+    def from_dict(cls, data: dict[str, Any]) -> ReplayPlan:
         return cls(cases=tuple(ReplayCase.from_dict(item) for item in data["cases"]))
 
     @classmethod
-    def from_json(cls, path: str | Path) -> "ReplayPlan":
+    def from_json(cls, path: str | Path) -> ReplayPlan:
         return cls.from_dict(json.loads(Path(path).read_text()))
 
     def save(self, path: str | Path) -> None:

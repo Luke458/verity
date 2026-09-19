@@ -7,8 +7,9 @@ runtime) consume one auditable structure instead of scattered tables.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from .attribution import AttributionResult
 from .contracts import ContractResult
@@ -141,14 +142,14 @@ def build_evidence_graph(
         )
 
     if reconciliation is not None:
-        for check in reconciliation.failed:
+        for recon_check in reconciliation.failed:
             graph.add(
                 EvidenceNode(
-                    f"{run_id}:reconciliation:{check.name}",
+                    f"{run_id}:reconciliation:{recon_check.name}",
                     "reconciliation_check",
                     "dataset",
-                    value=check.detail,
-                    payload={"name": check.name},
+                    value=recon_check.detail,
+                    payload={"name": recon_check.name},
                 ),
                 related=[root_id],
             )

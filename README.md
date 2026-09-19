@@ -1,11 +1,19 @@
 # retail-qc
 
 An automated QC and root-cause-analysis system for retail transactional data
-refreshed on Databricks. The architecture is a deterministic evidence system
-first and a semantic decision system last; the full specification is in
-[docs/architecture.md](docs/architecture.md).
+refreshed as versioned table snapshots. The architecture is a deterministic
+evidence system first and a semantic decision system last; the full
+specification is in [docs/architecture.md](docs/architecture.md).
 
-## Status: Milestones A-D
+> **Validation status: synthetic only.** Every number currently produced by
+> this repository is measured against the synthetic generator's own oracle or
+> is plumbing. There is no real-data evidence for detection, precision, or
+> calibration. See [docs/claims.md](docs/claims.md) for the per-milestone
+> evidence matrix. The supported backend is local versioned snapshots
+> (Parquet scenarios, delta-rs `DeltaSource`); Databricks/Spark execution is
+> not implemented.
+
+## Status: Milestones A-D (synthetic validation only)
 
 The repository contains the synthetic retail world generator and fault oracle
 (`qcgen`) and the QC engine (`qc`): data contracts, version resolution, the
@@ -23,13 +31,17 @@ SQLite store and drift monitoring for operations. A Jev-compatible remote
 decision provider lets a local `djev-spark` container or hosted Jev act as the
 semantic layer behind the deterministic engine, and a frozen-encoder text
 probe (ModernBERT-class) adds a third decision substrate. Delta onboarding and
-outcome import make the first real table a checklist rather than a migration,
-and a synthetic analyst simulator exercises the feedback loop with honest
-provenance until real analyst outcomes exist. Verity's production spine is
-being ported in: historical replay, scoped ratio expectations, independent
-reference controls, a bounded RCA loop and prequential point-in-time
-forecasting. `qc weekly` is the single scheduler entry point for a refresh
-(idempotent per version, alertable exit codes).
+outcome import exist but have never been run against a real production table.
+A synthetic analyst simulator exercises the feedback loop with honest
+provenance until real analyst outcomes exist. Verity's spine is ported:
+historical replay, scoped ratio expectations, independent reference controls,
+a bounded RCA loop and prequential point-in-time forecasting. `qc weekly` is
+the single scheduler entry point for a refresh (idempotent per version,
+alertable exit codes); its idempotency and atomicity are being hardened.
+
+"Implemented" below means the code path exists and is exercised on synthetic
+data. It does not mean validated. [docs/claims.md](docs/claims.md) records the
+evidence status and known weaknesses per milestone.
 
 Synthetic data with injected faults is a valid test oracle for the
 deterministic and temporal layers and validates the semantic-layer plumbing. It
@@ -147,24 +159,28 @@ docs/              architecture.md, engine.md, synthetic-data.md
 
 ## Milestones
 
+"Implemented" means the code path exists and runs on synthetic data; it is not
+a validation claim. See [docs/claims.md](docs/claims.md) for the evidence
+status and known weaknesses of each row.
+
 | Milestone | Scope | Status |
 |---|---|---|
-| A0 | Synthetic world, fault oracle, suite harness | implemented |
-| A | Data contracts, version pair, revision cube, lifecycle, attribution | implemented |
-| B | Counterfactual, reconciliation, lineage, expected events, shadow mode | implemented |
-| C | Chronos-2, robust statistics, forecast calibration, evidence graph | implemented |
-| 11 | TSPulse research adapter + revision-series suitability benchmark | implemented; weekly-length gate unresolved |
+| A0 | Synthetic world, fault oracle, suite harness | implemented; synthetic validation |
+| A | Data contracts, version pair, revision cube, lifecycle, attribution | implemented; plumbing-only |
+| B | Counterfactual, reconciliation, lineage, expected events, shadow mode | implemented; known weak checks, remediation planned |
+| C | Chronos-2, robust statistics, forecast calibration, evidence graph | implemented; synthetic only |
+| 11 | TSPulse research adapter + revision-series suitability benchmark | research; weekly-length gate unresolved |
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
-| C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented |
-| Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented (real-label cohort pending) |
-| Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented |
-| Substrates | Frozen-encoder text probe (ModernBERT-class) | implemented (challenger; real-label bake-off pending) |
-| Champion | Provider bake-off with pre-registered gates and leakage checks | implemented (real-label selection pending) |
-| Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented |
-| Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | implemented |
-| Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks deliberately skipped |
-| Weekly run | `qc weekly` orchestrator, idempotent per version, alertable exit codes, cron script | implemented |
-| Integration | Jev/djev-compatible remote decision provider + fallback | implemented |
+| C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; hierarchy check being replaced |
+| Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; gate enforcement and statistical fixes pending |
+| Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance and atomicity fixes pending |
+| Substrates | Frozen-encoder text probe (ModernBERT-class) | research; real-label bake-off pending |
+| Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; real-label selection pending |
+| Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
+| Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research |
+| Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |
+| Weekly run | `qc weekly` orchestrator, idempotent per version, alertable exit codes, cron script | implemented; locking/atomicity pending |
+| Integration | Jev/djev-compatible remote decision provider + fallback | implemented; protocol validation pending |
 
 See [docs/engine.md](docs/engine.md) for engine semantics and status codes,
 [docs/semantic-layer.md](docs/semantic-layer.md) for decisions, training and

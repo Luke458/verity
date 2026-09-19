@@ -8,7 +8,6 @@ from qc.decisions import (
     FEATURE_VERSION,
     SEVERITY_VALUES,
     FeatureEncoder,
-    RuleDecisionProvider,
     feature_version,
     field_index,
 )

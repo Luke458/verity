@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from .decisions import DecisionSet
 

@@ -16,10 +16,10 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
-from .config import DatasetConfig
 from .decisions import (
     DecisionProvider,
     DecisionSet,
@@ -214,7 +214,7 @@ def _parse_score(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
             f"score {score} is outside [0, {len(spec.values) - 1}] for {spec.name!r}"
         )
     reported = answer.get("probabilities") or {}
-    probabilities: dict[str, float] = {}
+    probabilities = {}
     for index, level in enumerate(spec.values):
         if str(index) in reported:
             probabilities[level] = float(reported[str(index)])
@@ -237,7 +237,7 @@ def _parse_score(spec: FieldSpec, answer: dict[str, Any]) -> DecisionValue:
         probabilities = {
             level: value / total for level, value in probabilities.items()
         }
-    best = max(probabilities, key=probabilities.get)
+    best = max(probabilities, key=lambda level: probabilities[level])
     return DecisionValue(
         field=spec.name,
         kind="score",

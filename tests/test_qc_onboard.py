@@ -7,11 +7,11 @@ import pytest
 
 pytest.importorskip("deltalake")
 
-from deltalake import write_deltalake  # noqa: E402
+from deltalake import write_deltalake
 
-from qc.cli import main  # noqa: E402
-from qc.config import load_dataset_config  # noqa: E402
-from qc.onboard import (  # noqa: E402
+from qc.cli import main
+from qc.config import load_dataset_config
+from qc.onboard import (
     assess_versions,
     config_from_proposal,
     profile_table,

@@ -27,34 +27,34 @@ from .champion import (
     write_champion_report,
 )
 from .cohort import CohortCase, CohortPlan, CohortResult, code_sha256, run_cohort
-from .conformal import ConformalInterval, conformal_interval, leave_one_out_coverage
 from .config import DatasetConfig, load_dataset_config
+from .conformal import ConformalInterval, conformal_interval, leave_one_out_coverage
 from .contracts import ContractCheck, ContractResult, validate_contracts
 from .counterfactual import CounterfactualResult, reconstruct_counterfactual
-from .delta import DeltaSource, describe_delta_table
 from .decisions import (
     DecisionProvider,
     DecisionSet,
     DecisionValue,
-    FieldSpec,
     FeatureEncoder,
+    FieldSpec,
     LinearHead,
     RuleDecisionProvider,
     TrainedDecisionProvider,
     default_fields,
     score_index,
 )
+from .delta import DeltaSource, describe_delta_table
 from .drift import DriftReport, monitor_drift
 from .events import load_registry, propose_expected_events, save_registry
+from .evidence import EvidenceGraph, EvidenceNode, build_evidence_graph
+from .evidence_query import ALLOWED_QUERIES, EvidenceQueryResult, query_evidence
+from .evidence_text import EVIDENCE_TEXT_VERSION, evidence_text
 from .expectations import (
     RatioExpectation,
     apply_expectations,
     load_expectations,
     save_expectations,
 )
-from .evidence import EvidenceGraph, EvidenceNode, build_evidence_graph
-from .evidence_query import ALLOWED_QUERIES, EvidenceQueryResult, query_evidence
-from .evidence_text import EVIDENCE_TEXT_VERSION, evidence_text
 from .fingerprints import fingerprint_deltas, structural_fingerprint
 from .incidents import (
     IncidentRecord,
@@ -68,14 +68,14 @@ from .labels import (
     build_oracle_labels,
     records_from_store,
 )
+from .lifecycle import LifecycleEvent, classify_entity_changes, detect_reclassification
+from .lineage import LineageResult, analyze_lineage
 from .onboard import (
     assess_versions,
     config_from_proposal,
     profile_table,
     propose_config,
 )
-from .lifecycle import LifecycleEvent, classify_entity_changes, detect_reclassification
-from .lineage import LineageResult, analyze_lineage
 from .prequential import (
     CalibrationPool,
     CalibrationRecord,
@@ -106,17 +106,19 @@ from .revision import build_revision_cube
 from .run import QCRunResult, run_qc
 from .shadow import ShadowRecord, run_shadow
 from .store import SqliteStore, import_outcomes
+from .synthetic_analyst import (
+    PROFILES as ANALYST_PROFILES,
+)
+from .synthetic_analyst import (
+    AnalystProfile,
+    simulate_analyst,
+)
 from .systemone import (
     FallbackDecisionProvider,
     SystemOneDecisionProvider,
     answers_to_decisions,
     build_evidence_state,
     decision_to_systemone_answers,
-)
-from .synthetic_analyst import (
-    PROFILES as ANALYST_PROFILES,
-    AnalystProfile,
-    simulate_analyst,
 )
 from .temporal import (
     BaselineForecaster,
@@ -146,6 +148,8 @@ from .tspulse import (
     AnomalyResult,
     EmbeddingResult,
     TSPulseResearch,
+)
+from .tspulse import (
     cosine as tspulse_cosine,
 )
 from .tspulse_benchmark import (

@@ -10,9 +10,10 @@ newly appearing entity with comparable volume.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -45,7 +46,7 @@ class EntityRelationship:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EntityRelationship":
+    def from_dict(cls, data: dict[str, Any]) -> EntityRelationship:
         relationship = str(data["relationship"])
         if relationship not in RELATIONSHIP_TYPES:
             raise ValueError(f"unknown relationship {relationship!r}")

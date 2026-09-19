@@ -209,14 +209,14 @@ def run_weekly(
     drift = None
     if calibration_path:
         pool = PrequentialStore(calibration_path).pool(min_samples=min_samples)
-        target = (
+        drift_target = (
             int(result.temporal.target_week)
             if result.temporal is not None
             else None
         )
-        if target is not None:
+        if drift_target is not None:
             drift = monitor_drift(
-                pool, as_of=target, target_week=target
+                pool, as_of=drift_target, target_week=drift_target
             ).to_dict()
             if drift["status"] == "DRIFT":
                 notes.append(

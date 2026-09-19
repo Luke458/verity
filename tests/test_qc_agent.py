@@ -8,7 +8,6 @@ import pytest
 
 from qc.agent import (
     CommandAgent,
-    InvestigationBrief,
     NullAgent,
     build_investigation_brief,
     parse_investigation_result,

@@ -18,6 +18,7 @@ import json
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -36,7 +37,6 @@ from .decisions import (
     DecisionSet,
     FeatureEncoder,
     RuleDecisionProvider,
-    TrainedDecisionProvider,
 )
 from .drift import monitor_drift
 from .events import load_registry
@@ -54,9 +54,14 @@ from .run import QCRunResult, run_qc
 from .shadow import run_shadow
 from .source import mapped
 from .store import SqliteStore, import_outcomes
+from .synthetic_analyst import PROFILES as ANALYST_PROFILES
+from .synthetic_analyst import simulate_analyst
 from .systemone import FallbackDecisionProvider, SystemOneDecisionProvider
-from .synthetic_analyst import PROFILES as ANALYST_PROFILES, simulate_analyst
-from .text_provider import ModernBertEmbedder, load_decision_provider, train_text_provider
+from .text_provider import (
+    ModernBertEmbedder,
+    load_decision_provider,
+    train_text_provider,
+)
 from .training import save_training_run, train_decision_provider
 from .tspulse_benchmark import run_tspulse_benchmark
 from .weekly import run_weekly
@@ -206,8 +211,8 @@ def _run_scenario(args, config, provider, expected_events=None):
         else:
             expected_events = load_registry(args.registry)
 
-    source = ScenarioSource(scenario_dir)
-    source = mapped(source, config.column_map_dict())
+    raw_source = ScenarioSource(scenario_dir)
+    source = mapped(raw_source, config.column_map_dict())
     current = args.current if getattr(args, "current", None) else None
     previous = args.previous if getattr(args, "previous", None) else None
     default_current, default_previous = _scenario_versions(source)
@@ -277,25 +282,27 @@ def _cmd_train(args: argparse.Namespace) -> int:
             revision=args.text_revision,
             max_length=args.text_max_length,
         )
-        provider, metrics = train_text_provider(
+        text_provider, metrics = train_text_provider(
             records,
             embedder,
             config,
             validation_fraction=args.validation_fraction,
             seed=args.seed,
         )
-        provider.save(args.out)
+        text_provider.save(args.out)
         (Path(args.out) / "metrics.json").write_text(
             json.dumps(metrics, indent=2, sort_keys=True)
         )
+        trained: Any = text_provider
     else:
-        provider, metrics = train_decision_provider(
+        feature_provider, metrics = train_decision_provider(
             records,
             config,
             validation_fraction=args.validation_fraction,
             seed=args.seed,
         )
-        save_training_run(provider, metrics, args.out)
+        save_training_run(feature_provider, metrics, args.out)
+        trained = feature_provider
     if args.json:
         print(json.dumps(metrics, indent=2, sort_keys=True))
         return 0
@@ -313,7 +320,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
                 f"    {field:<24} acc={field_metrics['accuracy']:.3f} "
                 f"brier={field_metrics['brier']:.3f} ece={field_metrics['ece']:.3f}"
             )
-    print("  warning:", provider.metadata.get("warning", ""))
+    print("  warning:", trained.metadata.get("warning", ""))
     return 0
 
 
@@ -571,20 +578,20 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
 
     options = json.loads(args.storage_options) if args.storage_options else None
     stage_tables = json.loads(args.stage_tables) if args.stage_tables else None
-    source = DeltaSource(
+    delta_source = DeltaSource(
         uri=args.uri,
         storage_options=options,
         stage=args.stage,
         stage_tables=stage_tables,
     )
-    versions = source.list_versions()
+    versions = delta_source.list_versions()
     current = args.current or (versions[-1] if versions else None)
     previous = args.previous or (versions[-2] if len(versions) > 1 else None)
     if current is None or previous is None:
         print("need at least two versions in the table", file=sys.stderr)
         return 2
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    source = mapped(source, config.column_map_dict())
+    source = mapped(delta_source, config.column_map_dict())
     result = run_qc(
         source,
         current,
@@ -597,7 +604,7 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
         print(json.dumps(result.machine, indent=2, default=_json_default))
     else:
         _print_human(result)
-    for warning in source.warnings:
+    for warning in getattr(source, "warnings", []):
         print(f"WARNING {warning}")
     return 0
 
@@ -1128,10 +1135,10 @@ def _cmd_prequential_forecast(args: argparse.Namespace) -> int:
     if not versions:
         print("--versions is empty", file=sys.stderr)
         return 2
-    source = DeltaSource(
+    delta_source = DeltaSource(
         uri=args.uri, storage_options=options, stage=args.stage
     )
-    source = mapped(source, config.column_map_dict())
+    source = mapped(delta_source, config.column_map_dict())
     result = prequential_sequence(
         source,
         versions,

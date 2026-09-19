@@ -9,8 +9,9 @@ only pick from the allowlist; the loop is bounded and any finding is
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from .agent import CAUSE_TOOL_PLANS
 from .evidence_query import ALLOWED_QUERIES, query_evidence

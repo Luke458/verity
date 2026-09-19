@@ -8,8 +8,9 @@ raise rather than falling back to anything.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 ALLOWED_QUERIES: tuple[str, ...] = (
     "lifecycle_changes",

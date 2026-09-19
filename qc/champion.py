@@ -18,15 +18,16 @@ confirmed analyst outcomes.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
 from .cohort import code_sha256
 from .config import DatasetConfig
-from .decisions import RuleDecisionProvider, default_fields
+from .decisions import RuleDecisionProvider
 from .labels import LabelRecord, oracle_labels_for_result
 from .text_provider import TextDecisionProvider, TextEmbedder, train_text_provider
 from .training import train_decision_provider
@@ -308,7 +309,7 @@ def run_champion(
             score = _score_result_provider(remote_provider, eval_items)
             score.provider = "remote"
             scores.append(score)
-        except Exception as error:  # fail closed: report, never assume success
+        except Exception as error:  # noqa: BLE001 - fail closed: report, never assume success
             scores.append(_unavailable("remote", f"{type(error).__name__}: {error}"))
 
     eligible = [

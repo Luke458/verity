@@ -10,9 +10,10 @@ beforehand" and "an AI model decided it was fine".
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ class RatioExpectation:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RatioExpectation":
+    def from_dict(cls, data: dict[str, Any]) -> RatioExpectation:
         return cls(
             expectation_id=str(data["expectation_id"]),
             dataset=str(data["dataset"]),

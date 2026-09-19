@@ -3,6 +3,12 @@
 > Status note: this is the original design record. Implementation deviations
 > and the status of every phase in section 73 are tracked in
 > [architecture-delta.md](architecture-delta.md).
+>
+> Backend note (2026): the implemented system reads local versioned snapshots
+> (Parquet scenarios, delta-rs `DeltaSource`). Azure Databricks and Spark
+> execution are **not implemented**; treat every Databricks reference in this
+> document as target architecture, not current capability. Validation status
+> per milestone is tracked in [claims.md](claims.md).
 
 ## 1. Purpose
 

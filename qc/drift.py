@@ -9,13 +9,12 @@ coverage of the baseline conformal interval falls below nominal, the status is
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
 from .conformal import conformal_interval
 from .prequential import CalibrationPool
-
-import statistics
 
 
 @dataclass
