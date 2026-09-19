@@ -349,6 +349,9 @@ def train_text_provider(
         },
     }
     sources = sorted({record.source for record in usable})
+    production_eligible = bool(sources) and all(
+        source == "analyst" for source in sources
+    )
     provider.metadata = {
         "n_records": len(usable),
         "n_train": len(train_records),
@@ -357,11 +360,12 @@ def train_text_provider(
         "families": sorted({str(record.family) for record in usable}),
         "text_version": EVIDENCE_TEXT_VERSION,
         "embedder": embedder.metadata(),
+        "production_eligible": production_eligible,
         "warning": (
-            "Synthetic oracle labels validate plumbing only; retrain on real "
-            "analyst labels before relying on probabilities."
-            if sources == ["oracle"]
-            else "Trained on supplied labels; calibration is not certified."
+            "Trained on non-analyst labels (oracle/synthetic); plumbing only. "
+            "Retrain on real analyst labels before relying on probabilities."
+            if not production_eligible
+            else "Trained on analyst labels; calibration is not certified."
         ),
     }
     return provider, metrics

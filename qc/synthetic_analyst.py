@@ -20,7 +20,6 @@ from typing import Any
 import numpy as np
 
 from .decisions import CAUSE_VALUES, ORIGIN_VALUES, SEVERITY_VALUES
-from .incidents import symptom_tags_for
 from .labels import oracle_labels_for_result
 from .store import SqliteStore
 
@@ -217,11 +216,10 @@ def simulate_analyst(
                     else ""
                 ),
                 analyst=f"synthetic-{profile.name}",
-                symptom_tags=(
-                    symptom_tags_for(result, result.decisions)
-                    if result.decisions is not None
-                    else []
-                ),
+                # Tags describe the simulated analyst's own conclusion, not
+                # the engine's decisions, so stored tags cannot contradict the
+                # recorded root cause.
+                symptom_tags=sorted({cause, origin, f"synthetic-{profile.name}"}),
                 requires_investigation=requires,
                 provenance="synthetic",
                 created=_created_date(week, delay),

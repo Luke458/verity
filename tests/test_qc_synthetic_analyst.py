@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -132,6 +133,18 @@ def test_champion_with_synthetic_store_stays_ineligible(tmp_path, suites):
     assert result.provenance["labels"] == "synthetic"
     assert result.provenance["train_sources"] == ["synthetic"]
     assert result.provenance["eval_sources"] == ["synthetic"]
+
+
+def test_synthetic_tags_come_from_simulated_cause(tmp_path, suites):
+    train_suite, _ = suites
+    store = tmp_path / "tags.db"
+    simulate_analyst(train_suite, store, profile="perfect", seed=5)
+    with SqliteStore(store) as sqlite_store:
+        for row in sqlite_store.confirmed_runs():
+            tags = set(json.loads(row["symptom_tags"] or "[]"))
+            assert row["root_cause"] in tags
+            assert any(tag.startswith("synthetic-") for tag in tags)
+            assert not any(tag.startswith("temporal:") for tag in tags)
 
 
 def test_cli_simulate_analyst(tmp_path, suites, capsys):

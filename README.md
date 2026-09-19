@@ -170,15 +170,15 @@ status and known weaknesses of each row.
 | A | Data contracts, version pair, revision cube, lifecycle, attribution | implemented; synthetic semantics validated |
 | B | Counterfactual, reconciliation, lineage, expected events, shadow mode | implemented; weak checks replaced (M2) |
 | C | Chronos-2, robust statistics, forecast calibration, evidence graph | implemented; synthetic only |
-| 11 | TSPulse research adapter + revision-series suitability benchmark | research; weekly-length gate unresolved |
+| 11 | TSPulse research adapter + revision-series suitability benchmark | research; pre-registered scenario-holdout gate |
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
 | C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; reconciliation and relationships hardened |
 | Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; statistical and gate fixes landed (M3) |
 | Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance, locking and atomicity enforced (M4) |
-| Substrates | Frozen-encoder text probe (ModernBERT-class) | research; real-label bake-off pending |
+| Substrates | Frozen-encoder text probe (ModernBERT-class) | research; non-analyst labels block production eligibility |
 | Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; paired selection and provenance enforced; real-label selection pending |
 | Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
-| Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research |
+| Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research; tags from simulated cause |
 | Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |
 | Weekly run | `qc weekly` orchestrator, idempotent per version, alertable exit codes, cron script | implemented; locked and atomic (M4) |
 | Integration | Jev/djev-compatible remote decision provider + fallback | implemented; protocol validation enforced (M4) |

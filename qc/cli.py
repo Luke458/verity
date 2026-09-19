@@ -392,12 +392,16 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
 
 def _cmd_tspulse_bench(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
+    gate_path = args.gate
+    if gate_path is None and Path("config/tspulse-gate.json").exists():
+        gate_path = "config/tspulse-gate.json"
     result = run_tspulse_benchmark(
         args.suite_dir,
         config,
         allow_resample=not args.strict_length,
         max_scenarios=args.max_scenarios,
         oracle_dir=getattr(args, "oracle_dir", None),
+        gate_path=gate_path,
     )
     payload = result.to_dict()
     if args.out:
@@ -415,8 +419,17 @@ def _cmd_tspulse_bench(args: argparse.Namespace) -> int:
         f"embedded={result.embedded_series}"
     )
     print(
-        f"  nearest_centroid_accuracy={result.nearest_centroid_accuracy:.3f}"
+        f"  nearest_centroid_accuracy={result.nearest_centroid_accuracy:.3f} "
+        f"scenario_holdout_accuracy="
+        f"{result.scenario_holdout_accuracy if result.scenario_holdout_accuracy is not None else 'n/a'}"
     )
+    if result.gate:
+        print(
+            f"  gate metric={result.gate['metric']} "
+            f"actual={result.gate['actual']} "
+            f"threshold={result.gate['threshold']} "
+            f"passed={result.gate['passed']}"
+        )
     print(
         f"  control_mean_norm={result.control_mean_embedding_norm:.3f} "
         f"fault_mean_norm={result.fault_mean_embedding_norm:.3f}"
@@ -1407,6 +1420,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tspulse.add_argument("--suite-dir", required=True)
     tspulse.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
+    tspulse.add_argument("--gate", default=None, help="pre-registered promotion gate JSON")
     tspulse.add_argument("--config", default=None)
     tspulse.add_argument("--out", default=None)
     tspulse.add_argument("--max-scenarios", type=int, default=None)

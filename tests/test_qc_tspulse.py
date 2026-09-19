@@ -102,6 +102,51 @@ def test_benchmark_flags_zero_revision_families(tmp_path):
     )
 
 
+def test_benchmark_gate_requires_scenario_holdout(tmp_path):
+    import json
+
+    config = suite_config(
+        "tiny",
+        families=("new_store_backfill", "history_truncation", "commodity_remap"),
+        controls=(),
+    )
+    suite_dir = generate_suite(
+        config, tmp_path, 8, "tsp-gate", ("source", "coded", "warehouse", "report")
+    )
+    gate_path = tmp_path / "gate.json"
+    gate_path.write_text(
+        json.dumps(
+            {
+                "metric": "scenario_holdout_accuracy",
+                "min_value": 0.0,
+                "require_scenario_holdout": True,
+                "note": "test gate",
+            }
+        )
+    )
+    result = run_tspulse_benchmark(
+        suite_dir, embedder=_fake_embedder, gate_path=gate_path
+    )
+    assert result.scenario_holdout_accuracy is not None
+    assert result.gate["passed"] is True
+    assert result.production_eligible is True
+
+    strict = tmp_path / "strict.json"
+    strict.write_text(
+        json.dumps(
+            {
+                "metric": "scenario_holdout_accuracy",
+                "min_value": 1.01,
+            }
+        )
+    )
+    failed = run_tspulse_benchmark(
+        suite_dir, embedder=_fake_embedder, gate_path=strict
+    )
+    assert failed.gate["passed"] is False
+    assert failed.production_eligible is False
+
+
 def test_benchmark_reports_no_embeddings(tmp_path):
     suite_dir = generate_suite(
         suite_config("tiny"),

@@ -56,6 +56,8 @@ class BenchmarkResult:
     mean_intra_family_similarity: float = 0.0
     mean_inter_family_similarity: float = 0.0
     zero_revision_series: int = 0
+    scenario_holdout_accuracy: float | None = None
+    gate: dict[str, Any] = field(default_factory=dict)
     production_eligible: bool = False
     transformations: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
@@ -63,6 +65,76 @@ class BenchmarkResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _scenario_holdout_accuracy(cases: Sequence[RevisionSeries]) -> float | None:
+    """Nearest-centroid accuracy with scenarios (not series) held out.
+
+    The leave-one-series-out number can see sibling series from the same
+    scenario during centroid construction. This splits scenarios into
+    centroid and test halves; returns ``None`` when the suite is too small to
+    estimate it.
+    """
+    scenarios = sorted({case.scenario_id for case in cases})
+    if len(scenarios) < 4:
+        return None
+    train_scenarios = {name for index, name in enumerate(scenarios) if index % 2 == 0}
+    train = [case for case in cases if case.scenario_id in train_scenarios]
+    test = [case for case in cases if case.scenario_id not in train_scenarios]
+    if not test or len({case.family for case in train}) < 2:
+        return None
+    families = sorted({case.family for case in train})
+    centroids = {
+        family: np.mean(
+            [_embedding(case) for case in train if case.family == family], axis=0
+        )
+        for family in families
+    }
+    correct = 0
+    for case in test:
+        vector = np.asarray(_embedding(case), dtype=float)
+        distances = {
+            family: float(np.linalg.norm(vector - centroid))
+            for family, centroid in centroids.items()
+        }
+        predicted = min(distances, key=lambda family: distances[family])
+        correct += int(predicted == case.family)
+    return correct / len(test)
+
+
+def load_tspulse_gate(path: str | Path) -> dict[str, Any]:
+    payload = json.loads(Path(path).read_text())
+    if not isinstance(payload, dict) or "metric" not in payload:
+        raise ValueError("tspulse gate must be an object with a 'metric'")
+    return payload
+
+
+def evaluate_tspulse_gate(
+    gate: dict[str, Any], metrics: dict[str, float | None]
+) -> dict[str, Any]:
+    metric = str(gate["metric"])
+    if metric not in metrics:
+        raise ValueError(f"unknown gate metric {metric!r}")
+    actual = metrics[metric]
+    threshold = gate.get("min_value")
+    passed = (
+        actual is not None
+        and threshold is not None
+        and float(actual) >= float(threshold)
+    )
+    return {
+        "metric": metric,
+        "threshold": threshold,
+        "actual": actual,
+        "require_scenario_holdout": bool(gate.get("require_scenario_holdout", False)),
+        "note": str(gate.get("note", "")),
+        "passed": passed,
+        "detail": (
+            "gate not evaluable on this suite"
+            if actual is None
+            else "passed" if passed else "below threshold"
+        ),
+    }
 
 
 def _default_embedder(allow_resample: bool) -> Embedder:
@@ -169,6 +241,7 @@ def run_tspulse_benchmark(
     allow_resample: bool = True,
     max_scenarios: int | None = None,
     oracle_dir: str | Path | None = None,
+    gate_path: str | Path | None = None,
 ) -> BenchmarkResult:
     suite_dir = Path(suite_dir)
     suite = json.loads((suite_dir / "suite.json").read_text())
@@ -197,7 +270,17 @@ def run_tspulse_benchmark(
         )
 
     accuracy = _leave_one_series_out_accuracy(embedded)
+    holdout_accuracy = _scenario_holdout_accuracy(embedded)
     intra_similarity, inter_similarity = _similarity_stats(embedded)
+    gate: dict[str, Any] = {}
+    if gate_path is not None and Path(gate_path).exists():
+        gate = evaluate_tspulse_gate(
+            load_tspulse_gate(gate_path),
+            {
+                "nearest_centroid_accuracy": accuracy,
+                "scenario_holdout_accuracy": holdout_accuracy,
+            },
+        )
     zero_revision = sum(1 for case in embedded if case.is_zero_revision)
     control_norms = [
         float(np.linalg.norm(_embedding(case)))
@@ -217,6 +300,9 @@ def run_tspulse_benchmark(
         "scenario per family a scenario-level holdout is not estimable, so "
         "same-scenario series are visible during centroid construction.",
         "The benchmark answers separation, not detection thresholds.",
+        "Promotion requires the pre-registered scenario-holdout gate "
+        "(config/tspulse-gate.json) to pass; production_eligible stays false "
+        "until then.",
     ]
     if zero_revision:
         limitations.append(
@@ -249,6 +335,9 @@ def run_tspulse_benchmark(
         mean_intra_family_similarity=intra_similarity,
         mean_inter_family_similarity=inter_similarity,
         zero_revision_series=zero_revision,
+        scenario_holdout_accuracy=holdout_accuracy,
+        gate=gate,
+        production_eligible=bool(gate.get("passed", False)),
         transformations=sorted(
             {case.transformation for case in embedded if case.transformation}
         ),
