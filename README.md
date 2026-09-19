@@ -167,12 +167,12 @@ status and known weaknesses of each row.
 | Milestone | Scope | Status |
 |---|---|---|
 | A0 | Synthetic world, fault oracle, suite harness | implemented; synthetic validation |
-| A | Data contracts, version pair, revision cube, lifecycle, attribution | implemented; plumbing-only |
-| B | Counterfactual, reconciliation, lineage, expected events, shadow mode | implemented; known weak checks, remediation planned |
+| A | Data contracts, version pair, revision cube, lifecycle, attribution | implemented; synthetic semantics validated |
+| B | Counterfactual, reconciliation, lineage, expected events, shadow mode | implemented; weak checks replaced (M2) |
 | C | Chronos-2, robust statistics, forecast calibration, evidence graph | implemented; synthetic only |
 | 11 | TSPulse research adapter + revision-series suitability benchmark | research; weekly-length gate unresolved |
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
-| C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; hierarchy check being replaced |
+| C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; reconciliation and relationships hardened |
 | Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; gate enforcement and statistical fixes pending |
 | Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance and atomicity fixes pending |
 | Substrates | Frozen-encoder text probe (ModernBERT-class) | research; real-label bake-off pending |

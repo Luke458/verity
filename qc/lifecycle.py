@@ -39,6 +39,7 @@ class LifecycleEvent:
     entity_type: str
     entity_id: str
     classification: str
+    classifications: tuple[str, ...] = ()
     first_week_previous: int | None = None
     last_week_previous: int | None = None
     first_week_current: int | None = None
@@ -59,6 +60,7 @@ class LifecycleEvent:
         data = asdict(self)
         data["historical_weeks_added"] = list(self.historical_weeks_added)
         data["historical_weeks_removed"] = list(self.historical_weeks_removed)
+        data["classifications"] = list(self.classifications)
         return data
 
 
@@ -72,10 +74,16 @@ def _presence(
     week_column: str,
     metric: str,
 ) -> tuple[dict[str, set[int]], dict[tuple[str, int], float], dict[str, int]]:
-    grouped = frame.groupby([entity_column, week_column], dropna=False)[metric].sum()
+    # min_count=1 makes an all-null group NaN, so a row that carries no metric
+    # value does not count as presence.
+    grouped = frame.groupby([entity_column, week_column], dropna=False)[metric].sum(
+        min_count=1
+    )
     weeks: dict[str, set[int]] = {}
     values: dict[tuple[str, int], float] = {}
     for (entity, week), value in grouped.items():
+        if pd.isna(value):
+            continue
         entity_id = str(entity)
         week_id = int(week)
         weeks.setdefault(entity_id, set()).add(week_id)
@@ -146,62 +154,57 @@ def classify_entity_changes(
                 rows_current=current_rows.get(entity_id, 0),
             )
 
+            added_weeks = current_set - previous_set
+            removed_weeks = previous_set - current_set
+            historical_added = added_weeks & overlap
+            historical_removed = removed_weeks & overlap
+            latest_missing = (
+                pair.previous_max_week in previous_set
+                and pair.current_max_week in pair.new_periods
+                and pair.current_max_week not in current_set
+            )
+
+            classifications: list[str] = []
             if in_previous and not in_current:
-                removed = set(previous_set) & overlap
-                event.classification = REMOVED
-                event.historical_weeks_removed = tuple(sorted(removed))
+                if not historical_removed:
+                    # Only non-overlap weeks disappeared (e.g. a shortened
+                    # history): there is no structural change in the overlap.
+                    continue
+                classifications.append(REMOVED)
+            elif in_current and not in_previous:
+                classifications.append(
+                    NEW_BACKFILL if historical_added else NEW_RECENT
+                )
+            else:
+                if latest_missing:
+                    classifications.append(LATEST_MISSING)
+                if historical_removed:
+                    classifications.append(TRUNCATED)
+                if historical_added:
+                    classifications.append(EXTENDED)
+
+            if not classifications:
+                continue
+
+            if historical_added:
+                event.historical_weeks_added = tuple(sorted(historical_added))
+                event.historical_value_added = _value_for_weeks(
+                    current_values, entity_id, historical_added
+                )
+                event.value_added_by_week = _values_by_week(
+                    current_values, entity_id, historical_added
+                )
+            if historical_removed:
+                event.historical_weeks_removed = tuple(sorted(historical_removed))
                 event.historical_value_removed = _value_for_weeks(
-                    previous_values, entity_id, removed
+                    previous_values, entity_id, historical_removed
                 )
                 event.value_removed_by_week = _values_by_week(
-                    previous_values, entity_id, removed
+                    previous_values, entity_id, historical_removed
                 )
-            elif in_current and not in_previous:
-                added = set(current_set) & overlap
-                if added:
-                    event.classification = NEW_BACKFILL
-                    event.historical_weeks_added = tuple(sorted(added))
-                    event.historical_value_added = _value_for_weeks(
-                        current_values, entity_id, added
-                    )
-                    event.value_added_by_week = _values_by_week(
-                        current_values, entity_id, added
-                    )
-                else:
-                    event.classification = NEW_RECENT
-            else:
-                added = set(current_set) - set(previous_set)
-                removed = set(previous_set) - set(current_set)
-                historical_added = added & overlap
-                historical_removed = removed & overlap
-                latest_missing = (
-                    pair.previous_max_week in previous_set
-                    and pair.current_max_week in pair.new_periods
-                    and pair.current_max_week not in current_set
-                )
-                if latest_missing:
-                    event.classification = LATEST_MISSING
-                elif historical_removed:
-                    event.classification = TRUNCATED
-                    event.historical_weeks_removed = tuple(sorted(historical_removed))
-                    event.historical_value_removed = _value_for_weeks(
-                        previous_values, entity_id, historical_removed
-                    )
-                    event.value_removed_by_week = _values_by_week(
-                        previous_values, entity_id, historical_removed
-                    )
-                elif historical_added:
-                    event.classification = EXTENDED
-                    event.historical_weeks_added = tuple(sorted(historical_added))
-                    event.historical_value_added = _value_for_weeks(
-                        current_values, entity_id, historical_added
-                    )
-                    event.value_added_by_week = _values_by_week(
-                        current_values, entity_id, historical_added
-                    )
-
-            if event.classification != UNCHANGED:
-                events.append(event)
+            event.classifications = tuple(classifications)
+            event.classification = classifications[0]
+            events.append(event)
 
     return events
 
@@ -251,46 +254,67 @@ def detect_reclassification(
     overlap = list(pair.overlap_weeks)
     events: list[LifecycleEvent] = []
     for (from_commodity, to_commodity), products in sorted(pairs.items()):
+        product_set = {str(product) for product in products}
+        moved_previous = float(
+            previous.loc[
+                previous["product_id"].astype(str).isin(product_set)
+                & previous[week].isin(overlap),
+                metric,
+            ].sum()
+        )
+        moved_current = float(
+            current.loc[
+                current["product_id"].astype(str).isin(product_set)
+                & current[week].isin(overlap),
+                metric,
+            ].sum()
+        )
         previous_from = float(
             previous.loc[
-                (previous["commodity_id"] == from_commodity)
+                (previous["commodity_id"].astype(str) == from_commodity)
                 & previous[week].isin(overlap),
                 metric,
             ].sum()
         )
         current_from = float(
             current.loc[
-                (current["commodity_id"] == from_commodity)
+                (current["commodity_id"].astype(str) == from_commodity)
                 & current[week].isin(overlap),
                 metric,
             ].sum()
         )
         previous_to = float(
             previous.loc[
-                (previous["commodity_id"] == to_commodity)
+                (previous["commodity_id"].astype(str) == to_commodity)
                 & previous[week].isin(overlap),
                 metric,
             ].sum()
         )
         current_to = float(
             current.loc[
-                (current["commodity_id"] == to_commodity)
+                (current["commodity_id"].astype(str) == to_commodity)
                 & current[week].isin(overlap),
                 metric,
             ].sum()
         )
         from_delta = current_from - previous_from
         to_delta = current_to - previous_to
-        gross = abs(from_delta) + abs(to_delta)
-        conservation = 1.0 - abs(from_delta + to_delta) / gross if gross > 1e-9 else 1.0
+        # Conservation is measured on the value that actually moved with the
+        # products, not on whole-commodity totals that other changes can move.
+        gross = max(abs(moved_previous), abs(moved_current))
+        conservation = (
+            1.0 - abs(moved_current - moved_previous) / gross
+            if gross > 1e-9
+            else 1.0
+        )
 
         events.append(
             LifecycleEvent(
                 entity_type="commodity",
                 entity_id=f"{from_commodity}->{to_commodity}",
                 classification=RECLASSIFIED,
-                historical_value_added=to_delta,
-                historical_value_removed=-from_delta,
+                historical_value_added=moved_current,
+                historical_value_removed=moved_previous,
                 details={
                     "from_commodity": from_commodity,
                     "to_commodity": to_commodity,
@@ -298,6 +322,8 @@ def detect_reclassification(
                     "product_count": len(products),
                     "from_delta": from_delta,
                     "to_delta": to_delta,
+                    "moved_previous": moved_previous,
+                    "moved_current": moved_current,
                     "gross_moved": gross,
                     "conservation_ratio": conservation,
                 },

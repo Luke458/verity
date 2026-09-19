@@ -1,9 +1,10 @@
 """Pipeline lineage: stage summaries and first-divergence detection.
 
-For each captured stage the overlap revision magnitude is computed against the
-previous version. The first stage where the divergence becomes material (or
-where row counts change) is the likely origin of the change. Latest-period
-faults that do not alter overlap history are surfaced by lifecycle instead.
+For each captured stage the overlap revision is fingerprinted for *both*
+versions. The first stage where the fingerprints differ (row/entity/metric
+structure) is the likely origin of the change. Stages outside the configured
+pipeline order are reported as unmapped; when no stage can be mapped the
+status is ``UNKNOWN`` rather than ``PASS``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Any
 import pandas as pd
 
 from .config import DatasetConfig
-from .fingerprints import structural_fingerprint
+from .fingerprints import fingerprint_deltas, structural_fingerprint
 from .source import VersionSource
 from .versions import VersionPair
 
@@ -24,6 +25,7 @@ class LineageResult:
     status: str = "PASS"
     first_divergence: str | None = None
     stages: list[str] = field(default_factory=list)
+    unmapped: list[str] = field(default_factory=list)
     summaries: dict[str, dict[str, Any]] = field(default_factory=dict)
     divergences: list[dict[str, Any]] = field(default_factory=list)
 
@@ -32,6 +34,7 @@ class LineageResult:
             "status": self.status,
             "first_divergence": self.first_divergence,
             "stages": list(self.stages),
+            "unmapped": list(self.unmapped),
             "summaries": self.summaries,
             "divergences": list(self.divergences),
         }
@@ -42,17 +45,17 @@ def _overlap_relative_divergence(
     current: pd.DataFrame,
     overlap: list[int],
     config: DatasetConfig,
-) -> tuple[float, int]:
+) -> tuple[float | None, int]:
     week = config.week_column
     metric = config.primary_metric
     if week not in previous.columns or week not in current.columns:
-        return 0.0, 0
+        return None, 0
     previous_overlap = previous.loc[previous[week].isin(overlap)]
     current_overlap = current.loc[current[week].isin(overlap)]
     row_delta = int(len(current_overlap) - len(previous_overlap))
 
     if metric not in previous_overlap.columns or metric not in current_overlap.columns:
-        return 0.0, row_delta
+        return None, row_delta
     previous_by_week = previous_overlap.groupby(week)[metric].sum()
     current_by_week = current_overlap.groupby(week)[metric].sum()
     aligned = pd.concat(
@@ -62,10 +65,25 @@ def _overlap_relative_divergence(
     absolute = float((aligned["current"] - aligned["previous"]).abs().sum())
     previous_total = float(aligned["previous"].sum())
     if abs(previous_total) > 1e-12:
-        relative = absolute / abs(previous_total)
-    else:
-        relative = 0.0 if absolute <= 1e-9 else float("inf")
-    return relative, row_delta
+        return absolute / abs(previous_total), row_delta
+    return (0.0 if absolute <= 1e-9 else None), row_delta
+
+
+def _fingerprint_changed(
+    previous: pd.DataFrame,
+    current: pd.DataFrame,
+    overlap: list[int],
+    config: DatasetConfig,
+) -> tuple[bool, dict[str, float]]:
+    week = config.week_column
+    previous_overlap = previous.loc[previous[week].isin(overlap)]
+    current_overlap = current.loc[current[week].isin(overlap)]
+    deltas = fingerprint_deltas(
+        structural_fingerprint(previous_overlap, config),
+        structural_fingerprint(current_overlap, config),
+    )
+    changed = any(abs(value) > 1e-9 for value in deltas.values())
+    return changed, deltas
 
 
 def analyze_lineage(
@@ -77,8 +95,10 @@ def analyze_lineage(
     pair: VersionPair,
 ) -> LineageResult:
     ordered = [stage for stage in config.pipeline_order if stage in stages]
-    result = LineageResult(stages=ordered)
+    unmapped = [stage for stage in stages if stage not in ordered]
+    result = LineageResult(stages=ordered, unmapped=unmapped)
     if not ordered:
+        result.status = "UNKNOWN"
         return result
 
     overlap = list(pair.overlap_weeks)
@@ -88,25 +108,37 @@ def analyze_lineage(
         relative, row_delta = _overlap_relative_divergence(
             previous, current, overlap, config
         )
+        fingerprint_changed, deltas = _fingerprint_changed(
+            previous, current, overlap, config
+        )
         diverged = (
-            relative > config.lineage_materiality_ratio or row_delta != 0
+            fingerprint_changed
+            or row_delta != 0
+            or relative is None
+            or relative > config.lineage_materiality_ratio
         )
         result.summaries[stage] = {
             "rows": int(len(current)),
             "fingerprint": structural_fingerprint(current, config),
+            "previous_fingerprint": structural_fingerprint(previous, config),
+            "fingerprint_deltas": deltas,
         }
         result.divergences.append(
             {
                 "stage": stage,
                 "row_count_delta": row_delta,
                 "relative_divergence": relative,
+                "fingerprint_changed": fingerprint_changed,
                 "diverged": diverged,
             }
         )
         if result.first_divergence is None and diverged:
             result.first_divergence = stage
 
-    result.status = (
-        "FIRST_DIVERGENCE" if result.first_divergence else "PASS"
-    )
+    if result.first_divergence is not None:
+        result.status = "FIRST_DIVERGENCE"
+    elif unmapped:
+        result.status = "UNKNOWN"
+    else:
+        result.status = "PASS"
     return result

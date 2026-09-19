@@ -9,8 +9,7 @@ from qc.events import load_registry, propose_expected_events, save_registry
 from qc.fingerprints import fingerprint_deltas, structural_fingerprint
 from qc.lifecycle import NEW_BACKFILL, LifecycleEvent
 from qc.lineage import analyze_lineage
-from qc.reconciliation import _hierarchy_checks, run_reconciliation
-from qc.revision import build_revision_cube
+from qc.reconciliation import _aggregate_marker_checks, run_reconciliation
 from qc.versions import build_version_pair
 
 CONFIG = DatasetConfig()
@@ -54,7 +53,7 @@ def test_structural_fingerprint_and_deltas():
 # ---------------------------------------------------------------------------
 
 
-def _counterfactual_cube():
+def _counterfactual_frames():
     previous = _fact(
         [
             {"week": 1, "store_id": "S1", "product_id": "P1", "dollar": 10.0, "units": 1},
@@ -73,21 +72,21 @@ def _counterfactual_cube():
         ],
         ignore_index=True,
     )
-    return build_revision_cube(
-        previous, current, ["week", "store_id", "product_id"], CONFIG, ()
-    )
+    return previous, current
 
 
 def test_counterfactual_fully_explained():
-    cube = _counterfactual_cube()
+    previous, current = _counterfactual_frames()
     event = LifecycleEvent(
         "store",
         "S9",
         NEW_BACKFILL,
+        historical_weeks_added=(1, 2),
         historical_value_added=10.0,
         value_added_by_week={1: 5.0, 2: 5.0},
     )
-    result = reconstruct_counterfactual(cube, [event], CONFIG)
+    result = reconstruct_counterfactual(previous, current, [event], CONFIG)
+    assert result.evaluated is True
     assert result.raw_delta == pytest.approx(10.0)
     assert result.explained_delta == pytest.approx(10.0)
     assert result.reconstructed_delta == pytest.approx(0.0)
@@ -96,21 +95,39 @@ def test_counterfactual_fully_explained():
 
 
 def test_counterfactual_partial_and_unexplained():
-    cube = _counterfactual_cube()
+    previous, current = _counterfactual_frames()
+    # Only week 1 is classified as added; week 2's excess stays unexplained.
     partial = LifecycleEvent(
         "store",
         "S9",
         NEW_BACKFILL,
+        historical_weeks_added=(1,),
         historical_value_added=5.0,
         value_added_by_week={1: 5.0},
     )
-    result = reconstruct_counterfactual(cube, [partial], CONFIG)
+    result = reconstruct_counterfactual(previous, current, [partial], CONFIG)
     assert result.reconstructed_delta == pytest.approx(5.0)
-    assert result.reconciliation_score == pytest.approx(0.5)
+    assert result.reconciliation_score == pytest.approx(0.75)
 
-    unexplained = reconstruct_counterfactual(cube, [], CONFIG)
-    assert unexplained.reconstructed_delta == pytest.approx(10.0)
-    assert unexplained.reconciliation_score == pytest.approx(0.0)
+    # No reconstructable events: no score at all, rather than a vacuous 1.0.
+    unexplained = reconstruct_counterfactual(previous, current, [], CONFIG)
+    assert unexplained.evaluated is False
+    assert unexplained.reconciliation_score is None
+
+
+def test_counterfactual_wrong_entity_scores_low():
+    previous, current = _counterfactual_frames()
+    wrong = LifecycleEvent(
+        "store",
+        "S1",
+        NEW_BACKFILL,
+        historical_weeks_added=(1, 2),
+        historical_value_added=10.0,
+    )
+    result = reconstruct_counterfactual(previous, current, [wrong], CONFIG)
+    # Values are recomputed from the frames, so pointing at the wrong entity
+    # cannot produce a perfect reconstruction.
+    assert result.reconciliation_score == pytest.approx(0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +203,10 @@ def test_reconciliation_ratio_flags():
     assert not {1, 2, 3, 4, 5} & flagged_weeks
 
 
-def test_hierarchy_checks_accept_detail_partitions():
+def test_marker_scan_does_not_claim_parent_child_consistency():
+    # A single frame cannot prove parent/child consistency: summing detail
+    # rows always reproduces the total. The old tautological check is gone;
+    # only aggregate-marker detection remains.
     base = _fact(
         [
             {"week": 1, "banner_id": "B1", "state_id": "NSW", "dollar": 10.0, "units": 1},
@@ -194,12 +214,12 @@ def test_hierarchy_checks_accept_detail_partitions():
             {"week": 2, "banner_id": "B1", "state_id": "NSW", "dollar": 7.0, "units": 1},
         ]
     )
-    checks = _hierarchy_checks(base, CONFIG)
+    checks = _aggregate_marker_checks(base, CONFIG)
     assert checks
     assert all(check.passed for check in checks)
     names = {check.name for check in checks}
-    assert "hierarchy:banner_id:dollar" in names
-    assert "hierarchy_markers:state_id" in names
+    assert "aggregate_markers:state_id" in names
+    assert not any(name.startswith("hierarchy:") for name in names)
 
 
 def test_hierarchy_markers_fail_reconciliation():
@@ -217,7 +237,7 @@ def test_hierarchy_markers_fail_reconciliation():
     result = run_reconciliation(base, report, CONFIG)
     assert result.status == "RECONCILIATION_FAILURE"
     assert any(
-        check.name == "hierarchy_markers:banner_id" for check in result.failed
+        check.name == "aggregate_markers:banner_id" for check in result.failed
     )
 
 

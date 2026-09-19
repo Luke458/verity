@@ -40,11 +40,16 @@ class Contributor:
 class AttributionResult:
     raw_delta: float = 0.0
     explained_delta: float = 0.0
+    explained_added: float = 0.0
+    explained_removed: float = 0.0
+    reclassified_moved: float = 0.0
     unexplained_delta: float = 0.0
     explained_fraction: float = 1.0
     previous_total: float = 0.0
     material: bool = False
     breadth: float = 0.0
+    over_explained: bool = False
+    offsetting: bool = False
     contributors: list[Contributor] = field(default_factory=list)
     explanations: list[str] = field(default_factory=list)
     structural_events: list[LifecycleEvent] = field(default_factory=list)
@@ -58,11 +63,16 @@ class AttributionResult:
         return {
             "raw_delta": self.raw_delta,
             "explained_delta": self.explained_delta,
+            "explained_added": self.explained_added,
+            "explained_removed": self.explained_removed,
+            "reclassified_moved": self.reclassified_moved,
             "unexplained_delta": self.unexplained_delta,
             "explained_fraction": self.explained_fraction,
             "previous_total": self.previous_total,
             "material": self.material,
             "breadth": self.breadth,
+            "over_explained": self.over_explained,
+            "offsetting": self.offsetting,
             "contributors": [asdict(contributor) for contributor in self.contributors],
             "explanations": list(self.explanations),
             "structural_events": [event.to_dict() for event in self.structural_events],
@@ -85,12 +95,22 @@ def _match_expected(
 
 
 def _contributors(
-    overlap: pd.DataFrame, delta_column: str, config: DatasetConfig
+    overlap: pd.DataFrame,
+    delta_column: str,
+    config: DatasetConfig,
+    entity_type: str | None = None,
 ) -> list[Contributor]:
     if delta_column not in overlap.columns:
         return []
+    columns = list(config.entity_key_columns)
+    if entity_type is not None:
+        matching = [
+            column for column in columns if _entity_type(column) == entity_type
+        ]
+        if matching:
+            columns = matching
     contributors: list[Contributor] = []
-    for column in config.entity_key_columns:
+    for column in columns:
         if column not in overlap.columns:
             continue
         grouped = overlap.groupby(column, dropna=False)[delta_column].sum()
@@ -178,56 +198,79 @@ def explain_revision(
         ),
         structural[0].entity_type if structural else None,
     )
-    explained = 0.0
+    explained_added = 0.0
+    explained_removed = 0.0
+    reclassified_moved = 0.0
     explanations: list[str] = []
     unmatched: list[LifecycleEvent] = []
     matched: list[str] = []
     conservation: dict[str, float] = {}
 
     for event in structural:
-        primary = event.entity_type == explanation_type
-        if primary and event.classification in (NEW_BACKFILL, NEW_RECENT, EXTENDED):
-            explained += event.historical_value_added
-            explanations.append(
-                f"{event.classification.lower()}:{event.entity_type}:{event.entity_id}"
-            )
-        elif primary and event.classification in (TRUNCATED, REMOVED):
-            explained -= event.historical_value_removed
-            explanations.append(
-                f"{event.classification.lower()}:{event.entity_type}:{event.entity_id}"
-            )
-        elif event.classification == RECLASSIFIED:
-            conservation[event.entity_id] = float(
-                event.details.get("conservation_ratio", 1.0)
-            )
-            explanations.append(f"possible_reclassification:{event.entity_id}")
-
-        if not primary:
-            continue
+        # Every structural event must be registry-matched, whatever grain it
+        # sits at; only the primary grain contributes to the explained sum.
         event_id = _match_expected(event, expected_events or [])
         if event_id:
             matched.append(event_id)
         else:
             unmatched.append(event)
 
+        if event.classification == RECLASSIFIED:
+            conservation[event.entity_id] = float(
+                event.details.get("conservation_ratio", 1.0)
+            )
+            reclassified_moved += float(event.details.get("gross_moved", 0.0))
+            explanations.append(f"possible_reclassification:{event.entity_id}")
+            continue
+
+        if event.entity_type != explanation_type:
+            continue
+        if event.classification in (NEW_BACKFILL, NEW_RECENT, EXTENDED):
+            explained_added += event.historical_value_added
+            explanations.append(
+                f"{event.classification.lower()}:{event.entity_type}:{event.entity_id}"
+            )
+        elif event.classification in (TRUNCATED, REMOVED):
+            explained_removed += event.historical_value_removed
+            explanations.append(
+                f"{event.classification.lower()}:{event.entity_type}:{event.entity_id}"
+            )
+
+    explained = explained_added - explained_removed
     unexplained = raw_delta - explained
-    if abs(raw_delta) > 1e-12:
+    epsilon = 1e-12
+    if abs(raw_delta) > epsilon:
         if explained * raw_delta < 0:
             explained_fraction = 0.0
         else:
-            explained_fraction = max(0.0, min(1.0, abs(explained) / abs(raw_delta)))
+            explained_fraction = min(1.0, abs(explained) / abs(raw_delta))
     else:
-        explained_fraction = 1.0
+        # A near-zero revision can only be called explained when the events
+        # themselves net to near-zero.
+        explained_fraction = 1.0 if abs(explained) <= epsilon else 0.0
+    over_explained = (
+        abs(explained) > abs(raw_delta) + max(epsilon, 1e-6 * abs(raw_delta))
+        and explained * raw_delta > 0
+    )
+    offsetting = (
+        min(explained_added, explained_removed) > 0.1 * max(abs(raw_delta), epsilon)
+        or (abs(raw_delta) <= epsilon and explained_added + explained_removed > epsilon)
+    )
 
     return AttributionResult(
         raw_delta=raw_delta,
         explained_delta=explained,
+        explained_added=explained_added,
+        explained_removed=explained_removed,
+        reclassified_moved=reclassified_moved,
         unexplained_delta=unexplained,
         explained_fraction=explained_fraction,
         previous_total=previous_total,
         material=material,
         breadth=breadth,
-        contributors=_contributors(overlap, delta_column, config),
+        over_explained=over_explained,
+        offsetting=offsetting,
+        contributors=_contributors(overlap, delta_column, config, explanation_type),
         explanations=explanations,
         structural_events=structural,
         unmatched_events=unmatched,
@@ -254,11 +297,12 @@ def classify_run(
     if attribution.structural_events:
         explained_enough = (
             attribution.explained_fraction >= config.explained_fraction_threshold
+            and not attribution.over_explained
         )
         all_matched = bool(attribution.matched_event_ids) and not attribution.unmatched_events
         reconstructed_enough = (
-            reconstruction_score is None
-            or reconstruction_score >= config.reconstruction_score_threshold
+            reconstruction_score is not None
+            and reconstruction_score >= config.reconstruction_score_threshold
         )
         if all_matched and explained_enough and reconstructed_enough:
             return "PASS_WITH_EXPLANATION"

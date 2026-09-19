@@ -190,7 +190,8 @@ def test_machine_output_shape(engine_runs):
     assert machine["latest_week"]["anomaly"] is True
     assert machine["contracts"]["status"] == "PASS"
     assert machine["version_pair"]["shape"] == "NORMAL"
-    assert machine["counterfactual"]["reconciliation_score"] == pytest.approx(1.0)
+    assert machine["counterfactual"]["reconciliation_score"] is None
+    assert machine["counterfactual"]["evaluated"] is False
     assert machine["reconciliation"]["status"] == "PASS"
     assert machine["lineage"]["status"] == "PASS"
     assert machine["lineage"]["first_divergence"] is None
@@ -205,7 +206,7 @@ LINEAGE_EXPECTATIONS = {
     "new_store_backfill": "source",
     "expected_event": "source",
     "history_truncation": "source",
-    "commodity_remap": None,
+    "commodity_remap": "coded",
     "coding_error": "coded",
     "warehouse_transform_error": "warehouse",
     "recalculation": "source",

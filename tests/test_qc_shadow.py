@@ -29,7 +29,7 @@ def test_shadow_over_generated_suite(tmp_path):
     assert summary["reconciliation_failures"] == 0
     assert summary["lineage_first_divergence_accuracy"] == 1.0
     assert summary["lineage_comparable"] >= 2
-    assert summary["reconstruction_evaluated"] >= 4
+    assert summary["reconstruction_evaluated"] >= 2
     assert summary["engine_status_counts"].get("PASS", 0) == 0
 
     assert (out_dir / "shadow.json").exists()

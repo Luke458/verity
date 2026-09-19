@@ -143,7 +143,10 @@ def _summarize(
         "reconciliation_failures": sum(
             1
             for r in records
-            if r.reconciliation_status not in (None, "PASS")
+            if r.reconciliation_status == "RECONCILIATION_FAILURE"
+        ),
+        "reconciliation_not_evaluated": sum(
+            1 for r in records if r.reconciliation_status == "NOT_EVALUATED"
         ),
         "records": [r.to_dict() for r in records],
     }

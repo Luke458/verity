@@ -67,7 +67,12 @@ def evidence_text(result: Any, max_chars: int = 8000) -> str:
     if counterfactual is not None:
         lines.append(
             f"counterfactual reconstructed={_number(counterfactual.reconstructed_delta)} "
-            f"score={counterfactual.reconciliation_score:.4f}"
+            "score="
+            + (
+                f"{counterfactual.reconciliation_score:.4f}"
+                if counterfactual.reconciliation_score is not None
+                else "n/a"
+            )
         )
 
     reconciliation = getattr(result, "reconciliation", None)

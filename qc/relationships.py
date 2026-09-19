@@ -115,6 +115,39 @@ def _correlation(left: Sequence[float], right: Sequence[float]) -> float:
     return float(np.corrcoef(a, b)[0, 1])
 
 
+def _fisher_p_value(correlation: float, n: int) -> float:
+    """Two-sided p-value for a Pearson correlation via Fisher's z.
+
+    Uses the normal approximation, which is adequate for the small candidate
+    sets here and avoids a scipy dependency.
+    """
+    import math
+
+    if n < 4:
+        return 1.0
+    if abs(correlation) >= 1.0:
+        return 0.0
+    z = math.atanh(correlation) * math.sqrt(n - 3)
+    return math.erfc(abs(z) / math.sqrt(2.0))
+
+
+def _benjamini_hochberg(p_values: Sequence[float], q: float = 0.05) -> list[bool]:
+    """Benjamini-Hochberg step-up; returns a keep mask over the input order."""
+    n = len(p_values)
+    if n == 0:
+        return []
+    order = sorted(range(n), key=lambda index: p_values[index])
+    cutoff_rank = 0
+    for rank, index in enumerate(order, start=1):
+        if p_values[index] <= q * rank / n:
+            cutoff_rank = rank
+    keep = [False] * n
+    for rank, index in enumerate(order, start=1):
+        if rank <= cutoff_rank:
+            keep[index] = True
+    return keep
+
+
 def _weekly_series(
     frame: pd.DataFrame,
     entity_column: str,
@@ -137,12 +170,19 @@ def detect_relationships(
     pair: VersionPair,
     config: DatasetConfig,
 ) -> list[EntityRelationship]:
-    """Conservative replacement candidates between removed and new entities."""
+    """Conservative replacement candidates between removed and new entities.
+
+    Every candidate pair is tested for correlation significance and the whole
+    candidate set is corrected with Benjamini-Hochberg, so scanning many pairs
+    cannot manufacture a replacement by chance.
+    """
     week = config.week_column
     metric = config.primary_metric
     overlap = list(pair.overlap_weeks)
     low, high = config.relationship_ratio_bounds
-    candidates: list[EntityRelationship] = []
+    if len(overlap) < config.relationship_min_weeks:
+        return []
+    candidates: list[dict[str, Any]] = []
 
     for entity_column in config.entity_columns:
         if entity_column not in previous.columns or entity_column not in current.columns:
@@ -178,10 +218,14 @@ def detect_relationships(
 
         for source_id, source_values in previous_series.items():
             source_total = sum(source_values)
+            active_source = sum(1 for value in source_values if abs(value) > 0.0)
+            if active_source < config.relationship_min_weeks:
+                continue
             for target_id, target_values in current_series.items():
-                if sum(abs(value) for value in target_values) <= 0.0:
-                    continue
-                if len(overlap) < config.relationship_min_weeks:
+                active_target = sum(
+                    1 for value in target_values if abs(value) > 0.0
+                )
+                if active_target < config.relationship_min_weeks:
                     continue
                 correlation = _correlation(source_values, target_values)
                 ratio = (
@@ -194,19 +238,39 @@ def detect_relationships(
                     and low <= ratio <= high
                 ):
                     candidates.append(
-                        EntityRelationship(
-                            source_id=source_id,
-                            target_id=target_id,
-                            entity_type=entity_type,
-                            relationship="replaced_by",
-                            effective_week=pair.current_max_week,
-                            confidence=correlation,
-                            confirmed=False,
-                            evidence={
-                                "weeks": len(overlap),
-                                "correlation": correlation,
-                                "volume_ratio": ratio,
-                            },
-                        )
+                        {
+                            "source_id": source_id,
+                            "target_id": target_id,
+                            "entity_type": entity_type,
+                            "correlation": correlation,
+                            "ratio": ratio,
+                            "active_weeks": min(active_source, active_target),
+                            "p_value": _fisher_p_value(correlation, len(overlap)),
+                        }
                     )
-    return candidates
+
+    keep = _benjamini_hochberg([candidate["p_value"] for candidate in candidates])
+    relationships: list[EntityRelationship] = []
+    for candidate, significant in zip(candidates, keep):
+        if not significant:
+            continue
+        relationships.append(
+            EntityRelationship(
+                source_id=candidate["source_id"],
+                target_id=candidate["target_id"],
+                entity_type=candidate["entity_type"],
+                relationship="replaced_by",
+                effective_week=pair.current_max_week,
+                confidence=candidate["correlation"],
+                confirmed=False,
+                evidence={
+                    "weeks": len(overlap),
+                    "active_weeks": candidate["active_weeks"],
+                    "correlation": candidate["correlation"],
+                    "volume_ratio": candidate["ratio"],
+                    "p_value": candidate["p_value"],
+                    "multiple_comparison": "benjamini_hochberg",
+                },
+            )
+        )
+    return relationships

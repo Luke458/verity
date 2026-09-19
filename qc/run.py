@@ -125,6 +125,10 @@ def _reasons(
         and not attribution.structural_events
     ):
         reasons.append("unexplained_value_change")
+    if attribution.over_explained:
+        reasons.append("over_explained_revision")
+    if attribution.offsetting:
+        reasons.append("offsetting_explanations")
     if (
         not attribution.material
         and attribution.breadth > config.broad_recalculation_breadth
@@ -175,6 +179,8 @@ def _machine(
             "explained_fraction": attribution.explained_fraction,
             "material": attribution.material,
             "breadth": attribution.breadth,
+            "over_explained": attribution.over_explained,
+            "offsetting": attribution.offsetting,
             "matched_expected_events": list(attribution.matched_event_ids),
             "conservation": dict(attribution.conservation),
         }
@@ -323,7 +329,7 @@ def run_qc(
     relationships = detect_relationships(previous, current, pair, config)
 
     attribution = explain_revision(cubes["base"], events, registry.events(), config)
-    counterfactual = reconstruct_counterfactual(cubes["base"], events, config)
+    counterfactual = reconstruct_counterfactual(previous, current, events, config)
     reconciliation = run_reconciliation(current, contract_current_fact, config)
     lineage = analyze_lineage(
         source, previous_id, current_id, common_stages, config, pair

@@ -1,8 +1,10 @@
 """Reconciliation and structural integrity checks.
 
-Mass balance across grains (the report must sum back to the analysis table),
-count consistency, and robust cross-metric ratio evidence. Invariant failures
-are reconciliation failures; ratio outliers are evidence, not failures.
+Mass balance compares the report table against the analysis table *per week
+and per report key*, so compensating errors (one duplicated key offset by one
+missing key) cannot pass. Aggregate-marker scans catch parent rows mixed into
+detail rows. Checks report ``PASS``, ``FAIL`` or ``SKIPPED``; a run whose
+checks were all skipped is ``NOT_EVALUATED``, never ``PASS``.
 """
 
 from __future__ import annotations
@@ -13,12 +15,20 @@ import pandas as pd
 
 from .config import DatasetConfig
 
+PASS = "PASS"
+FAIL = "FAIL"
+SKIPPED = "SKIPPED"
+
 
 @dataclass(frozen=True)
 class ReconciliationCheck:
     name: str
-    passed: bool
+    status: str
     detail: str = ""
+
+    @property
+    def passed(self) -> bool:
+        return self.status == PASS
 
 
 @dataclass
@@ -29,35 +39,78 @@ class ReconciliationResult:
 
     @property
     def failed(self) -> list[ReconciliationCheck]:
-        return [check for check in self.checks if not check.passed]
+        return [check for check in self.checks if check.status == FAIL]
+
+    @property
+    def skipped(self) -> list[ReconciliationCheck]:
+        return [check for check in self.checks if check.status == SKIPPED]
+
+    @property
+    def evaluated(self) -> list[ReconciliationCheck]:
+        return [check for check in self.checks if check.status != SKIPPED]
 
     def to_dict(self) -> dict:
         return {
             "status": self.status,
             "checks": [
-                {"name": c.name, "passed": c.passed, "detail": c.detail}
+                {"name": c.name, "status": c.status, "detail": c.detail}
                 for c in self.checks
             ],
             "ratio_flags": list(self.ratio_flags),
         }
 
 
+def _check(name: str, ok: bool, detail: str) -> ReconciliationCheck:
+    return ReconciliationCheck(name, PASS if ok else FAIL, detail)
+
+
+def _key_columns(base: pd.DataFrame, report: pd.DataFrame, config: DatasetConfig) -> list[str]:
+    week = config.week_column
+    keys = [week]
+    for column in config.report_grain:
+        if column in base.columns and column in report.columns:
+            keys.append(column)
+    return keys
+
+
 def _mass_balance(
     base: pd.DataFrame, report: pd.DataFrame, config: DatasetConfig
 ) -> list[ReconciliationCheck]:
+    """Per-key, per-week comparison of report against analysis totals."""
+    if base is report or base.equals(report):
+        return [
+            ReconciliationCheck(
+                "mass_balance",
+                SKIPPED,
+                "report and analysis frames are identical; nothing to reconcile",
+            )
+        ]
+    keys = _key_columns(base, report, config)
     checks: list[ReconciliationCheck] = []
     for metric in config.metric_columns:
         if metric not in base.columns or metric not in report.columns:
             continue
-        base_total = float(base[metric].sum())
-        report_total = float(report[metric].sum())
-        denominator = max(abs(base_total), 1e-9)
-        relative = abs(report_total - base_total) / denominator
+        base_grouped = base.groupby(keys, dropna=False)[metric].sum()
+        report_grouped = report.groupby(keys, dropna=False)[metric].sum()
+        aligned = pd.concat(
+            [base_grouped.rename("base"), report_grouped.rename("report")], axis=1
+        ).fillna(0.0)
+        residual = (aligned["report"] - aligned["base"]).abs()
+        scale = aligned["base"].abs().where(aligned["base"].abs() > 1e-9, 1.0)
+        relative = residual / scale
+        worst = float(relative.max()) if len(relative) else 0.0
+        worst_key = relative.idxmax() if len(relative) else None
+        checks.append(
+            _check(
+                f"mass_balance:{metric}",
+                worst <= config.reconciliation_tolerance,
+                f"keys={len(aligned)} worst_rel={worst:.2e} at {worst_key}",
+            )
+        )
+    if not checks:
         checks.append(
             ReconciliationCheck(
-                f"mass_balance:{metric}",
-                relative <= config.reconciliation_tolerance,
-                f"base={base_total:.6f} report={report_total:.6f} rel={relative:.2e}",
+                "mass_balance", SKIPPED, "no metric column present in both frames"
             )
         )
     return checks
@@ -92,7 +145,7 @@ def _count_consistency(
             )
             mismatches = int((merged[count] != merged["expected"]).sum())
             checks.append(
-                ReconciliationCheck(
+                _check(
                     f"count_consistency:{count}",
                     mismatches == 0,
                     f"mismatched_groups={mismatches}",
@@ -102,27 +155,23 @@ def _count_consistency(
             checks.append(
                 ReconciliationCheck(
                     f"count_consistency:{count}",
-                    True,
-                    "skipped: report grain unavailable in base",
+                    SKIPPED,
+                    "report grain unavailable in base",
                 )
             )
     return checks
 
 
-def _hierarchy_checks(
+def _aggregate_marker_checks(
     base: pd.DataFrame, config: DatasetConfig
 ) -> list[ReconciliationCheck]:
-    """Parent/child consistency and aggregate-mixing detection.
+    """Flag aggregate marker values (``TOTAL``, ``ALL``, ...) in detail rows.
 
-    For each configured hierarchy the per-week grand total is compared with the
-    total of its parts, and each part column is checked for marker values
-    (``TOTAL``, ``ALL``, ...) that would mix aggregates into detail rows and
-    double count. Unlike a parent-table comparison this needs only one frame.
+    Parent/child reconciliation requires two frames; within one frame the only
+    honest structural check is that aggregate markers are not mixed into
+    detail rows.
     """
     checks: list[ReconciliationCheck] = []
-    week = config.week_column
-    if week not in base.columns:
-        return checks
     markers = {marker.lower() for marker in config.hierarchy_total_markers}
     for columns in config.hierarchy_columns:
         present = [column for column in columns if column in base.columns]
@@ -132,35 +181,10 @@ def _hierarchy_checks(
             values = base[column].dropna().astype(str)
             hits = values[values.str.lower().isin(markers)]
             checks.append(
-                ReconciliationCheck(
-                    f"hierarchy_markers:{column}",
+                _check(
+                    f"aggregate_markers:{column}",
                     hits.empty,
                     f"aggregate_marker_rows={len(hits)}",
-                )
-            )
-        for metric in config.metric_columns:
-            if metric not in base.columns:
-                continue
-            grand = base.groupby(week)[metric].sum()
-            parts = (
-                base.groupby([week] + present, dropna=False)[metric]
-                .sum()
-                .groupby(level=0)
-                .sum()
-            )
-            aligned = pd.concat(
-                [grand.rename("grand"), parts.rename("parts")], axis=1
-            ).fillna(0.0)
-            residual = float(
-                (aligned["parts"] - aligned["grand"]).abs().sum()
-            )
-            denominator = float(aligned["grand"].abs().sum()) or 1.0
-            relative = residual / denominator
-            checks.append(
-                ReconciliationCheck(
-                    f"hierarchy:{'+'.join(present)}:{metric}",
-                    relative <= config.hierarchy_tolerance,
-                    f"residual={residual:.6f} rel={relative:.2e}",
                 )
             )
     return checks
@@ -199,22 +223,26 @@ def run_reconciliation(
     report_current: pd.DataFrame | None,
     config: DatasetConfig,
 ) -> ReconciliationResult:
-    checks: list[ReconciliationCheck] = []
     if base_current is None or report_current is None:
         return ReconciliationResult(
-            status="PASS",
+            status="NOT_EVALUATED",
             checks=[
                 ReconciliationCheck(
                     "mass_balance",
-                    True,
-                    "report stage unavailable; skipped",
+                    SKIPPED,
+                    "report or analysis frame unavailable",
                 )
             ],
         )
-    checks.extend(_mass_balance(base_current, report_current, config))
+    checks = _mass_balance(base_current, report_current, config)
     checks.extend(_count_consistency(base_current, report_current, config))
-    checks.extend(_hierarchy_checks(base_current, config))
-    status = "RECONCILIATION_FAILURE" if any(not c.passed for c in checks) else "PASS"
+    checks.extend(_aggregate_marker_checks(base_current, config))
+    if any(check.status == FAIL for check in checks):
+        status = "RECONCILIATION_FAILURE"
+    elif any(check.status == PASS for check in checks):
+        status = "PASS"
+    else:
+        status = "NOT_EVALUATED"
     return ReconciliationResult(
         status=status,
         checks=checks,

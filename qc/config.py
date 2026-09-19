@@ -61,7 +61,9 @@ class DatasetConfig:
     broad_recalculation_breadth: float = 0.5
     lineage_materiality_ratio: float = 1e-5
     reconciliation_tolerance: float = 1e-6
-    hierarchy_tolerance: float = 1e-5
+    # Columns scanned for aggregate marker values ("TOTAL", "ALL", ...) that
+    # would double count if mixed into detail rows. Parent/child reconciliation
+    # itself is done by comparing the analysis and report frames per key.
     hierarchy_columns: tuple[tuple[str, ...], ...] = (
         ("banner_id",),
         ("state_id",),

@@ -90,7 +90,12 @@ def render_markdown(
         lines.append("## Counterfactual")
         lines.append(
             f"- reconstructed delta {_number(result.counterfactual.reconstructed_delta)}; "
-            f"reconciliation score {result.counterfactual.reconciliation_score:.4f}"
+            "reconciliation score "
+            + (
+                f"{result.counterfactual.reconciliation_score:.4f}"
+                if result.counterfactual.reconciliation_score is not None
+                else "not evaluated"
+            )
         )
         lines.append("")
     if result.reconciliation is not None:

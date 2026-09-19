@@ -1,10 +1,15 @@
 """Counterfactual reconstruction.
 
-Remove the explained structural changes from the current overlap revision and
-compare the reconstructed current against the previous version. A reconstruction
-that closely matches the previous version is strong evidence that the
-identified lifecycle events genuinely explain the change (architecture section
-17).
+Rebuild the current overlap revision as if the structural lifecycle events had
+not happened: remove the value of added entity-weeks, restore the value of
+removed entity-weeks, and compare the reconstructed weekly totals against the
+previous version. The values are recomputed from the frames, not taken from
+the events, so a lifecycle classification that points at the wrong entity or
+week cannot produce a high score.
+
+A score is only produced when there is at least one reconstructable or
+net-conserving structural event; otherwise ``reconciliation_score`` is ``None``
+and the result must not be treated as evidence.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from .lifecycle import (
     EXTENDED,
     NEW_BACKFILL,
     NEW_RECENT,
+    RECLASSIFIED,
     REMOVED,
     TRUNCATED,
     LifecycleEvent,
@@ -33,7 +39,8 @@ class CounterfactualResult:
     explained_delta: float = 0.0
     reconstructed_delta: float = 0.0
     previous_total: float = 0.0
-    reconciliation_score: float = 1.0
+    reconciliation_score: float | None = None
+    evaluated: bool = False
     by_week: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,83 +51,126 @@ class CounterfactualResult:
             "reconstructed_delta": self.reconstructed_delta,
             "previous_total": self.previous_total,
             "reconciliation_score": self.reconciliation_score,
+            "evaluated": self.evaluated,
             "by_week": list(self.by_week),
         }
 
 
-def _explanation_type(
-    events: list[LifecycleEvent], config: DatasetConfig
-) -> str | None:
-    explainable = [
-        event for event in events if event.classification in EXPLAINABLE_CLASSES
+def _entity_column(entity_type: str, frame: pd.DataFrame) -> str | None:
+    column = f"{entity_type}_id"
+    return column if column in frame.columns else None
+
+
+def _week_sum(frame: pd.DataFrame, column: str, entity_id: str, weeks: list[int], config: DatasetConfig) -> pd.Series:
+    week = config.week_column
+    metric = config.primary_metric
+    rows = frame.loc[
+        (frame[column].astype(str) == entity_id) & frame[week].isin(weeks)
     ]
-    for entity_type in config.explanation_entity_types:
-        if any(event.entity_type == entity_type for event in explainable):
-            return entity_type
-    return explainable[0].entity_type if explainable else None
+    if rows.empty:
+        return pd.Series(dtype=float)
+    return rows.groupby(week)[metric].sum()
 
 
 def reconstruct_counterfactual(
-    base_cube: pd.DataFrame,
+    previous: pd.DataFrame,
+    current: pd.DataFrame,
     events: list[LifecycleEvent],
     config: DatasetConfig,
 ) -> CounterfactualResult:
     metric = config.primary_metric
-    delta_column = f"{metric}_delta"
-    overlap = (
-        base_cube.loc[base_cube["period"] == "overlap"]
-        if len(base_cube)
-        else base_cube
-    )
+    week = config.week_column
     result = CounterfactualResult(metric=metric)
-    if delta_column not in overlap.columns or not len(overlap):
+    if metric not in previous.columns or metric not in current.columns:
+        return result
+    if week not in previous.columns or week not in current.columns:
         return result
 
-    raw_by_week = (
-        overlap.groupby(config.week_column)[delta_column].sum().sort_index()
+    overlap = sorted(
+        {int(value) for value in previous[week].unique()}
+        & {int(value) for value in current[week].unique()}
     )
-    explanation_type = _explanation_type(events, config)
-    explained_by_week = pd.Series(0.0, index=raw_by_week.index)
-    for event in events:
-        if event.entity_type != explanation_type:
-            continue
-        if event.classification in (NEW_BACKFILL, NEW_RECENT, EXTENDED):
-            for week, value in event.value_added_by_week.items():
-                if week in explained_by_week.index:
-                    explained_by_week.loc[week] += value
-        elif event.classification in (TRUNCATED, REMOVED):
-            for week, value in event.value_removed_by_week.items():
-                if week in explained_by_week.index:
-                    explained_by_week.loc[week] -= value
+    if not overlap:
+        return result
 
-    adjusted = raw_by_week - explained_by_week
-    raw_total = float(raw_by_week.sum())
-    explained_total = float(explained_by_week.sum())
-    reconstructed = float(adjusted.sum())
-    if abs(raw_total) > 1e-12:
-        score = 1.0 - abs(reconstructed) / abs(raw_total)
+    previous_week = previous.groupby(week)[metric].sum().astype(float)
+    current_week = current.groupby(week)[metric].sum().astype(float)
+    adjusted = current_week.copy()
+    relevant = [
+        event for event in events if event.classification in EXPLAINABLE_CLASSES
+    ]
+    if not relevant:
+        return result
+
+    reconstructable = 0
+    for event in relevant:
+        if event.classification in (NEW_BACKFILL, NEW_RECENT, EXTENDED):
+            column = _entity_column(event.entity_type, current)
+            weeks = list(event.historical_weeks_added)
+            if column is None or not weeks:
+                continue
+            contribution = _week_sum(current, column, event.entity_id, weeks, config)
+            adjusted = adjusted.subtract(contribution, fill_value=0.0)
+            reconstructable += 1
+        elif event.classification in (TRUNCATED, REMOVED):
+            column = _entity_column(event.entity_type, previous)
+            weeks = list(event.historical_weeks_removed)
+            if column is None or not weeks:
+                continue
+            contribution = _week_sum(previous, column, event.entity_id, weeks, config)
+            adjusted = adjusted.add(contribution, fill_value=0.0)
+            reconstructable += 1
+        elif event.classification == RECLASSIFIED:
+            # Net-conserving by definition; the score tests that conservation.
+            reconstructable += 1
+
+    if reconstructable == 0:
+        return result
+
+    raw = current_week - previous_week
+    reconstructed = adjusted - previous_week
+    overlap_index = [
+        value
+        for value in overlap
+        if value in adjusted.index and value in previous_week.index
+    ]
+    numerator = float(
+        sum(
+            abs(
+                float(adjusted.get(value, 0.0))
+                - float(previous_week.get(value, 0.0))
+            )
+            for value in overlap_index
+        )
+    )
+    denominator = float(
+        sum(abs(float(previous_week.get(value, 0.0))) for value in overlap_index)
+    )
+    if denominator <= 1e-9:
+        score = 1.0 if numerator <= 1e-9 else 0.0
     else:
-        score = 1.0 if abs(reconstructed) <= 1e-9 else 0.0
-    score = max(0.0, min(1.0, score))
+        score = max(0.0, 1.0 - numerator / denominator)
 
     return CounterfactualResult(
         metric=metric,
-        raw_delta=raw_total,
-        explained_delta=explained_total,
-        reconstructed_delta=reconstructed,
+        raw_delta=float(raw.reindex(overlap_index).fillna(0.0).sum()),
+        explained_delta=float(
+            (current_week - adjusted).reindex(overlap_index).fillna(0.0).sum()
+        ),
+        reconstructed_delta=float(
+            reconstructed.reindex(overlap_index).fillna(0.0).sum()
+        ),
         previous_total=float(
-            overlap[f"{metric}_previous"].sum()
-            if f"{metric}_previous" in overlap.columns
-            else 0.0
+            previous_week.reindex(overlap_index).fillna(0.0).sum()
         ),
         reconciliation_score=score,
+        evaluated=True,
         by_week=[
             {
-                "week": int(week),
-                "raw_delta": float(raw_by_week.loc[week]),
-                "explained_delta": float(explained_by_week.loc[week]),
-                "reconstructed_delta": float(adjusted.loc[week]),
+                "week": int(value),
+                "raw_delta": float(raw.get(value, 0.0)),
+                "reconstructed_delta": float(reconstructed.get(value, 0.0)),
             }
-            for week in raw_by_week.index
+            for value in overlap_index
         ],
     )

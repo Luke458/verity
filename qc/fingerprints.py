@@ -19,8 +19,11 @@ from .config import DatasetConfig
 def _entity_set_hash(frame: pd.DataFrame, columns: list[str]) -> str:
     if not columns or len(frame) == 0:
         return hashlib.sha256(b"").hexdigest()[:16]
+    # Hash the *unique* entity tuples with a stable string cast, so duplicate
+    # rows or object/categorical dtype drift do not change the entity set.
+    unique = frame[columns].astype(str).drop_duplicates()
     hashed = (
-        pd.util.hash_pandas_object(frame[columns], index=False)
+        pd.util.hash_pandas_object(unique, index=False)
         .sort_values(kind="stable")
         .to_numpy(dtype=np.uint64)
     )
@@ -31,10 +34,10 @@ def structural_fingerprint(frame: pd.DataFrame, config: DatasetConfig) -> dict:
     week = config.week_column
     metrics = [column for column in config.metric_columns if column in frame.columns]
     entities = [column for column in config.entity_columns if column in frame.columns]
-    key_columns = [
+    key_columns = [week] + [
         column
-        for column in frame.columns
-        if column.endswith("_id") or column == week
+        for column in config.entity_key_columns
+        if column in frame.columns and column != week
     ]
     return {
         "rows": int(len(frame)),

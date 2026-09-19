@@ -364,7 +364,12 @@ def test_attribution_matches_expected_events_and_status():
     result = explain_revision(cube, events, registry, CONFIG)
     assert result.matched_event_ids == ["evt-1"]
     assert not result.unmatched_events
-    assert classify_run("PASS", events, result, CONFIG) == "PASS_WITH_EXPLANATION"
+    assert (
+        classify_run("PASS", events, result, CONFIG, reconstruction_score=1.0)
+        == "PASS_WITH_EXPLANATION"
+    )
+    # Without a reconstruction score the registry match alone is not enough.
+    assert classify_run("PASS", events, result, CONFIG) == "INVESTIGATE"
 
 
 def test_status_machine():

@@ -151,8 +151,12 @@ def _print_human(result: QCRunResult) -> None:
             f"{result.counterfactual.reconstructed_delta:,.2f}"
         )
         print(
-            f"  reconciliation_score "
-            f"{result.counterfactual.reconciliation_score:.4f}"
+            "  reconciliation_score "
+            + (
+                f"{result.counterfactual.reconciliation_score:.4f}"
+                if result.counterfactual.reconciliation_score is not None
+                else "n/a"
+            )
         )
     if result.reconciliation is not None:
         print(f"RECONCILIATION {result.reconciliation.status}")

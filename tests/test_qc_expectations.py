@@ -36,7 +36,19 @@ def test_approved_expectation_explains_only_its_alert():
     )
     assert [item["week"] for item in report["expected"]] == [6]
     assert report["expected"][0]["explained_by"] == "e1"
+    assert report["expected"][0]["ambiguous"] is False
     assert [item["week"] for item in report["unexpected"]] == [7]
+
+
+def test_ambiguous_matches_are_flagged():
+    report = apply_expectations(
+        [_flag(6, 100.0)],
+        [_expectation(expectation_id="e1"), _expectation(expectation_id="e2")],
+        {"dataset": "synthetic-retail", "as_of": "2026-06-01"},
+    )
+    assert len(report["expected"]) == 1
+    assert report["expected"][0]["ambiguous"] is True
+    assert report["expected"][0]["match_count"] == 2
 
 
 def test_unapproved_expired_and_wrong_scope_are_ignored():

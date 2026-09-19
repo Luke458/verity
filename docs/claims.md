@@ -16,18 +16,18 @@ Statuses:
 | Milestone | Status | Evidence / caveat |
 |---|---|---|
 | A0 Synthetic world, fault oracle, suite harness | `validated-synthetic` | `tests/test_dgp.py`, `tests/test_faults.py`, `tests/test_scenarios.py`; family expectations come from one spec table (`qcgen/spec.py`). |
-| A Data contracts | `plumbing-only` | Negative controls cover required columns, dtypes, week progression, nulls, duplicates. |
+| A Data contracts | `validated-synthetic` | Negative controls cover required columns, dtypes, week progression, nulls, duplicates. |
 | A Version pair / revision cube | `plumbing-only` | Grain semantics still loose (see M2 plan). |
-| A Lifecycle / attribution | `plumbing-only` | Multi-class events, offsetting explanations and reclassification accounting are unsound until M2. |
-| B Reconciliation | `plumbing-only` | Hierarchy check is a tautology; mass balance compares global totals only. M2 replaces it. |
-| B Counterfactual | `plumbing-only` | Currently arithmetic subtraction, not reconstruction; score can be 1.0 vacuously. M2 replaces it. |
-| B Lineage first divergence | `plumbing-only` | Stage-local; both-version fingerprints land in M2. |
+| A Lifecycle / attribution | `validated-synthetic` | Multi-class events, signed ledger with over-explanation/offsetting flags, and product-level reclassification conservation (M2). |
+| B Reconciliation | `validated-synthetic` | Per-key/per-week mass balance, aggregate-marker scans, explicit SKIPPED/NOT_EVALUATED; negative controls prove failures (M2). |
+| B Counterfactual | `validated-synthetic` | Reconstructed from frames; wrong-entity controls score low; no score when nothing is reconstructable (M2). |
+| B Lineage first divergence | `validated-synthetic` | Both-version fingerprints per stage, unmapped stages report UNKNOWN (M2). |
 | B Expected events / shadow mode | `plumbing-only` | Blind oracle separation landed: ground truth lives in a vault outside the scenario data, `qc/` cannot import `qcgen`, and `qc shadow` is blind by default (`--with-registry` is plumbing). Detection semantics still weak until M2. |
 | C Temporal intelligence / forecast calibration | `plumbing-only` | Synthetic-only; conformal/prequential fixes land in M3. |
 | 11 TSPulse adapter + benchmark | `research` | Weekly-length suitability gate unresolved; never production-eligible. |
 | D Typed decisions / labels / training | `plumbing-only` | Trained on synthetic oracle labels; real-label accuracy pending. |
 | D Incident memory / agent handoff | `plumbing-only` | Draft contamination and untrusted-output handling fixes land in M4. |
-| C+ Relationships / reports / Delta source | `plumbing-only` | Relationship correlation lacks multiple-comparison control until M2. |
+| C+ Relationships / reports / Delta source | `validated-synthetic` | Benjamini-Hochberg correction, active-week requirement, stable entity-set hashing (M2); reports/Delta still plumbing. |
 | Evaluation cohorts / conformal / prequential | `plumbing-only` | Gate enforcement and statistical corrections land in M3. |
 | Operations store / drift monitoring | `plumbing-only` | Provenance defaults and non-atomic weekly writes land in M4. |
 | Substrates ModernBERT-class text probe | `research` | Token-oracle tests only; real-label semantic benchmark pending. |

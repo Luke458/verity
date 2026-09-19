@@ -134,7 +134,11 @@ def build_evidence_graph(
                 f"{run_id}:counterfactual",
                 "counterfactual",
                 "dataset",
-                value=round(counterfactual.reconciliation_score, 4),
+                value=(
+                    round(counterfactual.reconciliation_score, 4)
+                    if counterfactual.reconciliation_score is not None
+                    else None
+                ),
                 confidence=counterfactual.reconciliation_score,
                 payload=counterfactual.to_dict(),
             ),
