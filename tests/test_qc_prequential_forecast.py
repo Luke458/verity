@@ -79,13 +79,34 @@ def test_insufficient_history_is_recorded_not_scored():
 
 
 def test_prequential_flag_on_anomalous_load():
+    from dataclasses import replace
+
     loads = [_load(target) for target in range(30, 34)]
     loads.append(_load(34, value=40.0))
-    result = forecast_across_loads(loads, min_samples=2)
+    # alpha=0.2 needs 4 usable residuals, matching this small fixture.
+    config = replace(
+        DatasetConfig(),
+        temporal_lower_percentile=0.2,
+        temporal_upper_percentile=0.8,
+    )
+    result = forecast_across_loads(loads, config, min_samples=2)
     last = next(item for item in result.evidence if item.load_id == "L34")
     assert last.pool_records == 4
     assert last.pool_percentile == pytest.approx(0.0)
+    assert last.pool_p_value == pytest.approx(0.2)
     assert last.flag == "prequential_lower"
+
+
+def test_prequential_flags_require_enough_samples():
+    loads = [_load(target) for target in range(30, 34)]
+    loads.append(_load(34, value=40.0))
+    # Default alpha=0.01 needs 99 usable residuals; with 4 the flag must stay
+    # off and the note must say why.
+    result = forecast_across_loads(loads, DatasetConfig(), min_samples=2)
+    last = next(item for item in result.evidence if item.load_id == "L34")
+    assert last.flag is None
+    assert last.pool_p_value is None
+    assert "need 99" in last.note
 
 
 class _DictSource:

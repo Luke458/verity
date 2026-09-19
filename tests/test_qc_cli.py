@@ -191,6 +191,8 @@ def test_cli_store_and_drift(tmp_path, capsys):
                 "25",
                 "--target-week",
                 "26",
+                "--alpha",
+                "0.5",
             ]
         )
         == 0

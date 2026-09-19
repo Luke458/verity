@@ -9,11 +9,23 @@ be persisted next to each Delta version.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
+
+
+def manifest_data_fingerprint(manifest: dict) -> str:
+    """Content identity of a version pair from its stage fingerprints."""
+    versions = manifest.get("versions", {})
+    payload = {
+        name: info.get("fingerprints", {}) for name, info in versions.items()
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode()
+    ).hexdigest()[:16]
 
 
 def _entity_set_hash(frame: pd.DataFrame, columns: list[str]) -> str:

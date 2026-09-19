@@ -73,6 +73,46 @@ def _permissive_gates() -> dict[str, float]:
     return {"min_overall_accuracy": 0.0, "min_cause_accuracy": 0.0}
 
 
+def test_partial_gates_rejected(cohorts):
+    records, items, _ = cohorts
+    with pytest.raises(ValueError, match="complete"):
+        run_champion(
+            records, items, DatasetConfig(), gates={"min_overall_accuracy": 0.0}
+        )
+
+
+def test_paired_test_flags_ties_and_separations():
+    from qc.champion import ProviderScore, _paired_p_value
+
+    a = ProviderScore(
+        "a",
+        True,
+        correct_by_case={"c1": 1, "c2": 1},
+        total_by_case={"c1": 1, "c2": 1},
+    )
+    b = ProviderScore(
+        "b",
+        True,
+        correct_by_case={"c1": 0, "c2": 0},
+        total_by_case={"c1": 1, "c2": 1},
+    )
+    assert _paired_p_value(a, a) == 1.0
+    assert _paired_p_value(a, b) == pytest.approx(0.5)
+    c = ProviderScore(
+        "c",
+        True,
+        correct_by_case={f"c{i}": 1 for i in range(10)},
+        total_by_case={f"c{i}": 1 for i in range(10)},
+    )
+    d = ProviderScore(
+        "d",
+        True,
+        correct_by_case={f"c{i}": 0 for i in range(10)},
+        total_by_case={f"c{i}": 1 for i in range(10)},
+    )
+    assert _paired_p_value(c, d) < 0.01
+
+
 def test_accuracy_handles_fields_with_no_correct_predictions():
     assert _accuracy(
         {"likely_cause": 2}, {"likely_cause": 2, "severity": 1}
@@ -86,7 +126,11 @@ def test_bakeoff_reports_every_provider(cohorts):
     )
     by_name = {score.provider: score for score in result.scores}
     assert set(by_name) == {"rule", "feature_head", "text_probe", "remote"}
-    assert result.champion in {"rule", "feature_head"}
+    # The paired test may find the two leaders statistically inseparable on
+    # this tiny cohort; that is an honest "no champion", not a failure.
+    assert result.champion in {None, "rule", "feature_head"}
+    if result.champion is None:
+        assert result.selection["p_value"] > 0.05
     assert result.production_eligible is False
     assert result.provenance["labels"] == "oracle"
     assert by_name["rule"].available

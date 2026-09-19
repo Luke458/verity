@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
 
-from qc.cohort import CohortPlan, run_cohort
+from qc.cohort import (
+    DEFAULT_GATES,
+    CohortCase,
+    CohortPlan,
+    _gate_results,
+    _metrics,
+    run_cohort,
+)
 
 
 def test_cohort_plan_rejects_overlapping_seeds():
@@ -47,15 +55,102 @@ def test_small_cohort_end_to_end(tmp_path):
     assert {json.loads(line)["split"] for line in lines} == {"dev", "heldout"}
 
 
-def test_cohort_gate_failure_is_reported(tmp_path):
+def test_gates_must_be_declared_and_complete():
+    with pytest.raises(ValueError):
+        CohortPlan(gates={})
+    with pytest.raises(ValueError):
+        CohortPlan(gates={"min_detection_rate": 0.9})
+    with pytest.raises(ValueError):
+        CohortPlan(gates={**DEFAULT_GATES, "min_detection_rate": 1.5})
+
+
+def test_gate_failure_is_reported():
+    metrics = {
+        "detection_rate": 0.5,
+        "false_positive_rate": 0.0,
+        "mean_reconstruction_score": 0.0,
+        "lineage_first_divergence_accuracy": 0.0,
+        "lineage_comparable": 0,
+    }
+    checks = _gate_results(metrics, DEFAULT_GATES)
+    assert checks
+    assert any(not check["passed"] for check in checks)
+
+
+def _case(**overrides) -> CohortCase:
+    data = {
+        "case_id": "c",
+        "split": "heldout",
+        "seed": 1,
+        "family": "missing_stores",
+        "is_control": False,
+        "engine_status": "INVESTIGATE",
+        "historical_status": "PASS",
+        "expected_status": "INVESTIGATE",
+        "expected_class": "missing_stores",
+        "injection_stage": "source",
+        "first_divergence": "source",
+        "reconstruction_score": 1.0,
+        "explained_fraction": 1.0,
+        "detected": True,
+        "expected_match": True,
+        "false_positive": False,
+    }
+    data.update(overrides)
+    return CohortCase(**data)
+
+
+def test_false_positive_uses_full_engine_status():
+    # A control escalated only by the latest-week detector still counts as a
+    # false positive; the historical status alone would hide it.
+    control = _case(
+        is_control=True,
+        engine_status="INVESTIGATE",
+        historical_status="PASS",
+        expected_status="INVESTIGATE",
+        detected=True,
+        false_positive=True,
+    )
+    metrics = _metrics([control])
+    assert metrics["false_positive_rate"] == 1.0
+    assert metrics["control_status_counts"] == {"INVESTIGATE": 1}
+
+    clean = _case(
+        is_control=True,
+        engine_status="PASS",
+        historical_status="PASS",
+        expected_status="INVESTIGATE",
+        detected=False,
+        false_positive=False,
+    )
+    assert _metrics([clean])["false_positive_rate"] == 0.0
+
+
+def test_plan_hash_pinning(tmp_path):
     plan = CohortPlan(
         families=("missing_stores",),
         controls=(),
         scenarios_per_family=1,
         dev_seeds=(1,),
         heldout_seeds=(2,),
-        gates={"min_detection_rate": 1.01},
     )
-    result = run_cohort(plan, workdir=tmp_path / "work")
-    assert result.gates_passed is False
-    assert result.gate_results[0]["passed"] is False
+    plan_path = tmp_path / "plan.json"
+    plan.save(plan_path)
+    sha = hashlib.sha256(
+        json.dumps(plan.to_dict(), sort_keys=True).encode()
+    ).hexdigest()
+    (tmp_path / "plan.json.sha256").write_text(sha + "\n")
+
+    result = run_cohort(plan, workdir=tmp_path / "w1", plan_path=plan_path)
+    assert result.plan_hash_verified is True
+
+    tampered = CohortPlan(
+        families=("coding_error",),
+        controls=(),
+        scenarios_per_family=1,
+        dev_seeds=(1,),
+        heldout_seeds=(2,),
+    )
+    tampered.save(plan_path)
+    with pytest.raises(ValueError, match="does not match"):
+        run_cohort(tampered, workdir=tmp_path / "w2", plan_path=plan_path)

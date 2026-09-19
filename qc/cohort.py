@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .config import DatasetConfig
+from .conformal import wilson_interval
 from .run import run_qc
 
 DEFAULT_FAMILIES: tuple[str, ...] = (
@@ -74,6 +76,20 @@ class CohortPlan:
         unknown = set(self.gates) - set(KNOWN_GATES)
         if unknown:
             raise ValueError(f"unknown gates: {sorted(unknown)}")
+        if not self.gates:
+            raise ValueError(
+                "gates must be declared; an empty gate set passes vacuously"
+            )
+        missing = set(DEFAULT_GATES) - set(self.gates)
+        if missing:
+            raise ValueError(
+                f"gates must be complete; missing {sorted(missing)}"
+            )
+        for name, threshold in self.gates.items():
+            if name.startswith("min_") and not 0.0 <= threshold <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1]")
+            if name.startswith("max_") and not 0.0 <= threshold <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1]")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -118,6 +134,7 @@ class CohortCase:
     reconstruction_score: float | None
     explained_fraction: float
     detected: bool
+    expected_match: bool
     false_positive: bool
 
     def to_dict(self) -> dict[str, Any]:
@@ -132,6 +149,9 @@ class CohortResult:
     gates_passed: bool
     code_sha256: str
     plan_sha256: str
+    plan_path: str | None = None
+    plan_hash_verified: bool = False
+    git_dirty: bool | None = None
     production_eligible: bool = False
     limitations: list[str] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -140,13 +160,38 @@ class CohortResult:
         return asdict(self)
 
 
-def code_sha256(package_dir: str | Path | None = None) -> str:
-    directory = Path(package_dir or Path(__file__).parent)
+def code_sha256(root: str | Path | None = None) -> str:
+    """Hash the engine, generator and dataset configs recursively."""
+    base = Path(root or Path(__file__).resolve().parents[1])
     digest = hashlib.sha256()
-    for path in sorted(directory.glob("*.py")):
-        digest.update(path.name.encode())
-        digest.update(path.read_bytes())
+    for folder in ("qc", "qcgen", "config"):
+        directory = base / folder
+        if not directory.exists():
+            continue
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file() or "__pycache__" in path.parts:
+                continue
+            digest.update(str(path.relative_to(base)).encode())
+            digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+def git_dirty(root: str | Path | None = None) -> bool | None:
+    """True when the working tree has uncommitted changes; None if unknown."""
+    base = Path(root or Path(__file__).resolve().parents[1])
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=base,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return bool(completed.stdout.strip())
 
 
 def _rate(values: list[bool]) -> float:
@@ -169,13 +214,32 @@ def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
     expected_contracts = [
         case for case in faults if case.family in ("schema_failure", "null_duplicate_storm")
     ]
+    detected = [case.detected for case in faults]
+    false_positives = [case.detected for case in controls]
+    detection_ci = wilson_interval(sum(detected), len(detected))
+    fpr_ci = wilson_interval(sum(false_positives), len(false_positives))
+    control_status_counts: dict[str, int] = {}
+    for case in controls:
+        control_status_counts[case.engine_status] = (
+            control_status_counts.get(case.engine_status, 0) + 1
+        )
     return {
         "cases": len(cases),
         "fault_cases": len(faults),
         "control_cases": len(controls),
-        "detection_rate": _rate([case.detected for case in faults]),
-        "false_positive_rate": _rate(
-            [case.historical_status not in (None, "PASS") for case in controls]
+        "detection_rate": _rate(detected),
+        "detection_rate_ci_low": detection_ci[0],
+        "detection_rate_ci_high": detection_ci[1],
+        "false_positive_rate": _rate(false_positives),
+        "false_positive_rate_ci_low": fpr_ci[0],
+        "false_positive_rate_ci_high": fpr_ci[1],
+        "control_status_counts": control_status_counts,
+        "expected_status_match_rate": _rate(
+            [
+                case.engine_status == case.expected_status
+                for case in cases
+                if case.expected_status is not None
+            ]
         ),
         "contract_failure_rate": _rate(
             [case.engine_status == "DATA_CONTRACT_FAILURE" for case in expected_contracts]
@@ -241,11 +305,27 @@ def _gate_results(metrics: dict[str, Any], gates: dict[str, float]) -> list[dict
     return checks
 
 
+def _verify_plan_hash(plan_path: Path, plan_sha: str) -> bool:
+    """Check a committed ``<plan>.sha256`` against the loaded plan."""
+    digest_path = plan_path.with_suffix(plan_path.suffix + ".sha256")
+    if not digest_path.exists():
+        return False
+    expected = digest_path.read_text().strip().split()[0]
+    if expected != plan_sha:
+        raise ValueError(
+            f"cohort plan {plan_path} does not match {digest_path}: "
+            f"expected {expected}, got {plan_sha}. Changing the plan after "
+            "seeing results invalidates the evaluation."
+        )
+    return True
+
+
 def run_cohort(
     plan: CohortPlan | None = None,
     workdir: str | Path = "reports/cohort",
     config: DatasetConfig | None = None,
     out_dir: str | Path | None = None,
+    plan_path: str | Path | None = None,
 ) -> CohortResult:
     from qcgen.config import suite_config
     from qcgen.scenarios import build_scenario
@@ -255,6 +335,12 @@ def run_cohort(
     config = config or DatasetConfig()
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
+    plan_sha = hashlib.sha256(
+        json.dumps(plan.to_dict(), sort_keys=True).encode()
+    ).hexdigest()
+    plan_hash_verified = False
+    if plan_path is not None:
+        plan_hash_verified = _verify_plan_hash(Path(plan_path), plan_sha)
 
     cases: list[CohortCase] = []
     splits = (("dev", plan.dev_seeds), ("heldout", plan.heldout_seeds))
@@ -318,9 +404,12 @@ def run_cohort(
                                 else 0.0
                             ),
                             detected=run_result.status != "PASS",
+                            expected_match=(
+                                case.get("expected_status") is not None
+                                and run_result.status == case.get("expected_status")
+                            ),
                             false_positive=(
-                                is_control
-                                and historical not in (None, "PASS")
+                                is_control and run_result.status != "PASS"
                             ),
                         )
                     )
@@ -336,9 +425,10 @@ def run_cohort(
         gate_results=gates,
         gates_passed=all(check["passed"] for check in gates),
         code_sha256=code_sha256(),
-        plan_sha256=hashlib.sha256(
-            json.dumps(plan.to_dict(), sort_keys=True).encode()
-        ).hexdigest(),
+        plan_sha256=plan_sha,
+        plan_path=str(plan_path) if plan_path is not None else None,
+        plan_hash_verified=plan_hash_verified,
+        git_dirty=git_dirty(),
         limitations=[
             "Synthetic oracle labels validate the harness and the engine's "
             "deterministic semantics, not real refresh accuracy.",

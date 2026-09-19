@@ -216,7 +216,10 @@ def run_weekly(
         )
         if drift_target is not None:
             drift = monitor_drift(
-                pool, as_of=drift_target, target_week=drift_target
+                pool,
+                as_of=drift_target,
+                target_week=drift_target,
+                scope=config.name,
             ).to_dict()
             if drift["status"] == "DRIFT":
                 notes.append(

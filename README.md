@@ -173,10 +173,10 @@ status and known weaknesses of each row.
 | 11 | TSPulse research adapter + revision-series suitability benchmark | research; weekly-length gate unresolved |
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
 | C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; reconciliation and relationships hardened |
-| Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; gate enforcement and statistical fixes pending |
+| Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; statistical and gate fixes landed (M3) |
 | Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance and atomicity fixes pending |
 | Substrates | Frozen-encoder text probe (ModernBERT-class) | research; real-label bake-off pending |
-| Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; real-label selection pending |
+| Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; paired selection and provenance enforced; real-label selection pending |
 | Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
 | Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research |
 | Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |

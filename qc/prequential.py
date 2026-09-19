@@ -11,6 +11,7 @@ calibration in ``qc/temporal.py``.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import Any
 import pandas as pd
 
 from .config import DatasetConfig
-from .conformal import ConformalInterval, conformal_interval
+from .conformal import ConformalInterval, conformal_interval, minimum_samples
 from .temporal import _forecast_scale, build_temporal_series, get_forecaster
 
 
@@ -59,36 +60,86 @@ class CalibrationPool:
         self.records: list[CalibrationRecord] = []
 
     def add(self, record: CalibrationRecord) -> bool:
-        """Add a record; reject duplicates for the same target in its scope."""
-        for existing in self.records:
-            if (
+        """Add a record; the latest record for a key supersedes older ones.
+
+        A repeated or partially recomputed load still contributes one record
+        per (scope, series, target), but a corrected residual replaces the
+        stale value instead of being rejected forever.
+        """
+        if not math.isfinite(float(record.residual)):
+            raise ValueError("residual must be finite")
+        self.records = [
+            existing
+            for existing in self.records
+            if not (
                 existing.scope == record.scope
                 and existing.series_id == record.series_id
                 and existing.target_week == record.target_week
-            ):
-                return False
+            )
+        ]
         self.records.append(record)
         if len(self.records) > self.max_records:
             self.records = self.records[-self.max_records :]
         return True
 
-    def usable(self, as_of: int, target_week: int) -> list[CalibrationRecord]:
+    def usable(
+        self, as_of: int, target_week: int, scope: str | None = None
+    ) -> list[CalibrationRecord]:
         return [
             record
             for record in self.records
-            if record.available_on < as_of and record.target_week < target_week
+            if record.available_on < as_of
+            and record.target_week < target_week
+            and (scope is None or record.scope == scope)
         ]
 
     def percentile(
-        self, z: float, as_of: int, target_week: int
+        self,
+        z: float,
+        as_of: int,
+        target_week: int,
+        scope: str | None = None,
     ) -> float | None:
-        residuals = sorted(record.residual for record in self.usable(as_of, target_week))
+        """Empirical CDF fraction of residuals at or below ``z``."""
+        residuals = sorted(
+            record.residual
+            for record in self.usable(as_of, target_week, scope=scope)
+        )
         if len(residuals) < self.min_samples:
             return None
         import numpy as np
 
         array = np.asarray(residuals, dtype=float)
-        return float(np.searchsorted(array, z, side="left") / len(array))
+        return float(np.searchsorted(array, z, side="right") / len(array))
+
+    def p_value(
+        self,
+        z: float,
+        as_of: int,
+        target_week: int,
+        tail: str = "lower",
+        scope: str | None = None,
+    ) -> float | None:
+        """Conformal p-value for ``z`` against the usable pool.
+
+        ``(1 + #{residuals at least as extreme}) / (n + 1)``: small values mean
+        ``z`` is unusually low (``tail="lower"``) or high (``tail="upper"``)
+        relative to the pool. Finite-sample valid under exchangeability.
+        """
+        residuals = [
+            record.residual
+            for record in self.usable(as_of, target_week, scope=scope)
+        ]
+        n = len(residuals)
+        if n == 0:
+            return None
+        if tail == "lower":
+            extreme = sum(1 for value in residuals if value <= z)
+        elif tail == "upper":
+            extreme = sum(1 for value in residuals if value >= z)
+        else:
+            raise ValueError("tail must be 'lower' or 'upper'")
+        return (1 + extreme) / (n + 1)
 
     def interval(
         self,
@@ -96,9 +147,18 @@ class CalibrationPool:
         as_of: int,
         target_week: int,
         alpha: float = 0.05,
+        scope: str | None = None,
     ) -> ConformalInterval:
-        residuals = [record.residual for record in self.usable(as_of, target_week)]
-        if len(residuals) < self.min_samples:
+        """Conformal interval in residual units around ``center``.
+
+        Residuals are standardized residuals, so callers pass ``center=0.0``
+        to obtain an interval in z-space.
+        """
+        residuals = [
+            record.residual
+            for record in self.usable(as_of, target_week, scope=scope)
+        ]
+        if len(residuals) < max(self.min_samples, minimum_samples(alpha)):
             return ConformalInterval(
                 alpha,
                 None,
@@ -106,7 +166,8 @@ class CalibrationPool:
                 len(residuals),
                 None,
                 "INSUFFICIENT_CALIBRATION",
-                f"need {self.min_samples} usable residuals, have {len(residuals)}",
+                f"need {max(self.min_samples, minimum_samples(alpha))} usable "
+                f"residuals, have {len(residuals)}",
             )
         return conformal_interval(residuals, center=center, alpha=alpha)
 
@@ -136,6 +197,11 @@ class PrequentialStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as handle:
             for record in records:
+                if not math.isfinite(float(record.residual)):
+                    raise ValueError(
+                        f"residual for {record.series_id}@{record.target_week} "
+                        "must be finite"
+                    )
                 handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
 
     def pool(self, max_records: int = 100, min_samples: int = 9) -> CalibrationPool:
@@ -181,6 +247,7 @@ class PrequentialSeriesEvidence:
     relative_residual: float | None = None
     standardized_residual: float | None = None
     pool_percentile: float | None = None
+    pool_p_value: float | None = None
     pool_records: int = 0
     flag: str | None = None
     note: str = ""
@@ -274,6 +341,11 @@ def forecast_across_loads(
         last_available = load.available_on
 
     pool = CalibrationPool(max_records=100, min_samples=min_samples)
+    lower_alpha = config.temporal_lower_percentile
+    upper_alpha = 1.0 - config.temporal_upper_percentile
+    required_samples = max(
+        min_samples, minimum_samples(min(lower_alpha, upper_alpha))
+    )
     evidence: list[PrequentialSeriesEvidence] = []
     committed = 0
 
@@ -292,7 +364,9 @@ def forecast_across_loads(
             actuals = [
                 value for week_id, value in zip(weeks, values) if week_id == load.target_week
             ]
-            pool_records = len(pool.usable(load.available_on, load.target_week))
+            pool_records = len(
+                pool.usable(load.available_on, load.target_week, scope=scope)
+            )
 
             if not actuals or len(training) < config.temporal_min_history:
                 evidence.append(
@@ -319,13 +393,30 @@ def forecast_across_loads(
             standardized = (actual - median) / scale
             relative = (actual - median) / median if median else 0.0
             percentile = pool.percentile(
-                standardized, load.available_on, load.target_week
+                standardized, load.available_on, load.target_week, scope=scope
             )
+            p_value = None
             flag = None
-            if percentile is not None:
-                if percentile <= config.temporal_lower_percentile:
+            if pool_records >= required_samples:
+                lower_p = pool.p_value(
+                    standardized,
+                    load.available_on,
+                    load.target_week,
+                    tail="lower",
+                    scope=scope,
+                )
+                upper_p = pool.p_value(
+                    standardized,
+                    load.available_on,
+                    load.target_week,
+                    tail="upper",
+                    scope=scope,
+                )
+                if lower_p is not None and lower_p <= lower_alpha:
+                    p_value = lower_p
                     flag = "prequential_lower"
-                elif percentile >= config.temporal_upper_percentile:
+                elif upper_p is not None and upper_p <= upper_alpha:
+                    p_value = upper_p
                     flag = "prequential_upper"
 
             evidence.append(
@@ -339,8 +430,18 @@ def forecast_across_loads(
                     relative_residual=relative,
                     standardized_residual=standardized,
                     pool_percentile=percentile,
+                    pool_p_value=p_value,
                     pool_records=pool_records,
                     flag=flag,
+                    note=(
+                        ""
+                        if pool_records >= required_samples
+                        else (
+                            f"p-values need {required_samples} usable residuals "
+                            f"for alpha={min(lower_alpha, upper_alpha)}; "
+                            f"have {pool_records}"
+                        )
+                    ),
                 )
             )
             pending.append(
@@ -364,8 +465,13 @@ def forecast_across_loads(
         evidence=evidence,
         pool=pool,
         limitations=[
-            "Prequential percentiles are unavailable until the pool reaches "
-            "min_samples; early loads are evaluated without them.",
+            "Prequential p-values need "
+            f"{required_samples} usable residuals for alpha="
+            f"{min(lower_alpha, upper_alpha)}; early loads are evaluated "
+            "without flags.",
+            "The pool mixes series of different scales within a scope; "
+            "p-values are computed per residual, not per independent weekly "
+            "shock.",
             "available_on is the caller's observation week, not an "
             "authenticated arrival time.",
             "Synthetic residuals inherit the generator's behaviour; real "

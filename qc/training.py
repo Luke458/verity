@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 
 from .config import DatasetConfig
+from .conformal import wilson_interval
 from .decisions import (
     FEATURE_VERSION,
     FeatureEncoder,
@@ -42,6 +43,63 @@ def split_records(
         validation = train[-1:]
         train = train[:-1] or train
     return train, validation
+
+
+def _group_key(record: LabelRecord) -> str:
+    """Group sibling scenarios so they cannot straddle a split."""
+    suite_id = record.metadata.get("suite_id")
+    family = record.family or record.metadata.get("scenario_id")
+    return f"{suite_id or '-'}:{family or record.run_id}"
+
+
+def split_records_grouped(
+    records: Sequence[LabelRecord],
+    validation_fraction: float = 0.3,
+    test_fraction: float = 0.2,
+    seed: int = 0,
+) -> tuple[list[LabelRecord], list[LabelRecord], list[LabelRecord]]:
+    """Group-aware train/calibration/test split.
+
+    Sibling scenarios from one suite and fault family stay together, so the
+    calibration temperature and the reported test metrics are not fitted to
+    near-duplicates of the training cases.
+    """
+    if not 0.0 < validation_fraction < 1.0:
+        raise ValueError("validation_fraction must be in (0, 1)")
+    if not 0.0 <= test_fraction < 1.0:
+        raise ValueError("test_fraction must be in [0, 1)")
+    if validation_fraction + test_fraction >= 1.0:
+        raise ValueError("validation_fraction + test_fraction must be < 1")
+    groups: dict[str, list[LabelRecord]] = {}
+    for record in records:
+        groups.setdefault(_group_key(record), []).append(record)
+    keys = sorted(groups)
+    order = [keys[int(i)] for i in np.random.default_rng(seed).permutation(len(keys))]
+
+    n = len(records)
+    target_test = int(round(n * test_fraction))
+    target_validation = int(round(n * validation_fraction))
+    test: list[LabelRecord] = []
+    validation: list[LabelRecord] = []
+    train: list[LabelRecord] = []
+    for key in order:
+        bucket = groups[key]
+        if len(test) < target_test and len(train) + len(validation) > 0:
+            test.extend(bucket)
+        elif len(validation) < target_validation and len(train) > 0:
+            validation.extend(bucket)
+        else:
+            train.extend(bucket)
+    if not train:
+        train = validation or test
+        validation = []
+        test = []
+    if not test and not validation:
+        # Everything landed in train (tiny input): fall back to a row split.
+        train, validation = split_records(
+            records, validation_fraction=validation_fraction, seed=seed
+        )
+    return train, validation, test
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -127,6 +185,8 @@ def evaluate_decision_provider(
     correct_total = 0
     predictions_total = 0
     for field_name, head in provider.heads.items():
+        # A label outside the head's classes is a miss, not a free pass: it is
+        # counted in the denominator and never in the numerator.
         targets = np.asarray(
             [
                 head.classes.index(record.labels[field_name])
@@ -136,19 +196,32 @@ def evaluate_decision_provider(
             ]
         )
         valid = targets >= 0
-        probabilities = head.probabilities(features[valid])
+        probabilities = head.probabilities(features)
+        predictions = probabilities.argmax(axis=1)
+        correct = (predictions == targets) & valid
+        n_total = len(records)
+        n_correct = int(correct.sum())
+        ci_low, ci_high = wilson_interval(n_correct, n_total)
         valid_targets = targets[valid]
-        accuracy = float(
-            (probabilities.argmax(axis=1) == valid_targets).mean()
-        ) if len(valid_targets) else 0.0
         per_field[field_name] = {
-            "n": int(len(valid_targets)),
-            "accuracy": accuracy,
-            "brier": _brier(probabilities, valid_targets) if len(valid_targets) else 0.0,
-            "ece": _ece(probabilities, valid_targets) if len(valid_targets) else 0.0,
+            "n": n_total,
+            "n_unmapped": int((~valid).sum()),
+            "accuracy": n_correct / n_total if n_total else 0.0,
+            "accuracy_ci_low": ci_low,
+            "accuracy_ci_high": ci_high,
+            "brier": (
+                _brier(probabilities[valid], valid_targets)
+                if len(valid_targets)
+                else None
+            ),
+            "ece": (
+                _ece(probabilities[valid], valid_targets)
+                if len(valid_targets)
+                else None
+            ),
         }
-        correct_total += int((probabilities.argmax(axis=1) == valid_targets).sum())
-        predictions_total += int(len(valid_targets))
+        correct_total += n_correct
+        predictions_total += n_total
     return {
         "n": len(records),
         "fields": per_field,
@@ -166,6 +239,7 @@ def train_decision_provider(
     l2: float = 1.0,
     epochs: int = 400,
     learning_rate: float = 0.5,
+    test_fraction: float = 0.2,
 ) -> tuple[TrainedDecisionProvider, dict[str, Any]]:
     if len(records) < 4:
         raise ValueError("at least four label records are required")
@@ -184,8 +258,11 @@ def train_decision_provider(
                     f"label {value!r} is not a class of {field_name!r}"
                 )
 
-    train_records, validation_records = split_records(
-        records, validation_fraction=validation_fraction, seed=seed
+    train_records, validation_records, test_records = split_records_grouped(
+        records,
+        validation_fraction=validation_fraction,
+        test_fraction=test_fraction,
+        seed=seed,
     )
     train_features = np.asarray(
         [record.features for record in train_records], dtype=float
@@ -237,24 +314,31 @@ def train_decision_provider(
     metrics = {
         "train": evaluate_decision_provider(provider, train_records),
         "validation": evaluate_decision_provider(provider, validation_records),
+        "test": evaluate_decision_provider(provider, test_records),
         "temperatures": {
             name: head.temperature for name, head in heads.items()
         },
     }
     sources = sorted({record.source for record in records})
     families = sorted({str(record.family) for record in records})
+    production_eligible = bool(sources) and all(
+        source == "analyst" for source in sources
+    )
     provider.metadata = {
         "n_records": len(records),
         "n_train": len(train_records),
         "n_validation": len(validation_records),
+        "n_test": len(test_records),
         "label_sources": sources,
         "families": families,
         "feature_version": provider.encoder.feature_version,
+        "production_eligible": production_eligible,
         "warning": (
-            "Synthetic oracle labels validate plumbing only; retrain on real "
-            "analyst labels before relying on probabilities."
-            if sources == ["oracle"]
-            else "Trained on supplied labels; probability calibration is not certified."
+            "Trained on non-analyst labels (oracle/synthetic); plumbing only. "
+            "Retrain on real analyst labels before relying on probabilities."
+            if not production_eligible
+            else "Trained on analyst labels; probability calibration is not "
+            "certified."
         ),
     }
     return provider, metrics

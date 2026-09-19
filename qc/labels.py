@@ -18,6 +18,7 @@ from typing import Any
 from .config import DatasetConfig
 from .decisions import FeatureEncoder
 from .evidence_text import evidence_text
+from .fingerprints import manifest_data_fingerprint
 
 CAUSE_BY_ORACLE: dict[str, str] = {
     "missing_stores": "MISSING_STORES",
@@ -177,6 +178,7 @@ def build_oracle_labels(
         )
         record = oracle_labels_for_result(result, oracle)
         record.metadata["suite_id"] = suite.get("suite_id")
+        record.metadata["data_fingerprint"] = manifest_data_fingerprint(manifest)
         records.append(record)
     return records
 
@@ -184,14 +186,13 @@ def build_oracle_labels(
 def records_from_store(
     path: str | Path,
     dataset: str | None = None,
-    source: str | None = None,
 ) -> list[LabelRecord]:
     """Confirmed-only analyst labels from the durable store.
 
     Only runs whose latest outcome is confirmed are returned, so drafts and
-    model guesses never become training data. ``source`` defaults to the
-    outcome provenance (``analyst`` or ``synthetic``), so simulated feedback
-    can never be mistaken for real analyst labels. The
+    model guesses never become training data. The provenance recorded with the
+    outcome is authoritative and is never overridden by the caller: a
+    ``synthetic`` or unknown outcome can never be relabelled ``analyst``. The
     `requires_investigation` label uses the explicit outcome field when set,
     otherwise it is derived (a confirmed non-unknown root cause implies an
     investigation happened).
@@ -205,7 +206,7 @@ def records_from_store(
                 continue
             if not row.get("features"):
                 continue
-            record_source = source or str(row.get("provenance") or "analyst")
+            record_source = str(row.get("provenance") or "unknown")
             requires = row.get("requires_investigation")
             if requires is None:
                 requires_label = (

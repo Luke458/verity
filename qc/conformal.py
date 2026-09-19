@@ -6,6 +6,9 @@ exchangeable with future errors. When that rank exceeds ``n`` the interval is
 reported as ``INSUFFICIENT_CALIBRATION`` instead of being widened by
 assumption. Temporal drift breaks the exchangeability assumption and must be
 re-checked with prequential (across-load) calibration.
+
+Residuals must be finite; a non-finite value is rejected rather than sorted
+into the interval, because it silently destroys the coverage guarantee.
 """
 
 from __future__ import annotations
@@ -14,6 +17,38 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+
+
+def minimum_samples(alpha: float) -> int:
+    """Smallest n for which an interval at ``alpha`` exists.
+
+    ``ceil((n + 1) * (1 - alpha)) <= n`` rearranges to ``n >= 1/alpha - 1``;
+    the epsilon keeps float representation from rounding 0.2 up to 5.
+    """
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
+    return max(0, math.ceil(1.0 / alpha - 1.0 - 1e-9))
+
+
+def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score interval for a binomial proportion."""
+    if n == 0:
+        return 0.0, 1.0
+    phat = successes / n
+    denominator = 1.0 + z * z / n
+    centre = (phat + z * z / (2 * n)) / denominator
+    margin = (
+        z * math.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n)) / denominator
+    )
+    return max(0.0, centre - margin), min(1.0, centre + margin)
+
+
+def _require_finite(residuals: Sequence[float]) -> list[float]:
+    values = [float(value) for value in residuals]
+    for value in values:
+        if not math.isfinite(value):
+            raise ValueError("residuals must be finite")
+    return values
 
 
 @dataclass(frozen=True)
@@ -52,7 +87,7 @@ def conformal_interval(
 ) -> ConformalInterval:
     if not 0.0 < alpha < 1.0:
         raise ValueError("alpha must be in (0, 1)")
-    absolute = sorted(abs(float(value)) for value in residuals)
+    absolute = sorted(abs(value) for value in _require_finite(residuals))
     n = len(absolute)
     if n == 0:
         return ConformalInterval(
@@ -60,7 +95,7 @@ def conformal_interval(
         )
     rank = math.ceil((n + 1) * (1.0 - alpha))
     if rank > n:
-        required = math.ceil(1.0 / alpha) - 1
+        required = minimum_samples(alpha)
         return ConformalInterval(
             alpha,
             None,
@@ -78,13 +113,15 @@ def conformal_interval(
 
 def leave_one_out_coverage(
     residuals: Sequence[float], alpha: float = 0.05
-) -> dict[str, float]:
+) -> dict[str, float | int | bool | None]:
     """Fraction of residuals inside the interval built without them.
 
-    This is the honest small-sample check: in-sample coverage is trivially
-    at least ``1 - alpha`` when the interval exists at all.
+    This is the honest small-sample check: in-sample coverage is trivially at
+    least ``1 - alpha`` when the interval exists at all. Returns
+    ``coverage=None`` when no leave-one-out interval could be built, so
+    "not evaluable" is never reported as zero coverage.
     """
-    values = [float(value) for value in residuals]
+    values = _require_finite(residuals)
     covered = 0
     total = 0
     for index, value in enumerate(values):
@@ -101,5 +138,6 @@ def leave_one_out_coverage(
     return {
         "alpha": alpha,
         "n": total,
-        "coverage": covered / total if total else 0.0,
+        "evaluated": total > 0,
+        "coverage": covered / total if total else None,
     }

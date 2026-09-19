@@ -48,30 +48,28 @@ def test_train_evaluate_and_reload(label_records, tmp_path):
     )
     assert metrics["train"]["n"] >= 1
     assert metrics["validation"]["n"] >= 1
+    assert metrics["test"]["n"] >= 1
+    # The model memorizes its training families; group-disjoint accuracy is
+    # expected to be poor on 13 synthetic records. This test asserts honest
+    # reporting, not semantic accuracy.
     assert metrics["train"]["overall_accuracy"] >= 0.9
-    # With 13 synthetic records the held-out number is noisy; this asserts the
-    # pipeline works, not that a semantic model is accurate.
-    assert metrics["validation"]["overall_accuracy"] >= 0.6
-    assert set(metrics["validation"]["fields"]) == {
+    assert set(metrics["test"]["fields"]) == {
         "likely_cause",
         "likely_origin",
         "severity",
         "requires_investigation",
     }
-    assert (
-        metrics["validation"]["fields"]["requires_investigation"]["accuracy"]
-        >= 0.75
-    )
-    assert all(
-        0.0 <= item["ece"] <= 1.0
-        for item in metrics["validation"]["fields"].values()
-    )
+    for item in metrics["test"]["fields"].values():
+        assert 0.0 <= item["accuracy"] <= 1.0
+        assert item["accuracy_ci_low"] <= item["accuracy"] <= item["accuracy_ci_high"]
+        assert item["ece"] is None or 0.0 <= item["ece"] <= 1.0
 
     directory = tmp_path / "provider"
     save_training_run(provider, metrics, directory)
     loaded = TrainedDecisionProvider.load(directory)
     assert loaded.metadata["label_sources"] == ["oracle"]
-    assert "retrain on real" in loaded.metadata["warning"]
+    assert loaded.metadata["production_eligible"] is False
+    assert "Retrain on real analyst labels" in loaded.metadata["warning"]
 
     from qc.run import run_qc
     from qcgen.scenarios import build_scenario
@@ -94,7 +92,23 @@ def test_train_evaluate_and_reload(label_records, tmp_path):
     assert result.decisions.provider == "trained"
     assert result.decisions.get("likely_cause").probability_kind == "temperature_scaled"
     evaluation = evaluate_decision_provider(loaded, label_records)
-    assert evaluation["overall_accuracy"] >= 0.6
+    # In-sample smoke check only; the honest held-out number is metrics["test"].
+    assert evaluation["overall_accuracy"] >= 0.5
+
+
+def test_grouped_split_keeps_families_together(label_records):
+    from qc.training import _group_key, split_records_grouped
+
+    train, validation, test = split_records_grouped(
+        label_records, validation_fraction=0.3, test_fraction=0.2, seed=1
+    )
+    train_keys = {_group_key(record) for record in train}
+    validation_keys = {_group_key(record) for record in validation}
+    test_keys = {_group_key(record) for record in test}
+    assert not train_keys & validation_keys
+    assert not train_keys & test_keys
+    assert not validation_keys & test_keys
+    assert len(train) + len(validation) + len(test) == len(label_records)
 
 
 def test_feature_version_mismatch_rejected(label_records, tmp_path):

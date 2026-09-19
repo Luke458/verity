@@ -15,14 +15,50 @@ def _record(target: int, residual: float, series: str = "national") -> Calibrati
     )
 
 
-def test_pool_rejects_duplicate_targets_and_bounds_size():
+def test_pool_latest_wins_and_bounds_size():
     pool = CalibrationPool(max_records=3, min_samples=2)
     assert pool.add(_record(10, 1.0)) is True
-    assert pool.add(_record(10, 5.0)) is False
+    # A corrected residual supersedes the stale one instead of being rejected.
+    assert pool.add(_record(10, 5.0)) is True
+    assert [record.residual for record in pool.records] == [5.0]
     for target in (11, 12, 13):
         pool.add(_record(target, float(target)))
     assert len(pool.records) == 3
     assert [record.target_week for record in pool.records] == [11, 12, 13]
+
+
+def test_pool_rejects_non_finite_residuals():
+    pool = CalibrationPool(min_samples=1)
+    with pytest.raises(ValueError):
+        pool.add(_record(10, float("nan")))
+    with pytest.raises(ValueError):
+        pool.add(_record(11, float("inf")))
+
+
+def test_scope_partition_is_respected():
+    pool = CalibrationPool(min_samples=1)
+    pool.add(
+        CalibrationRecord("national", 10, 10, 1.0, run_id="a", scope="alpha")
+    )
+    pool.add(
+        CalibrationRecord("national", 10, 10, 9.0, run_id="b", scope="beta")
+    )
+    assert [r.scope for r in pool.usable(20, 20, scope="alpha")] == ["alpha"]
+    # z=5 is above alpha's single residual (extreme=1 -> 1.0) but below beta's
+    # (extreme=0 -> 0.5): the pools are genuinely separate.
+    assert pool.p_value(5.0, 20, 20, tail="lower", scope="alpha") == pytest.approx(1.0)
+    assert pool.p_value(5.0, 20, 20, tail="lower", scope="beta") == pytest.approx(0.5)
+
+
+def test_conformal_p_value_formula():
+    pool = CalibrationPool(min_samples=1)
+    for target, residual in ((1, -1.0), (2, 0.0), (3, 1.0), (4, 2.0)):
+        pool.add(_record(target, residual))
+    # 1 + #{r <= -1} = 2 over n + 1 = 5.
+    assert pool.p_value(-1.0, 10, 10, tail="lower") == pytest.approx(0.4)
+    # 1 + #{r >= 2} = 2 over 5.
+    assert pool.p_value(2.0, 10, 10, tail="upper") == pytest.approx(0.4)
+    assert pool.p_value(100.0, 10, 10, tail="upper") == pytest.approx(0.2)
 
 
 def test_leakage_rules_exclude_current_and_future():

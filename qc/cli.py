@@ -309,7 +309,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
     print(
         f"trained decision provider on {len(records)} records -> {args.out}"
     )
-    for split in ("train", "validation"):
+    for split in ("train", "validation", "test"):
         split_metrics = metrics[split]
         print(
             f"  {split:<11} n={split_metrics['n']:<4} "
@@ -638,26 +638,33 @@ def _cmd_evidence(args: argparse.Namespace) -> int:
 
 
 def _cmd_prequential(args: argparse.Namespace) -> int:
+    scope = getattr(args, "scope", None)
     pool = PrequentialStore(args.store).pool()
     usable = (
-        pool.usable(args.as_of, args.target_week)
+        pool.usable(args.as_of, args.target_week, scope=scope)
         if args.as_of is not None and args.target_week is not None
         else []
     )
     print(
-        f"prequential store={args.store} records={len(pool.records)} "
-        f"usable={len(usable)}"
+        f"prequential store={args.store} scope={scope or 'all'} "
+        f"records={len(pool.records)} usable={len(usable)}"
     )
     if (
         args.z is not None
         and args.as_of is not None
         and args.target_week is not None
     ):
-        percentile = pool.percentile(args.z, args.as_of, args.target_week)
+        percentile = pool.percentile(
+            args.z, args.as_of, args.target_week, scope=scope
+        )
+        lower_p = pool.p_value(
+            args.z, args.as_of, args.target_week, tail="lower", scope=scope
+        )
         interval = pool.interval(
-            0.0, args.as_of, args.target_week, alpha=args.alpha
+            0.0, args.as_of, args.target_week, alpha=args.alpha, scope=scope
         )
         print(f"  percentile={percentile}")
+        print(f"  lower_p_value={lower_p}")
         print(f"  interval={json.dumps(interval.to_dict(), default=_json_default)}")
     return 0
 
@@ -676,14 +683,22 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
         if args.heldout_seed:
             overrides["heldout_seeds"] = tuple(args.heldout_seed)
         plan = CohortPlan(**overrides)
-    result = run_cohort(plan, workdir=args.workdir, out_dir=args.out)
+    result = run_cohort(
+        plan,
+        workdir=args.workdir,
+        out_dir=args.out,
+        plan_path=args.plan,
+    )
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, default=_json_default))
         return 0
     print(
         f"cohort cases={result.metrics['cases']} "
         f"detection_rate={result.metrics['detection_rate']:.3f} "
+        f"ci=[{result.metrics['detection_rate_ci_low']:.3f}, "
+        f"{result.metrics['detection_rate_ci_high']:.3f}] "
         f"false_positive_rate={result.metrics['false_positive_rate']:.3f} "
+        f"expected_match={result.metrics['expected_status_match_rate']:.3f} "
         f"reconstruction={result.metrics['mean_reconstruction_score']:.3f}"
     )
     for check in result.gate_results:
@@ -695,6 +710,8 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
     print(
         f"  gates_passed={result.gates_passed} "
         f"production_eligible={result.production_eligible} "
+        f"plan_hash_verified={result.plan_hash_verified} "
+        f"git_dirty={result.git_dirty} "
         f"code_sha256={result.code_sha256[:12]}"
     )
     if args.out:
@@ -823,6 +840,7 @@ def _cmd_drift(args: argparse.Namespace) -> int:
         alpha=args.alpha,
         ratio_threshold=args.ratio_threshold,
         coverage_margin=args.coverage_margin,
+        scope=getattr(args, "scope", None),
     )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2, default=_json_default))
@@ -834,7 +852,9 @@ def _cmd_drift(args: argparse.Namespace) -> int:
     print(
         f"  scale_ratio={report.scale_ratio} "
         f"coverage={report.recent_coverage} "
-        f"expected={report.expected_coverage}"
+        f"ci=[{report.coverage_ci_low}, {report.coverage_ci_high}] "
+        f"expected={report.expected_coverage} "
+        f"common_series={report.common_series}"
     )
     print(f"  flags={report.flags} detail={report.detail}")
     return 0
@@ -1355,6 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
         "prequential", help="inspect the across-load calibration pool"
     )
     prequential.add_argument("--store", required=True)
+    prequential.add_argument("--scope", default=None, help="calibration scope filter")
     prequential.add_argument("--as-of", type=int, default=None)
     prequential.add_argument("--target-week", type=int, default=None)
     prequential.add_argument("--z", type=float, default=None)
@@ -1526,6 +1547,7 @@ def build_parser() -> argparse.ArgumentParser:
         "drift", help="monitor prequential calibration for drift"
     )
     drift.add_argument("--store", required=True)
+    drift.add_argument("--scope", default=None, help="calibration scope filter")
     drift.add_argument("--as-of", type=int, required=True)
     drift.add_argument("--target-week", type=int, required=True)
     drift.add_argument("--alpha", type=float, default=0.05)

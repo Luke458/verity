@@ -28,10 +28,10 @@ Statuses:
 | D Typed decisions / labels / training | `plumbing-only` | Trained on synthetic oracle labels; real-label accuracy pending. |
 | D Incident memory / agent handoff | `plumbing-only` | Draft contamination and untrusted-output handling fixes land in M4. |
 | C+ Relationships / reports / Delta source | `validated-synthetic` | Benjamini-Hochberg correction, active-week requirement, stable entity-set hashing (M2); reports/Delta still plumbing. |
-| Evaluation cohorts / conformal / prequential | `plumbing-only` | Gate enforcement and statistical corrections land in M3. |
+| Evaluation cohorts / conformal / prequential | `validated-synthetic` | Conformal p-values, finite guards, scope partitioning, paired champion tests, complete gate sets and plan-hash pinning (M3); real-label cohort still pending. |
 | Operations store / drift monitoring | `plumbing-only` | Provenance defaults and non-atomic weekly writes land in M4. |
 | Substrates ModernBERT-class text probe | `research` | Token-oracle tests only; real-label semantic benchmark pending. |
-| Champion provider bake-off | `plumbing-only` | Gate completeness, disjoint evaluation and provenance fixes land in M3. |
+| Champion provider bake-off | `validated-synthetic` | Complete gates, homogeneous cohorts, fail-closed identity, provenance without overrides, paired selection (M3); real-label selection pending. |
 | Onboarding | `plumbing-only` | Never executed against a real production table. |
 | Feedback simulation (synthetic analyst) | `research` | Feedback-loop plumbing; provenance must remain `synthetic`. |
 | Verity spine (replay/expectations/reference/RCA) | `plumbing-only` | Leakage guards are advisory until M3/M4. |

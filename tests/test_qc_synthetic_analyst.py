@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from qc.champion import eval_cases_from_suite, run_champion
+from qc.champion import EvalItem, eval_cases_from_suite, run_champion
 from qc.cli import main
 from qc.config import DatasetConfig
 from qc.labels import CAUSE_BY_ORACLE, records_from_store
@@ -89,21 +89,49 @@ def test_sloppy_profile_produces_drafts(tmp_path, suites):
     assert 0 < len(records) <= summary["runs"]
 
 
+def test_champion_rejects_mixed_cohorts(tmp_path, suites):
+    train_suite, eval_dir = suites
+    store = tmp_path / "mixed.db"
+    simulate_analyst(train_suite, store, profile="careful", seed=3)
+    # Store cohorts are run-keyed, suite cohorts are content-keyed: mixing
+    # them means disjointness cannot be verified, so the bake-off refuses.
+    with pytest.raises(ValueError, match="identity kinds"):
+        run_champion(
+            records_from_store(store),
+            eval_cases_from_suite(eval_dir),
+            DatasetConfig(),
+            gates={"min_overall_accuracy": 0.0, "min_cause_accuracy": 0.0},
+        )
+
+
 def test_champion_with_synthetic_store_stays_ineligible(tmp_path, suites):
     train_suite, eval_dir = suites
-    store = tmp_path / "champion.db"
-    simulate_analyst(train_suite, store, profile="careful", seed=3)
+    train_store = tmp_path / "train.db"
+    eval_store = tmp_path / "eval.db"
+    simulate_analyst(train_suite, train_store, profile="careful", seed=3)
+    simulate_analyst(eval_dir, eval_store, profile="careful", seed=4)
+    eval_items = [
+        EvalItem(
+            case_id=record.run_id,
+            family=record.family,
+            labels=record.labels,
+            record=record,
+            source=record.source,
+        )
+        for record in records_from_store(eval_store)
+    ]
 
     result = run_champion(
-        records_from_store(store),
-        eval_cases_from_suite(eval_dir),
+        records_from_store(train_store),
+        eval_items,
         DatasetConfig(),
         gates={"min_overall_accuracy": 0.0, "min_cause_accuracy": 0.0},
     )
-    assert result.champion is not None
+    assert result.champion in {None, "rule", "feature_head"}
     assert result.production_eligible is False
     assert result.provenance["labels"] == "synthetic"
     assert result.provenance["train_sources"] == ["synthetic"]
+    assert result.provenance["eval_sources"] == ["synthetic"]
 
 
 def test_cli_simulate_analyst(tmp_path, suites, capsys):

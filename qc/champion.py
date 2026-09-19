@@ -18,6 +18,7 @@ confirmed analyst outcomes.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -28,6 +29,7 @@ import numpy as np
 from .cohort import code_sha256
 from .config import DatasetConfig
 from .decisions import RuleDecisionProvider
+from .fingerprints import manifest_data_fingerprint
 from .labels import LabelRecord, oracle_labels_for_result
 from .text_provider import TextDecisionProvider, TextEmbedder, train_text_provider
 from .training import train_decision_provider
@@ -46,6 +48,8 @@ class EvalItem:
     labels: dict[str, str]
     result: Any | None = None
     record: LabelRecord | None = None
+    source: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -55,6 +59,8 @@ class ProviderScore:
     overall_accuracy: float = 0.0
     cause_accuracy: float = 0.0
     per_field: dict[str, float] = field(default_factory=dict)
+    correct_by_case: dict[str, int] = field(default_factory=dict)
+    total_by_case: dict[str, int] = field(default_factory=dict)
     cases: int = 0
     note: str = ""
 
@@ -70,6 +76,7 @@ class ChampionResult:
     scores: list[ProviderScore]
     provenance: dict[str, Any]
     code_sha256: str
+    selection: dict[str, Any] = field(default_factory=dict)
     limitations: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -111,21 +118,38 @@ def eval_cases_from_suite(
                 family=oracle.get("family"),
                 labels=record.labels,
                 result=result,
+                source="oracle",
+                metadata={
+                    "suite_id": suite.get("suite_id"),
+                    "scenario_id": scenario_id,
+                    "data_fingerprint": manifest_data_fingerprint(manifest),
+                },
             )
         )
     return items
 
 
-def _train_key(record: LabelRecord) -> str:
-    suite_id = record.metadata.get("suite_id")
-    scenario_id = record.metadata.get("scenario_id")
-    if suite_id and scenario_id:
-        return f"{suite_id}:{scenario_id}"
-    return str(record.run_id)
+def _identity_from_metadata(metadata: dict[str, Any], run_id: str) -> tuple[str, str]:
+    fingerprint = metadata.get("data_fingerprint")
+    if fingerprint:
+        return ("fingerprint", str(fingerprint))
+    scenario_id = metadata.get("scenario_id")
+    if scenario_id:
+        return (
+            "scenario",
+            f"{metadata.get('suite_id')}:{scenario_id}",
+        )
+    return ("run", str(run_id))
 
 
-def _record_key(item: EvalItem) -> str:
-    return item.case_id
+def _train_identity(record: LabelRecord) -> tuple[str, str]:
+    return _identity_from_metadata(record.metadata, record.run_id)
+
+
+def _eval_identity(item: EvalItem) -> tuple[str, str]:
+    if item.record is not None:
+        return _identity_from_metadata(item.record.metadata, item.record.run_id)
+    return _identity_from_metadata(item.metadata, item.case_id)
 
 
 def _normalize(value: Any) -> str:
@@ -145,15 +169,19 @@ def _score_result_provider(provider: Any, items: Sequence[EvalItem]) -> Provider
     relevant = [item for item in items if item.result is not None]
     correct: dict[str, int] = {}
     total: dict[str, int] = {}
+    correct_by_case: dict[str, int] = {}
+    total_by_case: dict[str, int] = {}
     for item in relevant:
         decisions = provider.decide(item.result)
         for field_name, expected in item.labels.items():
-            decision = decisions.get(field_name)
-            if decision is None:
-                continue
             total[field_name] = total.get(field_name, 0) + 1
-            if _normalize(decision.value) == expected:
+            total_by_case[item.case_id] = total_by_case.get(item.case_id, 0) + 1
+            decision = decisions.get(field_name)
+            if decision is not None and _normalize(decision.value) == expected:
                 correct[field_name] = correct.get(field_name, 0) + 1
+                correct_by_case[item.case_id] = (
+                    correct_by_case.get(item.case_id, 0) + 1
+                )
     per_field = _accuracy(correct, total)
     overall = (
         sum(correct.values()) / sum(total.values()) if sum(total.values()) else 0.0
@@ -164,6 +192,8 @@ def _score_result_provider(provider: Any, items: Sequence[EvalItem]) -> Provider
         overall_accuracy=overall,
         cause_accuracy=per_field.get("likely_cause", 0.0),
         per_field=per_field,
+        correct_by_case=correct_by_case,
+        total_by_case=total_by_case,
         cases=len(relevant),
     )
 
@@ -180,24 +210,32 @@ def _head_features(provider: Any, records: Sequence[LabelRecord]) -> np.ndarray:
 
 
 def _score_head_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderScore:
-    records = [item.record for item in items if item.record is not None]
+    relevant = [item for item in items if item.record is not None]
+    records: list[LabelRecord] = []
+    for item in relevant:
+        assert item.record is not None
+        records.append(item.record)
     if not records:
         raise ValueError("no record-based evaluation items")
     features = _head_features(provider, records)
     correct: dict[str, int] = {}
     total: dict[str, int] = {}
+    correct_by_case: dict[str, int] = {}
+    total_by_case: dict[str, int] = {}
     for field_name, head in provider.heads.items():
         probabilities = head.probabilities(features)
         predictions = [
             head.classes[int(index)] for index in probabilities.argmax(axis=1)
         ]
-        for record, predicted in zip(records, predictions):
+        for item, record, predicted in zip(relevant, records, predictions):
             expected = record.labels.get(field_name)
-            if expected is None:
-                continue
             total[field_name] = total.get(field_name, 0) + 1
-            if predicted == expected:
+            total_by_case[item.case_id] = total_by_case.get(item.case_id, 0) + 1
+            if expected is not None and predicted == expected:
                 correct[field_name] = correct.get(field_name, 0) + 1
+                correct_by_case[item.case_id] = (
+                    correct_by_case.get(item.case_id, 0) + 1
+                )
     per_field = _accuracy(correct, total)
     overall = (
         sum(correct.values()) / sum(total.values()) if sum(total.values()) else 0.0
@@ -208,6 +246,8 @@ def _score_head_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderSc
         overall_accuracy=overall,
         cause_accuracy=per_field.get("likely_cause", 0.0),
         per_field=per_field,
+        correct_by_case=correct_by_case,
+        total_by_case=total_by_case,
         cases=len(records),
     )
 
@@ -223,6 +263,31 @@ def _provider_failures(score: ProviderScore, gates: dict[str, float]) -> list[st
     if "min_cause_accuracy" in gates and score.cause_accuracy < gates["min_cause_accuracy"]:
         failed.append("min_cause_accuracy")
     return failed
+
+
+def _paired_p_value(a: ProviderScore, b: ProviderScore) -> float:
+    """Exact two-sided McNemar p-value over per-case correct-field counts.
+
+    Providers are scored on the same cases with the same fields, so a case is
+    a win/loss/tie by its correct-field count. Ties carry no information.
+    """
+    common = sorted(set(a.correct_by_case) & set(b.correct_by_case))
+    wins = sum(
+        1
+        for case_id in common
+        if a.correct_by_case.get(case_id, 0) > b.correct_by_case.get(case_id, 0)
+    )
+    losses = sum(
+        1
+        for case_id in common
+        if a.correct_by_case.get(case_id, 0) < b.correct_by_case.get(case_id, 0)
+    )
+    n = wins + losses
+    if n == 0:
+        return 1.0
+    k = min(wins, losses)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / (2**n)
+    return min(1.0, 2.0 * tail)
 
 
 def run_champion(
@@ -241,13 +306,36 @@ def run_champion(
         raise ValueError("evaluation requires at least one held-out case")
     config = config or DatasetConfig()
     gates = dict(gates or DEFAULT_CHAMPION_GATES)
+    missing = set(DEFAULT_CHAMPION_GATES) - set(gates)
+    if missing:
+        raise ValueError(
+            f"gates must be complete; missing {sorted(missing)}. Partial gates "
+            "silently drop checks, so they are rejected."
+        )
     unknown = set(gates) - set(DEFAULT_CHAMPION_GATES)
     if unknown:
         raise ValueError(f"unknown gates: {sorted(unknown)}")
 
-    train_keys = {_train_key(record) for record in train_records}
-    eval_keys = {_record_key(item) for item in eval_items}
-    overlap = train_keys & eval_keys
+    scorable = [item for item in eval_items if item.result is not None or item.record is not None]
+    if not scorable:
+        raise ValueError("no scorable evaluation items")
+    kinds = {"result" if item.result is not None else "record" for item in scorable}
+    if len(kinds) > 1:
+        raise ValueError(
+            "evaluation items must be homogeneous: mix of result-based and "
+            "record-based cases; score providers on one cohort at a time"
+        )
+
+    train_ids = {_train_identity(record) for record in train_records}
+    eval_ids = {_eval_identity(item) for item in eval_items}
+    train_kinds = {kind for kind, _ in train_ids}
+    eval_kinds = {kind for kind, _ in eval_ids}
+    if train_kinds and eval_kinds and train_kinds != eval_kinds:
+        raise ValueError(
+            "cannot verify training/evaluation disjointness: identity kinds "
+            f"{sorted(train_kinds)} vs {sorted(eval_kinds)}"
+        )
+    overlap = train_ids & eval_ids
     if overlap:
         raise ValueError(
             f"training and evaluation cases overlap: {sorted(overlap)}; "
@@ -323,6 +411,7 @@ def run_champion(
         if score.available and not _provider_failures(score, gates)
     ]
     champion: str | None = None
+    selection: dict[str, Any] = {"method": "paired_mcnemar", "alpha": 0.05}
     if eligible:
         eligible.sort(
             key=lambda score: (
@@ -331,6 +420,19 @@ def run_champion(
             )
         )
         champion = eligible[0].provider
+        if len(eligible) > 1:
+            p_value = _paired_p_value(eligible[0], eligible[1])
+            selection["compared_with"] = eligible[1].provider
+            selection["p_value"] = p_value
+            if p_value > 0.05:
+                champion = None
+                selection["reason"] = (
+                    "inconclusive: paired test does not separate the leaders"
+                )
+            else:
+                selection["reason"] = "paired test separates the leaders"
+        else:
+            selection["reason"] = "single eligible provider"
 
     sources = sorted({record.source for record in train_records})
     if sources == ["oracle"]:
@@ -339,12 +441,14 @@ def run_champion(
         label_provenance = "analyst"
     else:
         label_provenance = "+".join(sources) if sources else "none"
+    eval_sources = sorted({item.source or "unknown" for item in eval_items})
     provenance = {
         "train_records": len(train_records),
         "train_sources": sources,
-        "train_keys": len(train_keys),
+        "train_keys": len(train_ids),
         "eval_cases": len(eval_items),
-        "eval_keys": sorted(eval_keys),
+        "eval_keys": sorted(f"{kind}:{value}" for kind, value in eval_ids),
+        "eval_sources": eval_sources,
         "labels": label_provenance,
     }
     limitations = [
@@ -352,13 +456,19 @@ def run_champion(
         "A learned champion is only meaningful once trained on confirmed analyst outcomes and evaluated on a frozen held-out cohort.",
         "Gates are pre-registered; changing them after seeing results invalidates the comparison.",
     ]
+    production_eligible = (
+        sources == ["analyst"]
+        and eval_sources == ["analyst"]
+        and champion is not None
+    )
     return ChampionResult(
         champion=champion,
-        production_eligible=(label_provenance == "analyst") and champion is not None,
+        production_eligible=production_eligible,
         gates=gates,
         scores=scores,
         provenance=provenance,
         code_sha256=code_sha256(),
+        selection=selection,
         limitations=limitations,
     )
 
