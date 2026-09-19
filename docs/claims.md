@@ -40,6 +40,8 @@ Statuses:
 
 ## Not claimed
 
+- Production eligibility without a passing `qc pilot-check` and a frozen real held-out cohort (`docs/real-pilot.md`).
+
 - Azure Databricks or Spark execution. The supported backend is local
   versioned snapshots (Parquet scenarios, delta-rs `DeltaSource`).
 - Any real-world detection, precision, or calibration number.

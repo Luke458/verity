@@ -143,6 +143,9 @@ uv pip install --python .venv/bin/python -e ".[test]"
 .venv/bin/qc weekly --uri ./lake/fact --store data/qc.db \
   --calibration-store data/calibration.jsonl --out reports/weekly
 
+# Real-data pilot readiness gate (see docs/real-pilot.md)
+.venv/bin/qc pilot-check --store data/pilot.db --plan config/cohort.json
+
 # Tests
 .venv/bin/python -m pytest
 ```

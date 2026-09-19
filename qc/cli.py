@@ -45,6 +45,7 @@ from .expectations import apply_expectations, load_expectations
 from .incidents import IncidentStore, build_incident_record, symptom_tags_for
 from .jsonutil import dumps as _json_dumps
 from .labels import LabelStore, build_oracle_labels, records_from_store
+from .pilot import pilot_readiness
 from .prequential import PrequentialStore, prequential_sequence
 from .rca import investigate
 from .reconciliation import run_reconciliation  # noqa: F401  (public surface)
@@ -1221,6 +1222,23 @@ def _cmd_prequential_forecast(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pilot_check(args: argparse.Namespace) -> int:
+    report = pilot_readiness(
+        args.store, args.plan, min_analyst_labels=args.min_labels
+    )
+    if args.json:
+        print(_json_dumps(report.to_dict(), indent=2, default=_json_default))
+    else:
+        print(
+            f"pilot status={report.status} analyst={report.analyst_labels} "
+            f"synthetic={report.synthetic_labels} unknown={report.unknown_labels} "
+            f"plan_hash_verified={report.plan_hash_verified}"
+        )
+        for blocker in report.blockers:
+            print(f"  blocker: {blocker}")
+    return 0 if report.ready else 1
+
+
 def _cmd_weekly(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     # Storage credentials may arrive via the environment so they never appear
@@ -1665,6 +1683,15 @@ def build_parser() -> argparse.ArgumentParser:
     prequential_forecast.add_argument("--out", default=None, help="append pool JSONL")
     prequential_forecast.add_argument("--json", action="store_true")
     prequential_forecast.set_defaults(func=_cmd_prequential_forecast)
+
+    pilot = subparsers.add_parser(
+        "pilot-check", help="check real-data pilot prerequisites"
+    )
+    pilot.add_argument("--store", required=True, help="pilot SQLite store")
+    pilot.add_argument("--plan", default="config/cohort.json")
+    pilot.add_argument("--min-labels", type=int, default=10)
+    pilot.add_argument("--json", action="store_true")
+    pilot.set_defaults(func=_cmd_pilot_check)
 
     weekly = subparsers.add_parser(
         "weekly",
