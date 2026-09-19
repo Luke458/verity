@@ -1,0 +1,358 @@
+"""Frozen cohort evaluation with pre-registered gates (architecture §65-68).
+
+Dev and held-out seeds are disjoint and declared before the run; gates are
+evaluated on the held-out split only. Every case is written to JSONL, the plan
+and the engine source are hashed, and ``production_eligible`` is always False
+for synthetic cohorts: this harness exists so real-label cohorts can be run and
+judged honestly, not to certify synthetic accuracy.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .config import DatasetConfig
+from .run import run_qc
+
+DEFAULT_FAMILIES: tuple[str, ...] = (
+    "missing_stores",
+    "missing_products",
+    "entity_merge",
+    "new_store_backfill",
+    "history_truncation",
+    "commodity_remap",
+    "coding_error",
+    "warehouse_transform_error",
+    "recalculation",
+    "schema_failure",
+    "null_duplicate_storm",
+)
+DEFAULT_CONTROLS: tuple[str, ...] = ("market_movement",)
+DEFAULT_GATES: dict[str, float] = {
+    "min_detection_rate": 0.9,
+    "max_false_positive_rate": 0.1,
+    "min_lineage_first_divergence_accuracy": 0.9,
+}
+KNOWN_GATES: tuple[str, ...] = (
+    "min_detection_rate",
+    "max_false_positive_rate",
+    "min_reconstruction_score",
+    "min_lineage_first_divergence_accuracy",
+)
+LINEAGE_FAMILIES: dict[str, str] = {
+    "new_store_backfill": "source",
+    "expected_event": "source",
+    "history_truncation": "source",
+    "entity_merge": "source",
+    "coding_error": "coded",
+    "warehouse_transform_error": "warehouse",
+    "recalculation": "source",
+}
+
+
+@dataclass(frozen=True)
+class CohortPlan:
+    profile: str = "tiny"
+    families: tuple[str, ...] = DEFAULT_FAMILIES
+    controls: tuple[str, ...] = DEFAULT_CONTROLS
+    scenarios_per_family: int = 1
+    dev_seeds: tuple[int, ...] = (1101,)
+    heldout_seeds: tuple[int, ...] = (7101, 7102)
+    gates: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_GATES)
+    )
+
+    def __post_init__(self) -> None:
+        if set(self.dev_seeds) & set(self.heldout_seeds):
+            raise ValueError("dev and held-out seeds must be disjoint")
+        if self.scenarios_per_family < 1:
+            raise ValueError("scenarios_per_family must be >= 1")
+        unknown = set(self.gates) - set(KNOWN_GATES)
+        if unknown:
+            raise ValueError(f"unknown gates: {sorted(unknown)}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CohortPlan":
+        return cls(
+            profile=str(data.get("profile", "tiny")),
+            families=tuple(data.get("families", DEFAULT_FAMILIES)),
+            controls=tuple(data.get("controls", DEFAULT_CONTROLS)),
+            scenarios_per_family=int(data.get("scenarios_per_family", 1)),
+            dev_seeds=tuple(int(value) for value in data.get("dev_seeds", (1101,))),
+            heldout_seeds=tuple(
+                int(value) for value in data.get("heldout_seeds", (7101, 7102))
+            ),
+            gates=dict(data.get("gates", DEFAULT_GATES)),
+        )
+
+    @classmethod
+    def from_json(cls, path: str | Path) -> "CohortPlan":
+        return cls.from_dict(json.loads(Path(path).read_text()))
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(
+            json.dumps(self.to_dict(), indent=2, sort_keys=True)
+        )
+
+
+@dataclass
+class CohortCase:
+    case_id: str
+    split: str
+    seed: int
+    family: str
+    is_control: bool
+    engine_status: str
+    historical_status: str | None
+    expected_status: str | None
+    expected_class: str | None
+    injection_stage: str | None
+    first_divergence: str | None
+    reconstruction_score: float | None
+    explained_fraction: float
+    detected: bool
+    false_positive: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CohortResult:
+    plan: dict[str, Any]
+    metrics: dict[str, Any]
+    gate_results: list[dict[str, Any]]
+    gates_passed: bool
+    code_sha256: str
+    plan_sha256: str
+    production_eligible: bool = False
+    limitations: list[str] = field(default_factory=list)
+    cases: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def code_sha256(package_dir: str | Path | None = None) -> str:
+    directory = Path(package_dir or Path(__file__).parent)
+    digest = hashlib.sha256()
+    for path in sorted(directory.glob("*.py")):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _rate(values: list[bool]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
+    faults = [case for case in cases if not case.is_control]
+    controls = [case for case in cases if case.is_control]
+    comparable = [
+        case
+        for case in faults
+        if case.family in LINEAGE_FAMILIES and case.injection_stage is not None
+    ]
+    reconstruction = [
+        case.reconstruction_score
+        for case in faults
+        if case.reconstruction_score is not None
+    ]
+    expected_contracts = [
+        case for case in faults if case.family in ("schema_failure", "null_duplicate_storm")
+    ]
+    return {
+        "cases": len(cases),
+        "fault_cases": len(faults),
+        "control_cases": len(controls),
+        "detection_rate": _rate([case.detected for case in faults]),
+        "false_positive_rate": _rate(
+            [case.historical_status not in (None, "PASS") for case in controls]
+        ),
+        "contract_failure_rate": _rate(
+            [case.engine_status == "DATA_CONTRACT_FAILURE" for case in expected_contracts]
+        ),
+        "mean_reconstruction_score": (
+            sum(reconstruction) / len(reconstruction) if reconstruction else 0.0
+        ),
+        "lineage_first_divergence_accuracy": _rate(
+            [
+                case.first_divergence == LINEAGE_FAMILIES[case.family]
+                for case in comparable
+            ]
+        ),
+        "lineage_comparable": len(comparable),
+    }
+
+
+def _gate_results(metrics: dict[str, Any], gates: dict[str, float]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    if "min_detection_rate" in gates:
+        threshold = gates["min_detection_rate"]
+        checks.append(
+            {
+                "gate": "min_detection_rate",
+                "threshold": threshold,
+                "actual": metrics["detection_rate"],
+                "passed": metrics["detection_rate"] >= threshold,
+            }
+        )
+    if "max_false_positive_rate" in gates:
+        threshold = gates["max_false_positive_rate"]
+        checks.append(
+            {
+                "gate": "max_false_positive_rate",
+                "threshold": threshold,
+                "actual": metrics["false_positive_rate"],
+                "passed": metrics["false_positive_rate"] <= threshold,
+            }
+        )
+    if "min_reconstruction_score" in gates:
+        threshold = gates["min_reconstruction_score"]
+        checks.append(
+            {
+                "gate": "min_reconstruction_score",
+                "threshold": threshold,
+                "actual": metrics["mean_reconstruction_score"],
+                "passed": metrics["mean_reconstruction_score"] >= threshold,
+            }
+        )
+    if "min_lineage_first_divergence_accuracy" in gates:
+        threshold = gates["min_lineage_first_divergence_accuracy"]
+        actual = metrics["lineage_first_divergence_accuracy"]
+        checks.append(
+            {
+                "gate": "min_lineage_first_divergence_accuracy",
+                "threshold": threshold,
+                "actual": actual,
+                "passed": (
+                    actual >= threshold if metrics["lineage_comparable"] else False
+                ),
+            }
+        )
+    return checks
+
+
+def run_cohort(
+    plan: CohortPlan | None = None,
+    workdir: str | Path = "reports/cohort",
+    config: DatasetConfig | None = None,
+    out_dir: str | Path | None = None,
+) -> CohortResult:
+    from qcgen.config import suite_config
+    from qcgen.scenarios import build_scenario
+    from qcgen.sources import ScenarioSource
+
+    plan = plan or CohortPlan()
+    config = config or DatasetConfig()
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    cases: list[CohortCase] = []
+    splits = (("dev", plan.dev_seeds), ("heldout", plan.heldout_seeds))
+    for split, seeds in splits:
+        for seed in seeds:
+            for family in plan.families + plan.controls:
+                is_control = family in plan.controls
+                for index in range(plan.scenarios_per_family):
+                    case_id = f"{split}-{seed}-{family}-{index}"
+                    root = workdir / case_id
+                    built = build_scenario(
+                        suite_config(plan.profile, seed=seed),
+                        index,
+                        root,
+                        family,
+                        ("source", "coded", "warehouse", "report"),
+                    )
+                    manifest = built.manifest
+                    case = manifest["cases"][0] if manifest.get("cases") else {}
+                    result = run_qc(
+                        ScenarioSource(built.directory),
+                        manifest["current_version"],
+                        manifest["previous_version"],
+                        config,
+                        expected_events=manifest.get("expected_events", []),
+                    )
+                    historical = (
+                        result.machine["historical_revision"]["status"]
+                        if result.machine.get("historical_revision")
+                        else None
+                    )
+                    cases.append(
+                        CohortCase(
+                            case_id=case_id,
+                            split=split,
+                            seed=seed,
+                            family=family,
+                            is_control=is_control,
+                            engine_status=result.status,
+                            historical_status=historical,
+                            expected_status=case.get("expected_status"),
+                            expected_class=case.get("expected_class"),
+                            injection_stage=case.get("injection_stage"),
+                            first_divergence=(
+                                result.lineage.first_divergence
+                                if result.lineage is not None
+                                else None
+                            ),
+                            reconstruction_score=(
+                                result.counterfactual.reconciliation_score
+                                if result.counterfactual is not None
+                                else None
+                            ),
+                            explained_fraction=(
+                                result.attribution.explained_fraction
+                                if result.attribution is not None
+                                else 0.0
+                            ),
+                            detected=result.status != "PASS",
+                            false_positive=(
+                                is_control
+                                and historical not in (None, "PASS")
+                            ),
+                        )
+                    )
+
+    heldout = [case for case in cases if case.split == "heldout"]
+    dev = [case for case in cases if case.split == "dev"]
+    metrics = _metrics(heldout)
+    metrics["dev"] = _metrics(dev)
+    gates = _gate_results(metrics, plan.gates)
+    result = CohortResult(
+        plan=plan.to_dict(),
+        metrics=metrics,
+        gate_results=gates,
+        gates_passed=all(check["passed"] for check in gates),
+        code_sha256=code_sha256(),
+        plan_sha256=hashlib.sha256(
+            json.dumps(plan.to_dict(), sort_keys=True).encode()
+        ).hexdigest(),
+        limitations=[
+            "Synthetic oracle labels validate the harness and the engine's "
+            "deterministic semantics, not real refresh accuracy.",
+            "Held-out seeds are disjoint from dev seeds but share the same "
+            "generator; generator bias is not measured.",
+            "Gates are evaluated on the held-out split only; changing the plan "
+            "after seeing results invalidates the evaluation.",
+        ],
+        cases=[case.to_dict() for case in cases],
+    )
+    if out_dir is not None:
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "cohort.json").write_text(
+            json.dumps(result.to_dict(), indent=2, sort_keys=True, default=str)
+        )
+        (out / "cases.jsonl").write_text(
+            "\n".join(json.dumps(case.to_dict(), sort_keys=True) for case in cases)
+            + "\n"
+        )
+    return result

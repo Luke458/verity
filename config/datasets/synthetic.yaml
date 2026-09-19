@@ -1,0 +1,26 @@
+# Synthetic retail QC dataset.
+# Profiles: tiny | small | full. Any field below overrides the profile default.
+dataset: synthetic
+profile: small
+seed: 7
+
+# Fault families to schedule across scenarios. Controls are interleaved and are
+# expected to produce genuine movement rather than a pipeline defect.
+faults:
+  include:
+    - missing_stores
+    - new_store_backfill
+    - history_truncation
+    - commodity_remap
+    - coding_error
+    - warehouse_transform_error
+    - recalculation
+    - schema_failure
+    - null_duplicate_storm
+    - expected_event
+  controls:
+    - market_movement
+
+# Stages written for the current version. Use "all" to write every pipeline
+# stage (source, coded, warehouse, report) for lineage experiments.
+stages: report

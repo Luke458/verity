@@ -1,0 +1,11 @@
+{
+  "profile": "tiny",
+  "scenarios_per_family": 2,
+  "dev_seeds": [1101, 1102],
+  "heldout_seeds": [7101, 7102, 7103],
+  "gates": {
+    "min_detection_rate": 0.9,
+    "max_false_positive_rate": 0.1,
+    "min_lineage_first_divergence_accuracy": 0.9
+  }
+}
