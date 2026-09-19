@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -26,11 +25,12 @@ def suites(tmp_path_factory):
 
 
 def _oracle_cause(suite_dir: Path, run_id: str) -> str:
+    from qcgen.oracle_vault import OracleVault, default_oracle_root
+
     scenario = run_id.split(":", 1)[1]
-    manifest = json.loads(
-        (Path(suite_dir) / scenario / "manifest.json").read_text()
-    )
-    expected_class = manifest["cases"][0]["expected_class"]
+    vault = OracleVault(default_oracle_root(suite_dir))
+    case = vault.first_case(scenario)
+    expected_class = case["expected_class"]
     return CAUSE_BY_ORACLE.get(expected_class, "UNKNOWN")
 
 

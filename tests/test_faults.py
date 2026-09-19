@@ -5,6 +5,7 @@ import pytest
 
 from qcgen.config import ALL_FAMILIES
 from qcgen.scenarios import build_scenario
+from qcgen.spec import FAMILY_SPECS
 from qcgen.stages import STAGE_ORDER
 
 
@@ -13,11 +14,17 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
     stages = ("source", "coded", "warehouse", "report")
     result = build_scenario(tiny_config, 0, tmp_path, family, stages)
     manifest = result.manifest
-    case = manifest["cases"][0]
+    oracle = result.oracle
+    case = oracle["cases"][0]
     effect = case["injected_effect"]
 
     assert case["family"] == family
-    assert case["injection_stage"] == manifest["fault"]["stage"]
+    assert case["injection_stage"] == oracle["fault"]["stage"]
+    spec = FAMILY_SPECS[family]
+    assert case["kind"] == spec.kind
+    assert case["expected_status"] == spec.expected_status
+    assert case["expected_class"] == spec.expected_class
+    assert case["expected_origin"] == spec.expected_origin
     assert case["expected_status"] in {
         "INVESTIGATE",
         "PASS",
@@ -55,11 +62,11 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
         assert all(store.startswith("S9") for store in case["affected"]["stores"])
         assert case["kind"] == "fault"
         assert case["expected_class"] == "backfill"
-        assert manifest["expected_events"] == []
+        assert oracle["expected_events"] == []
     elif family == "expected_event":
         assert case["kind"] == "expected_event"
         assert case["expected_status"] == "PASS_WITH_EXPLANATION"
-        events = manifest["expected_events"]
+        events = oracle["expected_events"]
         assert len(events) == 1
         assert events[0]["entity_ids"] == case["affected"]["stores"]
         assert events[0]["event_type"] == "new_store_historical_backfill"
@@ -101,7 +108,7 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
         assert effect["units"] > 0
     elif family == "market_movement":
         assert case["kind"] == "control"
-        assert case["expected_status"] == "PASS"
+        assert case["expected_status"] == "INVESTIGATE"
         assert effect["dollar"] < 0
         assert effect["units"] < 0
     else:
@@ -111,6 +118,6 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
 def test_source_fault_propagates_to_every_stage(tiny_config, tmp_path):
     stages = ("source", "coded", "warehouse", "report")
     result = build_scenario(tiny_config, 0, tmp_path, "missing_stores", stages)
-    case = result.manifest["cases"][0]
+    case = result.oracle["cases"][0]
     for stage in stages:
         assert case["effects"][stage].get("dollar", 0.0) < 0, stage

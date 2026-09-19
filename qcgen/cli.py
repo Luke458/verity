@@ -46,6 +46,9 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     )
     suite_dir = generate_suite(config, args.out, args.scenarios, args.suite, stages)
     suite = json.loads((suite_dir / "suite.json").read_text())
+    from .oracle_vault import OracleVault, default_oracle_root
+
+    vault = OracleVault(default_oracle_root(suite_dir))
 
     print(
         f"suite {suite['suite_id']}  profile={suite['profile']}  "
@@ -54,10 +57,12 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     print(f"  stages: {', '.join(suite['stages'])}")
     print(f"  output: {suite_dir}")
     for scenario in suite["scenarios"]:
+        oracle = vault.read(scenario["scenario_id"]) or {}
+        case = oracle["cases"][0] if oracle.get("cases") else {}
         rows = ", ".join(f"{k}={v}" for k, v in scenario["row_counts"].items())
         print(
-            f"  {scenario['scenario_id']}  {scenario['family']:<26} "
-            f"{scenario['expected_class']:<24} rows({rows})"
+            f"  {scenario['scenario_id']}  {str(oracle.get('family')):<26} "
+            f"{str(case.get('expected_class')):<24} rows({rows})"
         )
     return 0
 

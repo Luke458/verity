@@ -271,15 +271,19 @@ def run_cohort(
                         root,
                         family,
                         ("source", "coded", "warehouse", "report"),
+                        oracle_root=workdir / "_oracle",
                     )
                     manifest = built.manifest
-                    case = manifest["cases"][0] if manifest.get("cases") else {}
+                    case = (
+                        built.oracle["cases"][0]
+                        if built.oracle.get("cases")
+                        else {}
+                    )
                     run_result = run_qc(
                         ScenarioSource(built.directory),
                         manifest["current_version"],
                         manifest["previous_version"],
                         config,
-                        expected_events=manifest.get("expected_events", []),
                     )
                     historical = (
                         run_result.machine["historical_revision"]["status"]

@@ -140,7 +140,9 @@ def simulate_analyst(
     store_path: str | Path,
     profile: str | AnalystProfile = "typical",
     seed: int = 0,
+    oracle_dir: str | Path | None = None,
 ) -> dict[str, Any]:
+    from qcgen.oracle_vault import OracleVault, default_oracle_root
     from qcgen.sources import ScenarioSource
 
     from .run import run_qc
@@ -149,6 +151,7 @@ def simulate_analyst(
     rng = np.random.default_rng(seed)
     suite_dir = Path(suite_dir)
     suite = json.loads((suite_dir / "suite.json").read_text())
+    vault = OracleVault(oracle_dir or default_oracle_root(suite_dir))
     summary: dict[str, Any] = {
         "profile": profile.name,
         "store": str(store_path),
@@ -162,18 +165,19 @@ def simulate_analyst(
 
     with SqliteStore(store_path) as store:
         for entry in suite["scenarios"]:
-            scenario_dir = suite_dir / entry["scenario_id"]
+            scenario_id = entry["scenario_id"]
+            oracle_payload = vault.require(scenario_id)
+            scenario_dir = suite_dir / scenario_id
             manifest = json.loads((scenario_dir / "manifest.json").read_text())
-            run_id = f"{suite.get('suite_id')}:{entry['scenario_id']}"
+            run_id = f"{suite.get('suite_id')}:{scenario_id}"
             result = run_qc(
                 ScenarioSource(scenario_dir),
                 manifest["current_version"],
                 manifest["previous_version"],
-                expected_events=manifest.get("expected_events", []),
                 run_id=run_id,
             )
             store.record_result(result)
-            oracle = oracle_labels_for_result(result, manifest).labels
+            oracle = oracle_labels_for_result(result, oracle_payload).labels
             week = int(manifest["n_current_weeks"])
 
             cause = _perturb(

@@ -142,33 +142,40 @@ def _family_checks(
         _check(checks, f"{case_id}: known family", False, family)
 
 
-def verify_suite(suite_dir: str | Path) -> tuple[bool, dict]:
+def verify_suite(
+    suite_dir: str | Path, oracle_dir: str | Path | None = None
+) -> tuple[bool, dict]:
+    from .oracle_vault import OracleVault, default_oracle_root
+
     suite_dir = Path(suite_dir)
     suite_path = suite_dir / "suite.json"
     if not suite_path.exists():
         raise FileNotFoundError(f"no suite.json under {suite_dir}")
     suite = json.loads(suite_path.read_text())
+    vault = OracleVault(oracle_dir or default_oracle_root(suite_dir))
 
     checks: list[dict] = []
     for entry in suite["scenarios"]:
-        scenario_dir = suite_dir / entry["scenario_id"]
+        scenario_id = entry["scenario_id"]
+        scenario_dir = suite_dir / scenario_id
         manifest = json.loads((scenario_dir / "manifest.json").read_text())
+        oracle = vault.require(scenario_id)
 
         for version, version_info in manifest["versions"].items():
             for stage, fingerprint in version_info["fingerprints"].items():
                 path = scenario_dir / "versions" / version / stage / "fact.parquet"
                 if not path.exists():
-                    _check(checks, f"{entry['scenario_id']}/{version}/{stage}: file exists", False, path)
+                    _check(checks, f"{scenario_id}/{version}/{stage}: file exists", False, path)
                     continue
                 actual = frame_fingerprint(pd.read_parquet(path))
                 _check(
                     checks,
-                    f"{entry['scenario_id']}/{version}/{stage}: fingerprint",
+                    f"{scenario_id}/{version}/{stage}: fingerprint",
                     actual == fingerprint,
                     actual,
                 )
 
-        for case in manifest["cases"]:
+        for case in oracle["cases"]:
             _check(
                 checks,
                 f"{case['case_id']}: known status",

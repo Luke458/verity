@@ -15,14 +15,14 @@ Statuses:
 
 | Milestone | Status | Evidence / caveat |
 |---|---|---|
-| A0 Synthetic world, fault oracle, suite harness | `validated-synthetic` | `tests/test_dgp.py`, `tests/test_faults.py`, `tests/test_scenarios.py` |
+| A0 Synthetic world, fault oracle, suite harness | `validated-synthetic` | `tests/test_dgp.py`, `tests/test_faults.py`, `tests/test_scenarios.py`; family expectations come from one spec table (`qcgen/spec.py`). |
 | A Data contracts | `plumbing-only` | Negative controls cover required columns, dtypes, week progression, nulls, duplicates. |
 | A Version pair / revision cube | `plumbing-only` | Grain semantics still loose (see M2 plan). |
 | A Lifecycle / attribution | `plumbing-only` | Multi-class events, offsetting explanations and reclassification accounting are unsound until M2. |
 | B Reconciliation | `plumbing-only` | Hierarchy check is a tautology; mass balance compares global totals only. M2 replaces it. |
 | B Counterfactual | `plumbing-only` | Currently arithmetic subtraction, not reconstruction; score can be 1.0 vacuously. M2 replaces it. |
 | B Lineage first divergence | `plumbing-only` | Stage-local; both-version fingerprints land in M2. |
-| B Expected events / shadow mode | `plumbing-only` | Registry currently auto-loaded from the generator manifest; blind separation lands in M1. |
+| B Expected events / shadow mode | `plumbing-only` | Blind oracle separation landed: ground truth lives in a vault outside the scenario data, `qc/` cannot import `qcgen`, and `qc shadow` is blind by default (`--with-registry` is plumbing). Detection semantics still weak until M2. |
 | C Temporal intelligence / forecast calibration | `plumbing-only` | Synthetic-only; conformal/prequential fixes land in M3. |
 | 11 TSPulse adapter + benchmark | `research` | Weekly-length suitability gate unresolved; never production-eligible. |
 | D Typed decisions / labels / training | `plumbing-only` | Trained on synthetic oracle labels; real-label accuracy pending. |

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DatasetConfig
+from .registry import StaticRegistry
 
 
 @dataclass(frozen=True)
@@ -186,7 +187,7 @@ def replay(
                 case.current_version,
                 case.previous_version,
                 config,
-                expected_events=list(case.expected_events),
+                registry=StaticRegistry(list(case.expected_events)),
                 run_id=case.case_id,
             )
         except Exception as error:  # noqa: BLE001 - recorded, not hidden

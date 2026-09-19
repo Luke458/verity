@@ -30,6 +30,7 @@ from .lifecycle import (
 from .lineage import LineageResult, analyze_lineage
 from .reconciliation import ReconciliationResult, run_reconciliation
 from .reference import ReferenceSpec, compare_reference, reference_mismatches
+from .registry import RegistryStore, as_registry
 from .relationships import EntityRelationship, detect_relationships
 from .revision import base_keys, build_revision_cube, headline_keys
 from .source import VersionSource
@@ -221,14 +222,14 @@ def run_qc(
     current_id: str,
     previous_id: str,
     config: DatasetConfig | None = None,
-    expected_events: list[dict[str, Any]] | None = None,
+    registry: RegistryStore | list[dict[str, Any]] | None = None,
     run_id: str | None = None,
     decision_provider: DecisionProvider | None = None,
     reference_frame: pd.DataFrame | None = None,
     reference_spec: ReferenceSpec | None = None,
 ) -> QCRunResult:
     config = config or DatasetConfig()
-    expected_events = expected_events or []
+    registry = as_registry(registry)
     run_id = run_id or f"{previous_id}->{current_id}"
 
     previous_available = set(source.available_stages(previous_id))
@@ -321,7 +322,7 @@ def run_qc(
     )
     relationships = detect_relationships(previous, current, pair, config)
 
-    attribution = explain_revision(cubes["base"], events, expected_events, config)
+    attribution = explain_revision(cubes["base"], events, registry.events(), config)
     counterfactual = reconstruct_counterfactual(cubes["base"], events, config)
     reconciliation = run_reconciliation(current, contract_current_fact, config)
     lineage = analyze_lineage(

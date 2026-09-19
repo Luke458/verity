@@ -114,9 +114,10 @@ class LabelStore:
         return len(self.load())
 
 
-def oracle_labels_for_result(result: Any, manifest: dict) -> LabelRecord:
-    case: dict = manifest.get("cases", [{}])[0] if manifest.get("cases") else {}
-    family = manifest.get("family")
+def oracle_labels_for_result(result: Any, oracle: dict) -> LabelRecord:
+    """Oracle labels from a vault payload (never from the scenario manifest)."""
+    case: dict = oracle.get("cases", [{}])[0] if oracle.get("cases") else {}
+    family = oracle.get("family")
     expected_class = str(case.get("expected_class", "unknown"))
     expected_origin = str(case.get("expected_origin") or "unknown").lower()
     expected_status = str(case.get("expected_status", "PASS"))
@@ -136,7 +137,7 @@ def oracle_labels_for_result(result: Any, manifest: dict) -> LabelRecord:
         features=encoder.encode(result).tolist(),
         feature_version=encoder.feature_version,
         metadata={
-            "scenario_id": manifest.get("scenario_id"),
+            "scenario_id": oracle.get("scenario_id"),
             "expected_status": expected_status,
             "expected_class": expected_class,
         },
@@ -144,10 +145,13 @@ def oracle_labels_for_result(result: Any, manifest: dict) -> LabelRecord:
     )
 
 
-def build_oracle_labels(    suite_dir: str | Path,
+def build_oracle_labels(
+    suite_dir: str | Path,
     config: DatasetConfig | None = None,
     scenario_ids: Sequence[str] | None = None,
+    oracle_dir: str | Path | None = None,
 ) -> list[LabelRecord]:
+    from qcgen.oracle_vault import OracleVault, default_oracle_root
     from qcgen.sources import ScenarioSource
 
     from .run import run_qc
@@ -155,21 +159,23 @@ def build_oracle_labels(    suite_dir: str | Path,
     suite_dir = Path(suite_dir)
     config = config or DatasetConfig()
     suite = json.loads((suite_dir / "suite.json").read_text())
+    vault = OracleVault(oracle_dir or default_oracle_root(suite_dir))
     selected = set(scenario_ids) if scenario_ids else None
     records: list[LabelRecord] = []
     for entry in suite["scenarios"]:
-        if selected is not None and entry["scenario_id"] not in selected:
+        scenario_id = entry["scenario_id"]
+        if selected is not None and scenario_id not in selected:
             continue
-        scenario_dir = suite_dir / entry["scenario_id"]
+        oracle = vault.require(scenario_id)
+        scenario_dir = suite_dir / scenario_id
         manifest = json.loads((scenario_dir / "manifest.json").read_text())
         result = run_qc(
             ScenarioSource(scenario_dir),
             manifest["current_version"],
             manifest["previous_version"],
             config,
-            expected_events=manifest.get("expected_events", []),
         )
-        record = oracle_labels_for_result(result, manifest)
+        record = oracle_labels_for_result(result, oracle)
         record.metadata["suite_id"] = suite.get("suite_id")
         records.append(record)
     return records

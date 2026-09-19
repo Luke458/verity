@@ -79,8 +79,11 @@ class ChampionResult:
 
 
 def eval_cases_from_suite(
-    suite_dir: str | Path, config: DatasetConfig | None = None
+    suite_dir: str | Path,
+    config: DatasetConfig | None = None,
+    oracle_dir: str | Path | None = None,
 ) -> list[EvalItem]:
+    from qcgen.oracle_vault import OracleVault, default_oracle_root
     from qcgen.sources import ScenarioSource
 
     from .run import run_qc
@@ -88,22 +91,24 @@ def eval_cases_from_suite(
     suite_dir = Path(suite_dir)
     config = config or DatasetConfig()
     suite = json.loads((suite_dir / "suite.json").read_text())
+    vault = OracleVault(oracle_dir or default_oracle_root(suite_dir))
     items: list[EvalItem] = []
     for entry in suite["scenarios"]:
-        scenario_dir = suite_dir / entry["scenario_id"]
+        scenario_id = entry["scenario_id"]
+        oracle = vault.require(scenario_id)
+        scenario_dir = suite_dir / scenario_id
         manifest = json.loads((scenario_dir / "manifest.json").read_text())
         result = run_qc(
             ScenarioSource(scenario_dir),
             manifest["current_version"],
             manifest["previous_version"],
             config,
-            expected_events=manifest.get("expected_events", []),
         )
-        record = oracle_labels_for_result(result, manifest)
+        record = oracle_labels_for_result(result, oracle)
         items.append(
             EvalItem(
-                case_id=f"{suite.get('suite_id')}:{manifest.get('scenario_id', entry['scenario_id'])}",
-                family=manifest.get("family"),
+                case_id=f"{suite.get('suite_id')}:{scenario_id}",
+                family=oracle.get("family"),
                 labels=record.labels,
                 result=result,
             )

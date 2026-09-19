@@ -18,6 +18,7 @@ from .config import CONTROL_FAMILIES, STAGES, SuiteConfig
 from .dgp import generate_history, week_end_dates
 from .faults import INJECTORS, FaultContext
 from .oracle import GroundTruthCase, effect_delta, json_default
+from .oracle_vault import OracleVault, default_oracle_root, default_registry_root
 from .snapshots import SnapshotStore
 from .stages import ADVANCE, STAGE_ORDER, State, build_source
 from .universe import generate_universe
@@ -35,6 +36,7 @@ class ScenarioResult:
     scenario_id: str
     directory: Path
     manifest: dict
+    oracle: dict
 
 
 def fault_spec(
@@ -130,6 +132,7 @@ def build_scenario(
     suite_dir: Path,
     family: str,
     stages: tuple[str, ...],
+    oracle_root: str | Path | None = None,
 ) -> ScenarioResult:
     scenario_id = f"scenario-{index:04d}"
     seed = config.seed * 1000 + index
@@ -236,23 +239,35 @@ def build_scenario(
         "scenario_id": scenario_id,
         "seed": seed,
         "profile": config.profile,
-        "family": family,
-        "fault": asdict(spec),
         "previous_version": "V0001",
         "current_version": "V0002",
         "n_previous_weeks": current_week - 1,
         "n_current_weeks": current_week,
         "stages_written": list(stages),
         "stages_computed": list(STAGE_ORDER),
+        "versions": {"V0001": previous_manifest, "V0002": current_manifest},
+    }
+    oracle = {
+        "scenario_id": scenario_id,
+        "seed": seed,
+        "profile": config.profile,
+        "family": family,
+        "fault": asdict(spec),
         "cases": [case.to_dict()],
         "expected_events": [case.event_registry] if case.event_registry else [],
-        "versions": {"V0001": previous_manifest, "V0002": current_manifest},
     }
     scenario_dir.mkdir(parents=True, exist_ok=True)
     (scenario_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, default=json_default)
     )
-    return ScenarioResult(scenario_id=scenario_id, directory=scenario_dir, manifest=manifest)
+    if oracle_root is not None:
+        OracleVault(oracle_root).write(scenario_id, oracle)
+    return ScenarioResult(
+        scenario_id=scenario_id,
+        directory=scenario_dir,
+        manifest=manifest,
+        oracle=oracle,
+    )
 
 
 def generate_suite(
@@ -261,6 +276,8 @@ def generate_suite(
     n_scenarios: int,
     suite_id: str,
     stages: tuple[str, ...] | None = None,
+    oracle_root: str | Path | None = None,
+    registry_root: str | Path | None = None,
 ) -> Path:
     stages = tuple(stages or config.stages)
     unknown = set(stages) - set(STAGES)
@@ -268,19 +285,31 @@ def generate_suite(
         raise ValueError(f"unknown stages: {sorted(unknown)}")
     suite_dir = Path(out_root) / suite_id
     suite_dir.mkdir(parents=True, exist_ok=True)
+    oracle_root = Path(oracle_root) if oracle_root else default_oracle_root(suite_dir)
+    registry_root = (
+        Path(registry_root) if registry_root else default_registry_root(suite_dir)
+    )
 
     planned = schedule(config, n_scenarios)
     scenarios = []
     for index, family in enumerate(planned):
-        result = build_scenario(config, index, suite_dir, family, stages)
-        case = result.manifest["cases"][0]
+        result = build_scenario(
+            config, index, suite_dir, family, stages, oracle_root=oracle_root
+        )
+        expected_events = result.oracle.get("expected_events", [])
+        if expected_events:
+            registry_root.mkdir(parents=True, exist_ok=True)
+            (registry_root / f"{result.scenario_id}.json").write_text(
+                json.dumps(
+                    {"events": expected_events},
+                    indent=2,
+                    sort_keys=True,
+                    default=json_default,
+                )
+            )
         scenarios.append(
             {
                 "scenario_id": result.scenario_id,
-                "family": family,
-                "case_kind": case["kind"],
-                "expected_status": case["expected_status"],
-                "expected_class": case["expected_class"],
                 "row_counts": result.manifest["versions"]["V0002"]["row_counts"],
             }
         )
@@ -291,7 +320,6 @@ def generate_suite(
         "seed": config.seed,
         "n_scenarios": n_scenarios,
         "stages": list(stages),
-        "families": sorted({family for family in planned}),
         "scenarios": scenarios,
     }
     (suite_dir / "suite.json").write_text(

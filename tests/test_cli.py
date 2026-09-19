@@ -84,4 +84,13 @@ def test_cli_generate_from_yaml_config(tmp_path):
         == 0
     )
     suite = json.loads((tmp_path / "yaml" / "suite.json").read_text())
-    assert suite["families"] == ["market_movement", "missing_stores"]
+    from qcgen.oracle_vault import OracleVault, default_oracle_root
+
+    vault = OracleVault(default_oracle_root(tmp_path / "yaml"))
+    families = sorted(
+        {
+            str(vault.family(entry["scenario_id"]))
+            for entry in suite["scenarios"]
+        }
+    )
+    assert families == ["market_movement", "missing_stores"]

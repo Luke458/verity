@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 import pytest
 
 from qc.reference import ReferenceSpec, compare_reference
+from qc.registry import StaticRegistry
 from qc.run import run_qc
 from qcgen.config import suite_config
 from qcgen.scenarios import build_scenario
@@ -40,8 +39,7 @@ def expected_event_case(tmp_path_factory):
         "expected_event",
         STAGES,
     )
-    manifest = json.loads((built.directory / "manifest.json").read_text())
-    return built.directory, manifest.get("expected_events", [])
+    return built.directory, list(built.oracle.get("expected_events", []))
 
 
 def test_reference_match_preserves_status(expected_event_case):
@@ -53,7 +51,7 @@ def test_reference_match_preserves_status(expected_event_case):
         source,
         "V0002",
         "V0001",
-        expected_events=expected_events,
+        registry=StaticRegistry(expected_events),
         reference_frame=frame,
         reference_spec=spec,
     )
@@ -72,7 +70,7 @@ def test_reference_mismatch_forces_investigate(expected_event_case):
         source,
         "V0002",
         "V0001",
-        expected_events=expected_events,
+        registry=StaticRegistry(expected_events),
         reference_frame=tampered,
         reference_spec=spec,
     )

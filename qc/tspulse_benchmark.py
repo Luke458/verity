@@ -78,16 +78,23 @@ def build_revision_series(
     suite_dir: str | Path,
     config: DatasetConfig | None = None,
     max_scenarios: int | None = None,
+    oracle_dir: str | Path | None = None,
 ) -> list[RevisionSeries]:
+    from qcgen.oracle_vault import OracleVault, default_oracle_root
+
     suite_dir = Path(suite_dir)
     config = config or DatasetConfig()
     suite = json.loads((suite_dir / "suite.json").read_text())
+    vault = OracleVault(oracle_dir or default_oracle_root(suite_dir))
     week = config.week_column
     metric = config.primary_metric
     series: list[RevisionSeries] = []
 
     for entry in suite["scenarios"][: max_scenarios or len(suite["scenarios"])]:
-        scenario_dir = suite_dir / entry["scenario_id"]
+        scenario_id = entry["scenario_id"]
+        oracle = vault.read(scenario_id) or {}
+        case = oracle["cases"][0] if oracle.get("cases") else {}
+        scenario_dir = suite_dir / scenario_id
         manifest = json.loads((scenario_dir / "manifest.json").read_text())
         previous = pd.read_parquet(
             scenario_dir / "versions" / manifest["previous_version"] / "report" / "fact.parquet"
@@ -95,7 +102,6 @@ def build_revision_series(
         current = pd.read_parquet(
             scenario_dir / "versions" / manifest["current_version"] / "report" / "fact.parquet"
         )
-        case = manifest.get("cases", [{}])[0] if manifest.get("cases") else {}
         is_control = case.get("kind") == "control"
         if (
             metric not in previous.columns
@@ -119,8 +125,8 @@ def build_revision_series(
             revision = (aligned["current"] - aligned["previous"]).tolist()
             series.append(
                 RevisionSeries(
-                    scenario_id=entry["scenario_id"],
-                    family=str(manifest.get("family")),
+                    scenario_id=scenario_id,
+                    family=str(oracle.get("family")),
                     expected_class=str(case.get("expected_class")),
                     series_id=series_id,
                     is_control=is_control,
@@ -162,11 +168,12 @@ def run_tspulse_benchmark(
     embedder: Embedder | None = None,
     allow_resample: bool = True,
     max_scenarios: int | None = None,
+    oracle_dir: str | Path | None = None,
 ) -> BenchmarkResult:
     suite_dir = Path(suite_dir)
     suite = json.loads((suite_dir / "suite.json").read_text())
     embedder = embedder or _default_embedder(allow_resample)
-    cases = build_revision_series(suite_dir, config, max_scenarios)
+    cases = build_revision_series(suite_dir, config, max_scenarios, oracle_dir)
 
     for case in cases:
         result = embedder(case.values)

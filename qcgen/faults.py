@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from .oracle import GroundTruthCase
+from .spec import case_expectations
 from .stages import State
 
 
@@ -41,7 +42,15 @@ def _pick(rng: np.random.Generator, values) -> str:
 
 
 def _case(ctx: FaultContext, **kwargs) -> GroundTruthCase:
-    return GroundTruthCase(case_id=f"{ctx.scenario_id}-{ctx.family}", family=ctx.family, **kwargs)
+    expected = bool(kwargs.pop("expected", False))
+    meta = case_expectations(ctx.family, expected=expected)
+    kwargs.setdefault("kind", meta["kind"])
+    kwargs.setdefault("expected_status", meta["expected_status"])
+    kwargs.setdefault("expected_class", meta["expected_class"])
+    kwargs.setdefault("expected_origin", meta["expected_origin"])
+    return GroundTruthCase(
+        case_id=f"{ctx.scenario_id}-{ctx.family}", family=ctx.family, **kwargs
+    )
 
 
 def _entity_scope(dim: pd.DataFrame, store_ids: list[str]) -> dict[str, list[str]]:
@@ -65,11 +74,7 @@ def inject_missing_stores(state: State, ctx: FaultContext, params: dict) -> tupl
     new_fact = fact.loc[~mask].copy()
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="missing_stores",
-        expected_origin="source",
         affected=_entity_scope(state["stores"], stores),
         weeks=[week],
         details={"n_stores": len(stores), "week": week},
@@ -141,11 +146,8 @@ def inject_new_store_backfill(
         }
     case = _case(
         ctx,
-        kind="expected_event" if expected else "fault",
+        expected=expected,
         injection_stage=ctx.stage,
-        expected_status="PASS_WITH_EXPLANATION" if expected else "INVESTIGATE",
-        expected_class="backfill",
-        expected_origin="source",
         affected=_entity_scope(new_dim, new_ids),
         weeks=list(range(start, end + 1)),
         details={"backfill_start": start, "backfill_end": end, "expected": expected},
@@ -167,11 +169,7 @@ def inject_history_truncation(
     new_fact = fact.loc[~mask].copy()
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="truncation",
-        expected_origin="source",
         affected=_entity_scope(state["stores"], stores),
         weeks=weeks,
         details={"n_weeks": n_weeks},
@@ -210,11 +208,7 @@ def inject_commodity_remap(
 
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="reclassification",
-        expected_origin="source",
         affected={"products": selected, "commodities": [from_commodity, to_commodity]},
         weeks=[],
         details={
@@ -240,11 +234,7 @@ def inject_coding_error(
     ).astype(np.float32)
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="coding",
-        expected_origin="coded",
         affected={"products": selected},
         weeks=[],
         details={"factor": factor},
@@ -267,11 +257,7 @@ def inject_warehouse_transform_error(
     ).astype(np.float32)
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="warehouse",
-        expected_origin="warehouse",
         affected={"commodities": [commodity]},
         weeks=[],
         details={"factor": factor},
@@ -295,11 +281,7 @@ def inject_recalculation(
     weeks = sorted(int(v) for v in fact.loc[mask, "week"].unique())
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="historical_correction",
-        expected_origin="source",
         affected={},
         weeks=weeks,
         details={"sigma": sigma, "changed_rows": count},
@@ -317,11 +299,7 @@ def inject_schema_failure(
     new_fact = fact.drop(columns=[column])
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="DATA_CONTRACT_FAILURE",
-        expected_class="schema_failure",
-        expected_origin=ctx.stage,
         affected={},
         weeks=[],
         details={"column": column},
@@ -347,11 +325,7 @@ def inject_null_duplicate_storm(
             new_fact = pd.concat([new_fact, new_fact.iloc[idx]], ignore_index=True)
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="null_duplicate_storm",
-        expected_origin="warehouse",
         affected={},
         weeks=[],
         details={
@@ -381,11 +355,7 @@ def inject_market_movement(
     ).astype(np.float32)
     case = _case(
         ctx,
-        kind="control",
         injection_stage=ctx.stage,
-        expected_status="PASS",
-        expected_class="market_movement",
-        expected_origin=None,
         affected={"commodities": [commodity]},
         weeks=[ctx.current_week],
         details={"factor": factor},
@@ -409,11 +379,7 @@ def inject_missing_products(
     new_fact = fact.loc[~mask].copy()
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="missing_products",
-        expected_origin="source",
         affected={"products": products},
         weeks=[week],
         details={"n_products": len(products), "week": week},
@@ -460,11 +426,7 @@ def inject_entity_merge(
 
     case = _case(
         ctx,
-        kind="fault",
         injection_stage=ctx.stage,
-        expected_status="INVESTIGATE",
-        expected_class="entity_merge",
-        expected_origin="source",
         affected=_entity_scope(new_dim, [source_id, target_id]),
         weeks=[],
         details={

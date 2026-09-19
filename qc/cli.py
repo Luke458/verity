@@ -39,7 +39,6 @@ from .decisions import (
     RuleDecisionProvider,
 )
 from .drift import monitor_drift
-from .events import load_registry
 from .evidence_query import ALLOWED_QUERIES, query_evidence
 from .expectations import apply_expectations, load_expectations
 from .incidents import IncidentStore, build_incident_record, symptom_tags_for
@@ -197,19 +196,14 @@ def _scenario_versions(source):
     return current, previous
 
 
-def _run_scenario(args, config, provider, expected_events=None):
+def _run_scenario(args, config, provider, registry=None):
     from qcgen.sources import ScenarioSource
 
     scenario_dir = Path(args.scenario_dir)
-    if expected_events is None:
-        expected_events = []
-        if not args.registry:
-            manifest_path = scenario_dir / "manifest.json"
-            if manifest_path.exists():
-                manifest = json.loads(manifest_path.read_text())
-                expected_events = manifest.get("expected_events", [])
-        else:
-            expected_events = load_registry(args.registry)
+    if registry is None and getattr(args, "registry", None):
+        from .registry import FileRegistry
+
+        registry = FileRegistry(args.registry)
 
     raw_source = ScenarioSource(scenario_dir)
     source = mapped(raw_source, config.column_map_dict())
@@ -225,7 +219,7 @@ def _run_scenario(args, config, provider, expected_events=None):
         current,
         previous,
         config,
-        expected_events=expected_events,
+        registry=registry,
         run_id=getattr(args, "run_id", None),
         decision_provider=provider,
     )
@@ -275,7 +269,9 @@ def _cmd_train(args: argparse.Namespace) -> int:
             print(f"no label records in {args.labels}", file=sys.stderr)
             return 2
     else:
-        records = build_oracle_labels(args.suite_dir, config)
+        records = build_oracle_labels(
+            args.suite_dir, config, oracle_dir=getattr(args, "oracle_dir", None)
+        )
     if args.text_embedder:
         embedder = ModernBertEmbedder(
             model_id=args.text_embedder,
@@ -395,6 +391,7 @@ def _cmd_tspulse_bench(args: argparse.Namespace) -> int:
         config,
         allow_resample=not args.strict_length,
         max_scenarios=args.max_scenarios,
+        oracle_dir=getattr(args, "oracle_dir", None),
     )
     payload = result.to_dict()
     if args.out:
@@ -464,8 +461,12 @@ def _cmd_shadow(args: argparse.Namespace) -> int:
         out_dir=args.out,
         labels_out=args.labels_out,
         prequential_store=args.prequential_store,
+        oracle_dir=getattr(args, "oracle_dir", None),
+        with_registry=getattr(args, "with_registry", False),
     )
-    print(f"shadow suite={summary['suite_id']} scenarios={summary['scenarios']}")
+    print(f"shadow suite={summary['suite_id']} "
+          f"registry_mode={summary.get('registry_mode', 'blind')} "
+          f"scenarios={summary['scenarios']}")
     print(
         f"  detection_rate={summary['detection_rate']:.3f} "
         f"false_positive_rate={summary['false_positive_rate']:.3f}"
@@ -845,7 +846,9 @@ def _cmd_champion(args: argparse.Namespace) -> int:
         print("no training records found", file=sys.stderr)
         return 2
 
-    eval_items = eval_cases_from_suite(args.suite_dir, config)
+    eval_items = eval_cases_from_suite(
+        args.suite_dir, config, oracle_dir=getattr(args, "oracle_dir", None)
+    )
     if args.eval_store:
         for record in records_from_store(args.eval_store):
             eval_items.append(
@@ -1026,7 +1029,11 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
 
 def _cmd_simulate_analyst(args: argparse.Namespace) -> int:
     summary = simulate_analyst(
-        args.suite_dir, args.store, profile=args.profile, seed=args.seed
+        args.suite_dir,
+        args.store,
+        profile=args.profile,
+        seed=args.seed,
+        oracle_dir=getattr(args, "oracle_dir", None),
     )
     if args.json:
         print(json.dumps(summary, indent=2, default=_json_default))
@@ -1265,6 +1272,7 @@ def build_parser() -> argparse.ArgumentParser:
         "train", help="fit a learned decision provider from labels"
     )
     train.add_argument("--suite-dir", default=None)
+    train.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
     train.add_argument("--labels", default=None, help="label store JSONL")
     train.add_argument("--out", required=True)
     train.add_argument("--config", default=None)
@@ -1310,6 +1318,12 @@ def build_parser() -> argparse.ArgumentParser:
     shadow.add_argument("--suite-dir", required=True)
     shadow.add_argument("--config", default=None)
     shadow.add_argument("--registry", default=None)
+    shadow.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
+    shadow.add_argument(
+        "--with-registry",
+        action="store_true",
+        help="load generator-declared events from the vault (plumbing only)",
+    )
     shadow.add_argument("--out", default=None)
     shadow.add_argument("--labels-out", default=None, help="append oracle labels")
     shadow.add_argument(
@@ -1361,6 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="research benchmark: TSPulse embeddings of revision series",
     )
     tspulse.add_argument("--suite-dir", required=True)
+    tspulse.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
     tspulse.add_argument("--config", default=None)
     tspulse.add_argument("--out", default=None)
     tspulse.add_argument("--max-scenarios", type=int, default=None)
@@ -1527,6 +1542,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--store", default=None, help="SQLite store with confirmed outcomes"
     )
     champion.add_argument("--suite-dir", required=True, help="held-out eval suite")
+    champion.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
     champion.add_argument(
         "--eval-store", default=None, help="SQLite store with held-out outcomes"
     )
@@ -1547,6 +1563,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="write synthetic analyst outcomes to a store (provenance: synthetic)",
     )
     simulate.add_argument("--suite-dir", required=True)
+    simulate.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
     simulate.add_argument("--store", required=True)
     simulate.add_argument(
         "--profile", choices=sorted(ANALYST_PROFILES), default="typical"

@@ -12,6 +12,7 @@ from qc.decisions import (
     field_index,
 )
 from qc.labels import CAUSE_BY_ORACLE
+from qc.registry import StaticRegistry
 from qc.run import run_qc
 from qcgen.config import suite_config
 from qcgen.scenarios import build_scenario
@@ -63,12 +64,13 @@ def family_results(tmp_path_factory):
             family,
             ("source", "coded", "warehouse", "report"),
         )
-        manifest = built.manifest
         results[family] = run_qc(
             ScenarioSource(built.directory),
             "V0002",
             "V0001",
-            expected_events=manifest.get("expected_events", []),
+            registry=StaticRegistry(
+                list(built.oracle.get("expected_events", []))
+            ),
         )
     return results
 

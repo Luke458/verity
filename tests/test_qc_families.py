@@ -5,10 +5,12 @@ import json
 import pytest
 
 from qc.cli import _json_default
+from qc.registry import StaticRegistry
 from qc.run import run_qc
 from qcgen.config import suite_config
 from qcgen.scenarios import build_scenario
 from qcgen.sources import ScenarioSource
+from qcgen.spec import FAMILY_SPECS
 
 FAMILIES = (
     "missing_stores",
@@ -102,18 +104,20 @@ def engine_runs(tmp_path_factory):
             family,
             ("source", "coded", "warehouse", "report"),
         )
-        manifest = built.manifest
         runs[family] = run_qc(
             ScenarioSource(built.directory),
             "V0002",
             "V0001",
-            expected_events=manifest.get("expected_events", []),
+            registry=StaticRegistry(
+                list(built.oracle.get("expected_events", []))
+            ),
         )
     return runs
 
 
 @pytest.mark.parametrize("family", FAMILIES)
 def test_family_outcome(family, engine_runs):
+    assert EXPECTATIONS[family]["status"] == FAMILY_SPECS[family].expected_status
     run = engine_runs[family]
     expected = EXPECTATIONS[family]
 

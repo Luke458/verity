@@ -69,7 +69,8 @@ uv pip install --python .venv/bin/python -e ".[test]"
 .venv/bin/qc run --scenario-dir data/suites/demo/scenario-0012
 .venv/bin/qc decide --scenario-dir data/suites/demo/scenario-0012 --json
 
-# Score the engine against the oracle and collect labels
+# Score the engine against the oracle and collect labels (blind by default:
+# the engine sees no ground truth; the oracle lives in a sibling vault)
 .venv/bin/qc shadow --suite-dir data/suites/demo --out reports/shadow/demo \
   --labels-out data/labels/demo.jsonl
 
