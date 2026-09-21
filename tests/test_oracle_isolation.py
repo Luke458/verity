@@ -33,6 +33,7 @@ HARNESS_ALLOWLIST = {
     "champion.py",
     "cli.py",
     "cohort.py",
+    "evidence_bench.py",
     "labels.py",
     "replay.py",
     "shadow.py",

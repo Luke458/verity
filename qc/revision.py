@@ -20,7 +20,10 @@ def _aggregate(
     metrics: list[str],
     config: DatasetConfig,
 ) -> pd.DataFrame:
-    keys = [key for key in keys if key in frame.columns]
+    if any(key not in frame.columns for key in keys):
+        raise ValueError("declared aggregation grain is missing")
+    if config.week_column not in keys and any(metric in config.snapshot_metrics for metric in metrics):
+        raise ValueError("snapshot metrics cannot be aggregated across time")
     if not keys:
         return pd.DataFrame()
 
@@ -49,13 +52,13 @@ def _aggregate(
 
 def base_keys(frame: pd.DataFrame, config: DatasetConfig) -> list[str]:
     keys = [config.week_column]
-    keys += [column for column in config.entity_key_columns if column in frame.columns]
+    keys += list(dict(config.stage_keys).get(config.analysis_stage, config.entity_key_columns))
     return keys
 
 
 def headline_keys(frame: pd.DataFrame, config: DatasetConfig) -> list[str]:
     keys = [config.week_column]
-    keys += [column for column in config.report_grain if column in frame.columns]
+    keys += list(config.report_grain)
     return keys
 
 
@@ -67,7 +70,8 @@ def build_revision_cube(
     new_periods: tuple[int, ...],
 ) -> pd.DataFrame:
     week = config.week_column
-    keys = [key for key in keys if key in previous.columns and key in current.columns]
+    if any(key not in previous.columns or key not in current.columns for key in keys):
+        raise ValueError("declared revision grain is missing")
     if not keys:
         raise ValueError("no shared grain keys between versions")
 
@@ -86,18 +90,19 @@ def build_revision_cube(
     previous_agg = _aggregate(previous, keys, metrics, config)
     current_agg = _aggregate(current, keys, metrics, config)
     merged = previous_agg.merge(
-        current_agg, on=keys, how="outer", suffixes=("_previous", "_current")
+        current_agg, on=keys, how="outer", suffixes=("_previous", "_current"), indicator=True
     )
 
     for measure in measures:
         previous_column = f"{measure}_previous"
         current_column = f"{measure}_current"
         if previous_column not in merged.columns:
-            merged[previous_column] = 0.0
+            merged[previous_column] = np.nan
         if current_column not in merged.columns:
-            merged[current_column] = 0.0
-        merged[previous_column] = merged[previous_column].fillna(0.0)
-        merged[current_column] = merged[current_column].fillna(0.0)
+            merged[current_column] = np.nan
+        if config.absent_entity_policy == "zero":
+            merged.loc[merged["_merge"] == "right_only", previous_column] = 0.0
+            merged.loc[merged["_merge"] == "left_only", current_column] = 0.0
         delta = merged[current_column] - merged[previous_column]
         merged[f"{measure}_delta"] = delta
         previous_values = merged[previous_column].to_numpy(dtype=np.float64)
@@ -111,7 +116,7 @@ def build_revision_cube(
     merged["period"] = np.where(
         merged[week].isin(list(new_periods)), "new", "overlap"
     )
-    return merged.sort_values(keys).reset_index(drop=True)
+    return merged.drop(columns="_merge").sort_values(keys).reset_index(drop=True)
 
 
 def cube_summary(cube: pd.DataFrame, metric: str) -> dict[str, float]:

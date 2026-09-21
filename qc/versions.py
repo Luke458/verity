@@ -120,3 +120,21 @@ def resolve_versions(
         current_stage,
         config,
     )
+
+
+def select_versions(versions: list[str], current: str | None = None,
+                    previous: str | None = None) -> tuple[str, str]:
+    """Select a predecessor relative to current using source history order."""
+    if not versions:
+        raise ValueError("no available snapshots")
+    current = current or versions[-1]
+    if current not in versions:
+        raise ValueError(f"unavailable current snapshot: {current}")
+    index = versions.index(current)
+    if previous is None:
+        if index == 0:
+            raise ValueError("selected snapshot has no predecessor")
+        previous = versions[index - 1]
+    if previous not in versions or versions.index(previous) >= index:
+        raise ValueError("previous snapshot must exist and precede current")
+    return current, previous

@@ -78,7 +78,9 @@ def test_analyst_store_with_pinned_plan_is_ready(tmp_path):
     report = pilot_readiness(
         store_path, _pinned_plan(tmp_path), min_analyst_labels=1
     )
-    assert report.status == "READY"
+    assert report.status == "LABEL_PREREQUISITES_MET"
+    assert report.evaluation_complete is False
+    assert report.production_eligible is False
     assert report.analyst_labels == 1
     assert report.plan_hash_verified is True
     assert report.blockers == []

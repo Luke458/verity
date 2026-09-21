@@ -55,6 +55,7 @@ class AttributionResult:
     structural_events: list[LifecycleEvent] = field(default_factory=list)
     unmatched_events: list[LifecycleEvent] = field(default_factory=list)
     matched_event_ids: list[str] = field(default_factory=list)
+    approval_coverage: list[dict[str, Any]] = field(default_factory=list)
     per_metric: dict[str, float] = field(default_factory=dict)
     cross_metric_flags: list[str] = field(default_factory=list)
     conservation: dict[str, float] = field(default_factory=dict)
@@ -85,9 +86,20 @@ class AttributionResult:
 
 
 def _match_expected(
-    event: LifecycleEvent, registry: list[dict[str, Any]]
+    event: LifecycleEvent, registry: list[dict[str, Any]], config: DatasetConfig
 ) -> str | None:
     for item in registry:
+        if not item.get("approved_by") or item.get("confirmed") is not True or item.get("dataset") != config.name:
+            continue
+        expected_class = item.get("classification")
+        if expected_class is None and item.get("event_type") in ("new_store_historical_backfill", "new_entity_historical_backfill"):
+            expected_class = NEW_BACKFILL
+        if expected_class != event.classification:
+            continue
+        weeks = (*event.historical_weeks_added, *event.historical_weeks_removed)
+        start, end = item.get("expected_history_start"), item.get("expected_history_end")
+        if not weeks or type(start) is not int or type(end) is not int or not all(start <= w <= end for w in weeks):
+            continue
         entity_ids = [str(value) for value in item.get("entity_ids", [])]
         if event.entity_type == str(item.get("entity_type")) and event.entity_id in entity_ids:
             return str(item.get("event_id"))
@@ -102,7 +114,7 @@ def _contributors(
 ) -> list[Contributor]:
     if delta_column not in overlap.columns:
         return []
-    columns = list(config.entity_key_columns)
+    columns = list(dict(config.stage_keys).get(config.analysis_stage, config.entity_key_columns))
     if entity_type is not None:
         matching = [
             column for column in columns if _entity_type(column) == entity_type
@@ -173,7 +185,9 @@ def explain_revision(
         raw_delta = 0.0
         previous_total = 0.0
     per_metric = {
-        column: float(overlap[f"{column}_delta"].sum()) for column in metrics_present
+        column: float((overlap.loc[overlap[config.week_column] == overlap[config.week_column].max()]
+                       if column in config.snapshot_metrics and len(overlap) else overlap)[f"{column}_delta"].sum())
+        for column in metrics_present
     }
     if metrics_present and len(overlap):
         changed = (
@@ -185,7 +199,8 @@ def explain_revision(
         breadth = float(changed.mean())
     else:
         breadth = 0.0
-    material = abs(raw_delta) > max(
+    gross_delta = float(overlap[delta_column].abs().sum()) if delta_column in overlap else 0.0
+    material = gross_delta > max(
         config.materiality_abs, config.materiality_ratio * abs(previous_total)
     )
 
@@ -204,14 +219,17 @@ def explain_revision(
     explanations: list[str] = []
     unmatched: list[LifecycleEvent] = []
     matched: list[str] = []
+    coverage: list[dict[str, Any]] = []
     conservation: dict[str, float] = {}
 
     for event in structural:
         # Every structural event must be registry-matched, whatever grain it
         # sits at; only the primary grain contributes to the explained sum.
-        event_id = _match_expected(event, expected_events or [])
+        event_id = _match_expected(event, expected_events or [], config)
         if event_id:
             matched.append(event_id)
+            coverage.append({"check": "historical_event", "scope": f"{event.entity_type}:{event.entity_id}:{event.classification}",
+                             "approval_id": event_id, "weeks": sorted(set((*event.historical_weeks_added, *event.historical_weeks_removed)))})
         else:
             unmatched.append(event)
 
@@ -248,6 +266,8 @@ def explain_revision(
         # A near-zero revision can only be called explained when the events
         # themselves net to near-zero.
         explained_fraction = 1.0 if abs(explained) <= epsilon else 0.0
+    if material and not structural:
+        explained_fraction = 0.0
     over_explained = (
         abs(explained) > abs(raw_delta) + max(epsilon, 1e-6 * abs(raw_delta))
         and explained * raw_delta > 0
@@ -275,6 +295,7 @@ def explain_revision(
         structural_events=structural,
         unmatched_events=unmatched,
         matched_event_ids=matched,
+        approval_coverage=coverage,
         per_metric=per_metric,
         cross_metric_flags=_cross_metric_flags(
             overlap, per_metric, previous_total, config

@@ -9,7 +9,7 @@ status is ``UNKNOWN`` rather than ``PASS``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pandas as pd
@@ -45,6 +45,7 @@ def _overlap_relative_divergence(
     current: pd.DataFrame,
     overlap: list[int],
     config: DatasetConfig,
+    grain: tuple[str, ...] | None = None,
 ) -> tuple[float | None, int]:
     week = config.week_column
     metric = config.primary_metric
@@ -56,8 +57,11 @@ def _overlap_relative_divergence(
 
     if metric not in previous_overlap.columns or metric not in current_overlap.columns:
         return None, row_delta
-    previous_by_week = previous_overlap.groupby(week)[metric].sum()
-    current_by_week = current_overlap.groupby(week)[metric].sum()
+    keys = [week, *(grain if grain is not None else config.entity_key_columns)]
+    if any(key not in previous or key not in current for key in keys):
+        return None, row_delta
+    previous_by_week = previous_overlap.groupby(keys, dropna=False)[metric].sum(min_count=1)
+    current_by_week = current_overlap.groupby(keys, dropna=False)[metric].sum(min_count=1)
     aligned = pd.concat(
         [previous_by_week.rename("previous"), current_by_week.rename("current")],
         axis=1,
@@ -106,10 +110,12 @@ def analyze_lineage(
         previous = source.read_fact(previous_id, stage)
         current = source.read_fact(current_id, stage)
         relative, row_delta = _overlap_relative_divergence(
-            previous, current, overlap, config
+            previous, current, overlap, config,
+            dict(config.stage_keys).get(stage, config.report_grain if stage == config.contract_stage else config.entity_key_columns)
         )
+        stage_config = replace(config, entity_key_columns=dict(config.stage_keys).get(stage, config.report_grain if stage == config.contract_stage else config.entity_key_columns))
         fingerprint_changed, deltas = _fingerprint_changed(
-            previous, current, overlap, config
+            previous, current, overlap, stage_config
         )
         diverged = (
             fingerprint_changed
@@ -119,8 +125,8 @@ def analyze_lineage(
         )
         result.summaries[stage] = {
             "rows": int(len(current)),
-            "fingerprint": structural_fingerprint(current, config),
-            "previous_fingerprint": structural_fingerprint(previous, config),
+            "fingerprint": structural_fingerprint(current, stage_config),
+            "previous_fingerprint": structural_fingerprint(previous, stage_config),
             "fingerprint_deltas": deltas,
         }
         result.divergences.append(

@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .jsonutil import dumps as json_dumps
+
 
 def _as_comparable(value: Any) -> tuple[str, Any] | None:
     """Normalize a week number or ISO date into a comparable tagged value."""
@@ -47,9 +49,13 @@ class RatioExpectation:
     effective_from: str | None = None
     effective_to: str | None = None
     approved_by: str | None = None
+    approved_at: str | None = None
     note: str = ""
 
     def __post_init__(self) -> None:
+        import math
+        if any(value is not None and not math.isfinite(value) for value in (self.min_ratio, self.max_ratio)):
+            raise ValueError("ratio bounds must be finite")
         if self.min_ratio is None and self.max_ratio is None:
             raise ValueError(f"{self.expectation_id}: a ratio band is required")
         if (
@@ -92,6 +98,7 @@ class RatioExpectation:
             effective_from=data.get("effective_from"),
             effective_to=data.get("effective_to"),
             approved_by=data.get("approved_by"),
+            approved_at=data.get("approved_at"),
             note=str(data.get("note", "")),
         )
 
@@ -107,7 +114,7 @@ def save_expectations(
     expectations: Sequence[RatioExpectation], path: str | Path
 ) -> None:
     Path(path).write_text(
-        json.dumps(
+        json_dumps(
             {"expectations": [item.to_dict() for item in expectations]},
             indent=2,
             sort_keys=True,
@@ -116,6 +123,16 @@ def save_expectations(
 
 
 def _in_scope(expectation: RatioExpectation, flag: dict[str, Any], context: dict) -> tuple[bool, str]:
+    cutoff = context.get("as_of")
+    if cutoff and "T" in str(cutoff):
+        if not expectation.approved_at:
+            return False, "approval observation time missing"
+        try:
+            if _dt.datetime.fromisoformat(expectation.approved_at) > _dt.datetime.fromisoformat(str(cutoff)):
+                return False, "approval not yet observed"
+        except (TypeError, ValueError):
+            return False, "invalid approval observation time"
+        context = {**context, "as_of": str(cutoff)[:10]}
     if not expectation.approved:
         return False, "unapproved"
     if expectation.dataset != str(context.get("dataset", "")):

@@ -6,6 +6,9 @@ tested without configuration; YAML files override any field for real datasets.
 
 from __future__ import annotations
 
+import datetime as _dt
+import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -31,6 +34,9 @@ class DatasetConfig:
         ("product_count", "product_id"),
     )
     primary_metric: str = "dollar"
+    # Effective unit-value decomposition: value measure divided by quantity.
+    unit_value_metric: str = "dollar"
+    unit_value_quantity: str = "units"
 
     # Stage selection: contracts run on the final report table, analysis runs on
     # the entity-bearing table.
@@ -68,6 +74,9 @@ class DatasetConfig:
         ("banner_id",),
         ("state_id",),
     )
+    # Declared intersection views (for example commodity-by-banner). Each is
+    # checked against its first key's parent, never added to the national total.
+    hierarchy_intersections: tuple[tuple[str, ...], ...] = ()
     hierarchy_total_markers: tuple[str, ...] = (
         "total",
         "all",
@@ -80,6 +89,103 @@ class DatasetConfig:
     duplicate_fraction_limit: float = 0.005
     top_contributors: int = 10
     pipeline_order: tuple[str, ...] = ("source", "coded", "warehouse", "report")
+
+    calendar: str = "sequential_week"
+    period_map: tuple[tuple[str, int], ...] = ()
+    # Declared business calendar: the first day of ``calendar_anchor_week`` and
+    # the annual events (name, rule, lead_weeks, lag_weeks). No anchor means no
+    # calendar evidence; the engine never assumes a geography.
+    calendar_anchor_date: str = ""
+    calendar_anchor_week: int = 1
+    calendar_events: tuple[tuple[str, str, int, int], ...] = ()
+    snapshot_metrics: tuple[str, ...] = ("stock",)
+    required_dimensions: tuple[str, ...] = ()
+    temporal_required: bool = True
+    optional_checks: tuple[str, ...] = ()
+    absent_entity_policy: str = "zero"
+    stage_keys: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", self.name):
+            raise ValueError("name must be a safe dataset identifier")
+        if self.calendar not in ("sequential_week", "weekly_date", "mapped"):
+            raise ValueError("unsupported calendar")
+        if self.calendar == "mapped" and not self.period_map:
+            raise ValueError("encoded calendars require period_map")
+        for field in fields(self):
+            value, default = getattr(self, field.name), field.default
+            if isinstance(default, bool) and not isinstance(value, bool):
+                raise ValueError(f"{field.name} must be boolean")
+            if isinstance(default, int) and not isinstance(default, bool):
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise ValueError(f"{field.name} must be a positive integer")
+            if isinstance(default, float):
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                    raise ValueError(f"{field.name} must be finite and nonnegative")
+                if ("fraction" in field.name or "percentile" in field.name or "breadth" in field.name) and value > 1:
+                    raise ValueError(f"{field.name} must be <= 1")
+            if isinstance(default, tuple) and not isinstance(value, tuple):
+                raise ValueError(f"{field.name} must be a sequence")
+        stages = [stage for stage, _ in self.stage_keys]
+        if len(set(stages)) != len(stages):
+            raise ValueError("stage_keys must have unique stages")
+        seen_intersections: set[tuple[str, ...]] = set()
+        for keys in self.hierarchy_intersections:
+            if len(keys) < 2 or any(not key for key in keys) or len(set(keys)) != len(keys):
+                raise ValueError("hierarchy intersections require unique keys")
+            if keys in seen_intersections:
+                raise ValueError("hierarchy intersections must be unique")
+            seen_intersections.add(keys)
+        for keys in (self.entity_key_columns, self.report_grain, *(keys for _, keys in self.stage_keys)):
+            if any(not isinstance(key, str) or not key for key in keys) or len(set(keys)) != len(keys) or self.week_column in keys:
+                raise ValueError("grain keys must be unique column names excluding the period")
+        if self.absent_entity_policy not in ("zero", "missing"):
+            raise ValueError("absent_entity_policy must be zero or missing")
+        if self.primary_metric in self.snapshot_metrics:
+            raise ValueError("snapshot measures cannot be the time-aggregated primary metric")
+        if self.calendar_anchor_date:
+            try:
+                _dt.date.fromisoformat(self.calendar_anchor_date)
+            except ValueError as error:
+                raise ValueError("calendar_anchor_date must be an ISO date") from error
+        if self.calendar_events:
+            if not self.calendar_anchor_date:
+                raise ValueError("calendar events require calendar_anchor_date")
+            names = [name for name, _, _, _ in self.calendar_events]
+            if any(not name for name in names) or len(set(names)) != len(names):
+                raise ValueError("calendar event names must be unique and nonempty")
+            for _, rule, lead, lag in self.calendar_events:
+                if rule != "easter" and not re.fullmatch(r"\d{2}-\d{2}", str(rule)):
+                    raise ValueError("calendar event rule must be easter or MM-DD")
+                if type(lead) is not int or type(lag) is not int or lead < 0 or lag < 0:
+                    raise ValueError("calendar event lead/lag weeks must be nonnegative")
+        if not 0 < self.temporal_interval_alpha < 1:
+            raise ValueError("temporal_interval_alpha must be in (0, 1)")
+        if not 0 < self.temporal_fdr_q < 1:
+            raise ValueError("temporal_fdr_q must be in (0, 1)")
+        if self.recurrence_minimum > self.recurrence_window:
+            raise ValueError("recurrence_minimum cannot exceed recurrence_window")
+        if self.period_map:
+            if len(dict(self.period_map)) != len(self.period_map) or any(type(v) is not int for _, v in self.period_map):
+                raise ValueError("period_map must have unique labels and integer indices")
+            if len({v for _, v in self.period_map}) != len(self.period_map):
+                raise ValueError("period_map indices must be unique")
+        if self.primary_metric not in self.metric_columns:
+            raise ValueError("primary_metric must be declared in metric_columns")
+        if self.unit_value_metric and self.unit_value_metric not in self.metric_columns:
+            raise ValueError("unit_value_metric must be declared in metric_columns")
+        if self.unit_value_quantity and self.unit_value_quantity not in self.metric_columns:
+            raise ValueError("unit_value_quantity must be declared in metric_columns")
+        if not self.forecast_quantiles or any(not 0 < q < 1 for q in self.forecast_quantiles):
+            raise ValueError("forecast quantiles must be in (0, 1)")
+        if tuple(sorted(set(self.forecast_quantiles))) != self.forecast_quantiles:
+            raise ValueError("forecast quantiles must be sorted and unique")
+        if self.temporal_lower_percentile >= self.temporal_upper_percentile:
+            raise ValueError("invalid temporal percentile bounds")
+        for index in (0, 1):
+            names = [item[index] for item in self.column_map]
+            if len(names) != len(set(names)):
+                raise ValueError("column_map names must be unique")
 
     def column_map_dict(self) -> dict[str, str]:
         """Canonical name -> production column name."""
@@ -104,6 +210,25 @@ class DatasetConfig:
     temporal_lower_percentile: float = 0.01
     temporal_upper_percentile: float = 0.99
     temporal_backtest_origins: int = 26
+    # Annual-seasonality explanations require at least two full retail years.
+    temporal_min_annual_history: int = 104
+    # Reported prediction intervals use the held-out residual quantiles.
+    temporal_interval_alpha: float = 0.1
+    # Sparse leaves fall back to parent expectation x historical child share;
+    # the fallback is labelled and cannot support statistical clearance.
+    temporal_sparse_fallback: bool = True
+    # Verified certificates may clear their specific finding without a new
+    # human approval; integrity failures still always require review.
+    statistical_clearance_enabled: bool = True
+    # Leaf anomaly screening controls false discoveries before escalation.
+    temporal_fdr_enabled: bool = True
+    temporal_fdr_q: float = 0.05
+    # Recurrence escalation: a finding repeated in at least
+    # ``recurrence_minimum`` of the last ``recurrence_window`` refreshes whose
+    # cumulative impact is material escalates to review.
+    recurrence_enabled: bool = True
+    recurrence_window: int = 3
+    recurrence_minimum: int = 2
     forecast_quantiles: tuple[float, ...] = (
         0.01,
         0.05,
@@ -136,6 +261,24 @@ class DatasetConfig:
         return {field.name: getattr(self, field.name) for field in fields(self)}
 
 
+def _calendar_events(value: Any) -> tuple[tuple[str, str, int, int], ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("calendar_events must be a list of event declarations")
+    events: list[tuple[str, str, int, int]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            name = item.get("name")
+            rule = item.get("rule")
+            lead = item.get("lead_weeks", 0)
+            lag = item.get("lag_weeks", 0)
+        elif isinstance(item, (list, tuple)) and len(item) == 4:
+            name, rule, lead, lag = item
+        else:
+            raise ValueError("calendar events require name, rule and optional lead/lag weeks")
+        events.append((str(name), str(rule), int(lead), int(lag)))
+    return tuple(events)
+
+
 def load_dataset_config(path: str | Path) -> DatasetConfig:
     raw = yaml.safe_load(Path(path).read_text())
     if raw is None:
@@ -150,13 +293,23 @@ def load_dataset_config(path: str | Path) -> DatasetConfig:
     converted: dict[str, Any] = {}
     for key, value in raw.items():
         current = getattr(config, key)
-        if key == "column_map":
+        if key == "stage_keys":
+            if not isinstance(value, Mapping):
+                raise ValueError("stage_keys must map stages to key lists")
+            converted[key] = tuple((str(stage), tuple(keys)) for stage, keys in value.items())
+        elif key == "period_map":
+            if not isinstance(value, Mapping):
+                raise ValueError("period_map must map labels to sequential week indices")
+            converted[key] = tuple((str(label), index) for label, index in value.items())
+        elif key == "column_map":
             if not isinstance(value, Mapping):
                 raise ValueError("column_map must be a mapping of canonical: production")
             converted[key] = tuple(
                 (str(canonical), str(production))
                 for canonical, production in value.items()
             )
+        elif key == "calendar_events":
+            converted[key] = _calendar_events(value)
         elif isinstance(current, tuple) and isinstance(value, (list, tuple)):
             if current and isinstance(current[0], tuple):
                 converted[key] = tuple(tuple(item) for item in value)

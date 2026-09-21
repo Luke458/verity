@@ -30,7 +30,7 @@ LOG_FILE="$QC_LOG_DIR/weekly-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec 9>"$QC_LOCK"
 if ! flock -n 9; then
     echo "weekly: another run holds $QC_LOCK; exiting" | tee -a "$LOG_FILE"
-    exit 0
+    exit 75
 fi
 
 args=(weekly --uri "$QC_URI" --stage "$QC_STAGE" --out "$QC_OUT"
@@ -42,6 +42,8 @@ args=(weekly --uri "$QC_URI" --stage "$QC_STAGE" --out "$QC_OUT"
 [[ -n "${QC_EXPECTATIONS:-}" ]] && args+=(--expectations "$QC_EXPECTATIONS")
 [[ -n "${QC_REFERENCE_URI:-}" ]] && args+=(--reference-uri "$QC_REFERENCE_URI")
 [[ -n "${QC_REFERENCE_SPEC:-}" ]] && args+=(--reference-spec "$QC_REFERENCE_SPEC")
+[[ -n "${QC_REFERENCE_VERSION:-}" ]] && args+=(--reference-version "$QC_REFERENCE_VERSION")
+[[ -n "${QC_REFERENCE_STAGE:-}" ]] && args+=(--reference-stage "$QC_REFERENCE_STAGE")
 [[ "${QC_ALLOW_INVESTIGATE:-0}" == "1" ]] && args+=(--allow-investigate)
 
 set +e

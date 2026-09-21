@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DatasetConfig
+from .jsonutil import dumps as json_dumps
 from .registry import StaticRegistry
 
 
@@ -32,6 +33,9 @@ class ReplayCase:
     expected_events: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", self.case_id):
+            raise ValueError("unsafe replay case_id")
         if self.previous_version == self.current_version:
             raise ValueError(f"{self.case_id}: previous and current are equal")
         if not self.as_of:
@@ -96,7 +100,7 @@ class ReplayPlan:
             "caller_assertion": self.caller_assertion,
             "cases": [case.to_dict() for case in self.cases],
             "plan_sha256": hashlib.sha256(
-                json.dumps(
+                json_dumps(
                     [case.to_dict() for case in self.cases], sort_keys=True
                 ).encode()
             ).hexdigest(),
@@ -115,7 +119,7 @@ class ReplayPlan:
             "cases": [case.to_dict() for case in self.cases],
             "caller_assertion": self.caller_assertion,
         }
-        Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True))
+        Path(path).write_text(json_dumps(payload, indent=2, sort_keys=True))
 
 
 def default_source_factory(
@@ -163,7 +167,7 @@ def replay(
     config = config or DatasetConfig()
     factory = source_factory or default_source_factory(storage_options)
     plan_sha = hashlib.sha256(
-        json.dumps(
+        json_dumps(
             [case.to_dict() for case in plan.cases], sort_keys=True
         ).encode()
     ).hexdigest()
@@ -189,6 +193,7 @@ def replay(
                 config,
                 registry=StaticRegistry(list(case.expected_events)),
                 run_id=case.case_id,
+                observed_at=case.as_of,
             )
         except Exception as error:  # noqa: BLE001 - recorded, not hidden
             report.failed.append(
@@ -200,7 +205,7 @@ def replay(
             continue
         machine_path = out / "cases" / f"{case.case_id}.json"
         machine_path.write_text(
-            json.dumps(result.machine, indent=2, sort_keys=True, default=str)
+            json_dumps(result.machine, indent=2, sort_keys=True, default=str)
         )
         report.cases.append(
             {
@@ -215,6 +220,6 @@ def replay(
         )
 
     (out / "replay.json").write_text(
-        json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str)
+        json_dumps(report.to_dict(), indent=2, sort_keys=True, default=str)
     )
     return report

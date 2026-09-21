@@ -20,6 +20,9 @@ def _number(value: float | None, digits: int = 6) -> str:
 
 
 def evidence_text(result: Any, max_chars: int = 8000) -> str:
+    recorded = getattr(result, "recorded_text", None)
+    if isinstance(recorded, str):
+        return recorded[:max_chars]
     lines: list[str] = []
     lines.append(f"run_id={getattr(result, 'run_id', '')}")
     lines.append(f"dataset={getattr(result, 'dataset', '')}")

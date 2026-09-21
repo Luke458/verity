@@ -30,6 +30,7 @@ from .cohort import code_sha256
 from .config import DatasetConfig
 from .decisions import RuleDecisionProvider
 from .fingerprints import manifest_data_fingerprint
+from .jsonutil import dumps as json_dumps
 from .labels import LabelRecord, oracle_labels_for_result
 from .text_provider import TextDecisionProvider, TextEmbedder, train_text_provider
 from .training import train_decision_provider
@@ -456,11 +457,8 @@ def run_champion(
         "A learned champion is only meaningful once trained on confirmed analyst outcomes and evaluated on a frozen held-out cohort.",
         "Gates are pre-registered; changing them after seeing results invalidates the comparison.",
     ]
-    production_eligible = (
-        sources == ["analyst"]
-        and eval_sources == ["analyst"]
-        and champion is not None
-    )
+    production_eligible = False  # Only pinned real evaluation plus operational gates can promote.
+
     return ChampionResult(
         champion=champion,
         production_eligible=production_eligible,
@@ -515,7 +513,7 @@ def write_champion_report(
     json_path = path / "champion.json"
     markdown_path = path / "champion.md"
     json_path.write_text(
-        json.dumps(result.to_dict(), indent=2, sort_keys=True, default=str)
+        json_dumps(result.to_dict(), indent=2, sort_keys=True, default=str)
     )
     markdown_path.write_text(render_champion_markdown(result))
     return {"json": json_path, "markdown": markdown_path}

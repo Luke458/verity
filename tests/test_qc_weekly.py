@@ -34,7 +34,7 @@ def _frame(
         stores = ("S1", "S2") if week < target else (latest_stores or ("S1", "S2"))
         for store in stores:
             rows.append(
-                {"week": week, "store_id": store, "dollar": value, "units": 10}
+                {"week": week, "store_id": store, "product_id": "P1", "dollar": value, "units": 10}
             )
     return pd.DataFrame(rows)
 
@@ -62,7 +62,7 @@ def test_weekly_pass_artifacts_and_idempotency(tmp_path):
         calibration_path=tmp_path / "calibration.jsonl",
         out_root=tmp_path / "weekly",
     )
-    assert result.status in ("PASS", "PASS_WITH_EXPLANATION"), result.notes
+    assert result.status == "INCOMPLETE", result.notes
     assert result.recorded is True
     assert result.prequential_records >= 1
     assert result.current_version == "2"
@@ -71,9 +71,9 @@ def test_weekly_pass_artifacts_and_idempotency(tmp_path):
         assert (Path(result.report_dir) / name).exists(), name
 
     again = run_weekly(
-        str(path), config=config, out_root=tmp_path / "weekly"
+        str(path), config=config, store_path=tmp_path / "store.db", out_root=tmp_path / "weekly"
     )
-    assert again.status == "ALREADY_PROCESSED"
+    assert again.status == result.status
     assert again.skipped is True
 
 
@@ -112,9 +112,9 @@ def test_weekly_investigate_and_exit_codes(tmp_path):
                 "--allow-investigate",
             ]
         )
-        == 0
+        == 2
     )
-    # Same output root again: already processed, so no investigation exit code.
+    # Cached assessments preserve the investigation exit code.
     assert (
         main(
             [
@@ -125,7 +125,7 @@ def test_weekly_investigate_and_exit_codes(tmp_path):
                 str(tmp_path / "cli-allow"),
             ]
         )
-        == 0
+        == 2
     )
 
 
@@ -139,9 +139,9 @@ def test_weekly_force_rerun_notes_duplicate_run(tmp_path):
     forced = run_weekly(
         str(path), config=config, store_path=store, out_root=out, force=True
     )
-    assert forced.skipped is False
-    assert forced.recorded is False
-    assert any("already recorded" in note for note in forced.notes)
+    assert forced.skipped is True
+    assert forced.recorded is True
+    assert any("reused immutable" in note for note in forced.notes)
 
 
 def test_weekly_lock_prevents_overlap(tmp_path):
@@ -164,7 +164,7 @@ def test_weekly_lock_prevents_overlap(tmp_path):
         handle.close()
 
     after = run_weekly(str(path), config=config, out_root=out)
-    assert after.status in ("PASS", "PASS_WITH_EXPLANATION")
+    assert after.status == "INCOMPLETE"
 
 
 def test_incomplete_report_directory_is_reprocessed(tmp_path):
@@ -178,8 +178,9 @@ def test_incomplete_report_directory_is_reprocessed(tmp_path):
 
     result = run_weekly(str(path), config=config, out_root=out)
     assert result.skipped is False
-    assert any("incomplete report" in note for note in result.notes)
-    assert (report_dir / "weekly.json").exists()
+    assert Path(result.report_dir) != report_dir
+    assert (report_dir / "report.md").read_text() == "stale partial output"
+    assert (Path(result.report_dir) / "weekly.json").exists()
 
 
 def test_records_from_result_match_temporal_series(tmp_path):

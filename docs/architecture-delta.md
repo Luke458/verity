@@ -22,7 +22,7 @@ why, and the current status of every phase in section 73 of that document.
 | D12 | Onboarding | Added Delta profiling, config proposal, readiness assessment and analyst-outcome import (CSV/Delta). | With no production data yet, the highest-value work is making day one mechanical: profile, propose, flag blockers, and import outcomes without manual entry. |
 | D13 | Feedback simulation | Added a synthetic analyst simulator (drafts, mistakes, unknowns, corrections, latency, investigation disagreement) writing provenance-tagged outcomes. | Real analyst data does not exist yet, but the feedback loop can still be exercised end to end. Provenance guarantees simulated labels never unlock `production_eligible`. |
 | D14 | Canonical repository | retail-qc is canonical; Verity's spine is ported here (replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting). Spark/Databricks adapters and deployment are deliberately skipped; ratio expectations deliberately stay in a versioned JSON file. | One spec, two engines was a drift risk. The pandas engine plus delta-rs covers assessment; managed compute is not required yet, and diffable approvals beat a database table for low-volume governed data. |
-| D15 | Operations | Added `qc weekly` as the single scheduler entry point: version resolution, engine, reference control, expectations, calibration append, drift check, store, report and brief; idempotent per version and alertable via exit codes. | Every step existed as a command, but a refresh needed an operator to run nine of them in order. A scheduler needs one call with a status contract. |
+| D15 | Operations | Added `qc weekly` as the single scheduler entry point: version resolution, engine, reference control, expectations, calibration append, drift check, store, report and brief; content-addressed immutable assessments, separate attempts, SQLite journal recovery and explicit review exit codes. | Every step existed as a command, but a refresh needed an operator to run nine of them in order. A scheduler needs one call with a status contract. |
 | D16 | Field mapping | Added a config `column_map` (canonical -> production) applied by a source decorator, onboarding `--alias` inference, and fail-loud behaviour when a mapped column is absent. | Real tables never use the synthetic names; the engine must see one vocabulary and never silently score a wrong column. |
 
 ## Phase status
@@ -40,7 +40,7 @@ why, and the current status of every phase in section 73 of that document.
 | 9 | Robust statistical ensemble | done | MAD, seasonal z, EWMA, change point |
 | 10 | Forecast calibration | done | empirical residual calibration, finite-sample conformal intervals, prequential across-load pool |
 | 11 | TSPulse research adapter | done (research) | closed production gate, benchmark harness |
-| 12 | Incident memory | partial | retrieval + embedding blend; confirmed-only revisioned store queued |
+| 12 | Incident memory | partial | retrieval + embedding blend; revisioned store with historical observation cutoffs implemented |
 | 13 | Evidence graph | done | |
 | 14 | Semantic decision benchmark | partial | label store, training and shadow scoring done; real-label bake-off pending |
 | 15 | Semantic runtime | done | rule/trained/remote providers, typed score fields |
@@ -58,4 +58,22 @@ why, and the current status of every phase in section 73 of that document.
    calibration is refit, and how drift alerts are handled. The store and drift
    checks exist; the process does not.
 
-Everything else is engineering that can follow demand.
+See [reliability acceptance and limitations](reliability-limitations.md) for the
+current engineering evidence and remaining qualification work. Phase completion
+means an implemented path, not production validation.
+
+## Reliability release (schema versions)
+
+Machine reports use schema 3, findings schema 2, the evidence package schema 1
+and SQLite schema 4. Migrations back up and preserve legacy runs/outcomes;
+legacy identity is never silently reused, and readers tolerate schema-2
+artifacts because no missing historical evidence is invented. `qc.policy`
+computes final status after contracts, references, temporal checks,
+recurrence and scoped approvals, and can clear a specific finding only through
+a verified explanation certificate. `qc.assessment` and `qc.weekly` journal
+immutable assessment content (including `evidence.json`) before atomic
+filesystem publication. `qc.store_cohort` freezes analyst revisions and
+chronological incident groups for separate training, calibration, development
+and test sets. `qc.laya` is a lightweight HTTP adapter; heavy model
+dependencies stay in a separate optional service. Rules remain the default, and
+every current synthetic artifact is ineligible.

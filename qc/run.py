@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -22,6 +23,8 @@ from .contracts import ContractCheck, ContractResult, validate_contracts
 from .counterfactual import CounterfactualResult, reconstruct_counterfactual
 from .decisions import DecisionProvider, DecisionSet, RuleDecisionProvider
 from .evidence import EvidenceGraph, build_evidence_graph
+from .hierarchy import HierarchyCheck, hierarchy_checks
+from .ledger import ExplanationLedger, build_explanation_ledger
 from .lifecycle import (
     LifecycleEvent,
     classify_entity_changes,
@@ -66,7 +69,16 @@ class QCRunResult:
     decisions: DecisionSet | None = None
     relationships: list[EntityRelationship] = field(default_factory=list)
     reference: dict[str, Any] | None = None
+    expectations: Sequence[Any] = ()
+    observed_at: str | None = None
+    temporal_required: bool = False
+    input_findings: list[dict[str, Any]] = field(default_factory=list)
+    snapshot_manifest: dict[str, Any] | None = None
     reasons: list[str] = field(default_factory=list)
+    hierarchy: list[HierarchyCheck] = field(default_factory=list)
+    ledger: ExplanationLedger | None = None
+    evidence_package: Any | None = None
+    certificates: tuple[Any, ...] = ()
     machine: dict[str, Any] = field(default_factory=dict)
 
 
@@ -130,7 +142,7 @@ def _reasons(
     if attribution.offsetting:
         reasons.append("offsetting_explanations")
     if (
-        not attribution.material
+        abs(attribution.raw_delta) <= max(config.materiality_abs, config.materiality_ratio * abs(attribution.previous_total))
         and attribution.breadth > config.broad_recalculation_breadth
     ):
         reasons.append("broad_historical_recalculation")
@@ -214,11 +226,96 @@ def _attach_decisions(
     result: QCRunResult,
     provider: DecisionProvider | None,
     config: DatasetConfig,
+    prior_refreshes: Sequence[dict[str, Any]] = (),
 ) -> QCRunResult:
+    if result.snapshot_manifest is not None:
+        result.machine["snapshot_manifest"] = result.snapshot_manifest
+        result.machine["observed_at"] = result.observed_at
+    from .calendar import calendar_identity
+    result.machine["calendar"] = calendar_identity(config)
+    result.machine["hierarchy"] = {
+        "schema_version": 1,
+        "checks": [check.to_dict() for check in result.hierarchy],
+    }
+    result.machine["ledger"] = result.ledger.to_dict() if result.ledger else None
+    result.machine["statistical"] = {
+        "forecaster": config.forecaster,
+        "selection": "frozen_grid_v1",
+        "min_annual_history": config.temporal_min_annual_history,
+        "interval_alpha": config.temporal_interval_alpha,
+    }
+    from .policy import finalize_policy
+    result.machine["materiality_threshold"] = max(config.materiality_abs,
+        config.materiality_ratio * abs(result.attribution.previous_total)) if result.attribution else config.materiality_abs
+    certificates: tuple[Any, ...] = ()
+    if getattr(config, "statistical_clearance_enabled", True):
+        from .evidence_package import build_assessment_evidence, verify_explanations
+        try:
+            package = build_assessment_evidence(
+                result,
+                config,
+                assessment_id=result.run_id,
+                observation_cutoff=result.observed_at,
+            )
+            certificates = verify_explanations(
+                package,
+                config,
+                materiality_threshold=result.machine["materiality_threshold"],
+            )
+            result.evidence_package = package
+            result.certificates = certificates
+            result.machine["certificate_availability"] = {
+                "status": "AVAILABLE",
+                "verified": sum(1 for item in certificates if item.status == "VERIFIED"),
+                "rejected": sum(1 for item in certificates if item.status == "REJECTED"),
+            }
+        except Exception as error:  # noqa: BLE001 - keep deterministic results
+            result.machine["certificate_availability"] = {
+                "status": "UNAVAILABLE",
+                "error": f"{type(error).__name__}: {error}",
+            }
+    finalize_policy(
+        result,
+        config.optional_checks,
+        certificates,
+        config=config,
+        prior_refreshes=tuple(prior_refreshes),
+    )
+    from dataclasses import asdict
+    result.machine["rule_evidence"] = {
+        "contracts": {"status": result.contracts.status, "failed": [asdict(c) for c in result.contracts.failed]},
+        "events": [asdict(e) for e in result.events],
+        "attribution": asdict(result.attribution) if result.attribution else None,
+        "lineage": asdict(result.lineage) if result.lineage else None,
+        "temporal": asdict(result.temporal) if result.temporal else None,
+        "relationships": [asdict(r) for r in result.relationships],
+    }
+    from .systemone import build_evidence_state
+    result.machine["recorded_evidence_state"] = build_evidence_state(result, 128 * 1024)
     if not config.decision_enabled:
         return result
     active = provider or RuleDecisionProvider(config)
-    result.decisions = active.decide(result)
+    try:
+        result.decisions = active.decide(result)
+        result.machine["provider_availability"] = {"status": "AVAILABLE", "provider": active.name}
+    except Exception as error:
+        if provider is None:
+            raise
+        result.machine["provider_availability"] = {"status": "UNAVAILABLE", "provider": active.name, "error": str(error)}
+        result.decisions = RuleDecisionProvider(config).decide(result)
+    result.machine["provider_recommendation"] = result.decisions.to_dict()
+    result.machine["policy_required_review"] = result.machine["requires_investigation"]
+    if result.machine["policy_required_review"]:
+        from .decisions import DecisionValue
+        result.decisions.values["requires_investigation"] = DecisionValue(
+            field="requires_investigation", kind="boolean", value=True,
+            probabilities={"False": 0.0, "True": 1.0}, strategy="deterministic_policy",
+            probability_kind="deterministic_policy", evidence=[f["finding_id"] for f in result.machine["findings"]
+                if f["outcome"] in ("FAIL", "CONTRACT_FAILURE", "UNAVAILABLE") and f["required"]])
+    result.decisions.requires_investigation = (
+        result.decisions.requires_investigation or result.machine["requires_investigation"]
+    )
+    result.machine["requires_investigation"] = result.decisions.requires_investigation
     result.machine["decision"] = result.decisions.to_dict()
     return result
 
@@ -233,18 +330,51 @@ def run_qc(
     decision_provider: DecisionProvider | None = None,
     reference_frame: pd.DataFrame | None = None,
     reference_spec: ReferenceSpec | None = None,
+    expectations: Sequence[Any] = (),
+    observed_at: str | None = None,
+    prior_refreshes: Sequence[dict[str, Any]] = (),
 ) -> QCRunResult:
     config = config or DatasetConfig()
+    from .store import observation_time
+    observed_at = observation_time(observed_at)
+    from .source import CachedSource
+    if not isinstance(source, CachedSource):
+        source = CachedSource(source, config)
+    from .versions import select_versions
+    current_id, previous_id = select_versions(source.list_versions(), current_id, previous_id)
+    if hasattr(source, "snapshot_metadata"):
+        cutoff_ms = datetime.fromisoformat(observed_at).timestamp() * 1000
+        for selected in (previous_id, current_id):
+            commit = source.snapshot_metadata(selected).get("committed_at_ms")
+            if commit is not None and commit > cutoff_ms + 0.001:
+                raise ValueError(f"snapshot {selected} was unavailable at observation cutoff")
     registry = as_registry(registry)
     run_id = run_id or f"{previous_id}->{current_id}"
 
+    from .assessment import snapshot_manifest
+    raw_source = getattr(source, "source", source)
+    raw_source = getattr(raw_source, "inner", raw_source)
+    source_identity = str(getattr(raw_source, "source_id", getattr(raw_source, "uri", getattr(raw_source, "scenario_dir", "in_memory"))))
+    snapshots = snapshot_manifest(source, previous_id, current_id, config, source_identity)
     previous_available = set(source.available_stages(previous_id))
     current_available = set(source.available_stages(current_id))
     common_stages = sorted(previous_available & current_available)
-    if not common_stages:
-        raise ValueError(f"no common stage between {previous_id!r} and {current_id!r}")
+    input_findings = [{"check": f"input:{stage}", "scope": config.name, "outcome": "UNAVAILABLE", "required": True}
+                      for stage in (config.analysis_stage, config.contract_stage) if stage not in common_stages]
+    for name in sorted(set(("products", "stores", *config.required_dimensions))):
+        for version in (previous_id, current_id):
+            frame = _read_dim(source, version, name)
+            if frame is None:
+                input_findings.append({"check": f"dimension:{name}", "scope": version,
+                                       "outcome": "UNAVAILABLE", "required": name in config.required_dimensions})
+    if config.analysis_stage not in common_stages:
+        contracts = ContractResult(status="PASS", checks=[])
+        result = QCRunResult(run_id=run_id, dataset=config.name, status="INCOMPLETE", contracts=contracts,
+                             version_pair=None, input_findings=input_findings, snapshot_manifest=snapshots, observed_at=observed_at,
+                             machine=_machine(run_id, config.name, "INCOMPLETE", contracts, None, [], None, []))
+        return _attach_decisions(result, decision_provider, config, prior_refreshes)
     stages_to_check: list[str] = []
-    for stage in (config.contract_stage, config.analysis_stage):
+    for stage in common_stages:
         if stage in common_stages and stage not in stages_to_check:
             stages_to_check.append(stage)
     if not stages_to_check:
@@ -255,12 +385,12 @@ def run_qc(
     for stage in stages_to_check:
         current_fact = source.read_fact(current_id, stage)
         previous_fact = source.read_fact(previous_id, stage)
-        stage_result = validate_contracts(current_fact, previous_fact, config)
+        stage_result = validate_contracts(current_fact, previous_fact, config, stage)
         checks.extend(
             ContractCheck(f"{stage}:{check.name}", check.passed, check.detail)
             for check in stage_result.checks
         )
-        if stage == config.contract_stage or contract_current_fact is None:
+        if stage == config.contract_stage:
             contract_current_fact = current_fact
     contracts = ContractResult(
         status=(
@@ -279,12 +409,13 @@ def run_qc(
             status=contracts.status,
             contracts=contracts,
             version_pair=None,
+            snapshot_manifest=snapshots, observed_at=observed_at,
             reasons=reasons,
             machine=_machine(
                 run_id, config.name, contracts.status, contracts, None, [], None, reasons
             ),
         )
-        return _attach_decisions(result, decision_provider, config)
+        return _attach_decisions(result, decision_provider, config, prior_refreshes)
 
     analysis_stage = _resolve_common_stage(
         source, previous_id, current_id, config.analysis_stages()
@@ -307,7 +438,9 @@ def run_qc(
         previous, current, base_grain, config, pair.new_periods
     )
     headline_grain = headline_keys(current, config)
-    if headline_grain != base_grain:
+    if any(key not in current or key not in previous for key in headline_grain):
+        input_findings.append({"check": "revision:headline_grain", "scope": config.name, "outcome": "UNAVAILABLE", "required": True})
+    elif headline_grain != base_grain:
         cubes["headline"] = build_revision_cube(
             previous, current, headline_grain, config, pair.new_periods
         )
@@ -328,16 +461,28 @@ def run_qc(
     )
     relationships = detect_relationships(previous, current, pair, config)
 
-    attribution = explain_revision(cubes["base"], events, registry.events(), config)
+    def approval_available(item):
+        try:
+            approved = datetime.fromisoformat(item["approved_at"])
+            cutoff = datetime.fromisoformat(observed_at)
+            if approved.tzinfo is None:
+                approved = approved.replace(tzinfo=UTC)
+            if cutoff.tzinfo is None:
+                cutoff = cutoff.replace(tzinfo=UTC)
+            return approved <= cutoff
+        except (KeyError, ValueError, TypeError):
+            return False
+    approved_events = [item for item in registry.events() if approval_available(item)]
+    attribution = explain_revision(cubes["base"], events, approved_events, config)
     counterfactual = reconstruct_counterfactual(previous, current, events, config)
-    reconciliation = run_reconciliation(current, contract_current_fact, config)
+    reconciliation = run_reconciliation(current, contract_current_fact if config.analysis_stage != config.contract_stage else None, config)
     lineage = analyze_lineage(
         source, previous_id, current_id, common_stages, config, pair
     )
-    if (reference_frame is None) != (reference_spec is None):
-        raise ValueError(
-            "reference_frame and reference_spec must be provided together"
-        )
+    if reference_frame is not None and reference_spec is None:
+        raise ValueError("reference_frame requires reference_spec")
+    if reference_spec is not None and reference_frame is None:
+        reference_frame = pd.DataFrame()
     reference_report = (
         compare_reference(current, reference_frame, reference_spec, config)
         if reference_frame is not None and reference_spec is not None
@@ -350,7 +495,14 @@ def run_qc(
         config,
         reconstruction_score=counterfactual.reconciliation_score,
     )
-    temporal = run_temporal_qc(previous, current, pair, config, events)
+    try:
+        temporal = run_temporal_qc(previous, current, pair, config, events)
+    except Exception as exc:  # noqa: BLE001 - preserve completed deterministic checks
+        temporal = TemporalResult(
+            target_week=pair.current_max_week, anomaly=False, flags=[],
+            calibration={"unavailable_reason": f"{type(exc).__name__}: {exc}"},
+            series=[], unavailable_series=["provider_execution"],
+        )
     status = historical_status
     if (
         temporal is not None
@@ -363,6 +515,25 @@ def run_qc(
         and reference_report["status"] == "MISMATCH"
     ):
         status = "INVESTIGATE"
+    from .calendar import build_calendar
+    calendar = build_calendar(config)
+    try:
+        hierarchy = hierarchy_checks(current, config)
+    except ValueError:
+        hierarchy = []
+    try:
+        ledger = build_explanation_ledger(
+            previous,
+            current,
+            pair,
+            config,
+            events=events,
+            temporal=temporal,
+            calendar=calendar,
+            approved_event_ids=tuple(attribution.matched_event_ids),
+        )
+    except ValueError:
+        ledger = None
     reasons = _reasons(
         contracts, events, attribution, config, historical_status, relationships
     )
@@ -394,6 +565,7 @@ def run_qc(
             status=status,
             contracts=contracts,
             version_pair=pair,
+            snapshot_manifest=snapshots,
             cubes=cubes,
             events=events,
             attribution=attribution,
@@ -404,6 +576,12 @@ def run_qc(
             evidence=evidence,
             relationships=relationships,
             reference=reference_report,
+            expectations=expectations,
+            hierarchy=hierarchy,
+            ledger=ledger,
+            observed_at=observed_at,
+            temporal_required=config.temporal_enabled and config.temporal_required and bool(pair.new_periods),
+            input_findings=input_findings,
             reasons=reasons,
             machine=_machine(
                 run_id,
@@ -426,4 +604,5 @@ def run_qc(
         ),
         decision_provider,
         config,
+        prior_refreshes,
     )

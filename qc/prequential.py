@@ -21,6 +21,7 @@ import pandas as pd
 
 from .config import DatasetConfig
 from .conformal import ConformalInterval, conformal_interval, minimum_samples
+from .jsonutil import dumps as json_dumps
 from .temporal import _forecast_scale, build_temporal_series, get_forecaster
 
 
@@ -68,30 +69,20 @@ class CalibrationPool:
         """
         if not math.isfinite(float(record.residual)):
             raise ValueError("residual must be finite")
-        self.records = [
-            existing
-            for existing in self.records
-            if not (
-                existing.scope == record.scope
-                and existing.series_id == record.series_id
-                and existing.target_week == record.target_week
-            )
-        ]
+        if record in self.records:
+            return False
         self.records.append(record)
-        if len(self.records) > self.max_records:
-            self.records = self.records[-self.max_records :]
         return True
 
     def usable(
         self, as_of: int, target_week: int, scope: str | None = None
     ) -> list[CalibrationRecord]:
-        return [
-            record
-            for record in self.records
-            if record.available_on < as_of
-            and record.target_week < target_week
-            and (scope is None or record.scope == scope)
-        ]
+        latest: dict[tuple[str, str, int], CalibrationRecord] = {}
+        for record in sorted(self.records, key=lambda item: item.available_on):
+            if (record.available_on < as_of and record.target_week < target_week
+                    and (scope is None or record.scope == scope)):
+                latest[(record.scope, record.series_id, record.target_week)] = record
+        return list(latest.values())[-self.max_records:]
 
     def percentile(
         self,
@@ -202,7 +193,7 @@ class PrequentialStore:
                         f"residual for {record.series_id}@{record.target_week} "
                         "must be finite"
                     )
-                handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+                handle.write(json_dumps(record.to_dict(), sort_keys=True) + "\n")
 
     def pool(self, max_records: int = 100, min_samples: int = 9) -> CalibrationPool:
         pool = CalibrationPool(max_records=max_records, min_samples=min_samples)

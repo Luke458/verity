@@ -129,7 +129,7 @@ def test_benchmark_gate_requires_scenario_holdout(tmp_path):
     )
     assert result.scenario_holdout_accuracy is not None
     assert result.gate["passed"] is True
-    assert result.production_eligible is True
+    assert result.production_eligible is False  # synthetic gates never confer eligibility
 
     strict = tmp_path / "strict.json"
     strict.write_text(

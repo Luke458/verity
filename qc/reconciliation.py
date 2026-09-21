@@ -77,7 +77,7 @@ def _mass_balance(
     base: pd.DataFrame, report: pd.DataFrame, config: DatasetConfig
 ) -> list[ReconciliationCheck]:
     """Per-key, per-week comparison of report against analysis totals."""
-    if base is report or base.equals(report):
+    if base is report:
         return [
             ReconciliationCheck(
                 "mass_balance",
@@ -85,16 +85,27 @@ def _mass_balance(
                 "report and analysis frames are identical; nothing to reconcile",
             )
         ]
+    missing = [key for key in (config.week_column, *config.report_grain)
+               if key not in base.columns or key not in report.columns]
+    if missing:
+        return [ReconciliationCheck("mass_balance", SKIPPED, f"missing grain: {missing}")]
     keys = _key_columns(base, report, config)
     checks: list[ReconciliationCheck] = []
     for metric in config.metric_columns:
+        if metric not in base.columns and metric not in report.columns:
+            continue
         if metric not in base.columns or metric not in report.columns:
+            checks.append(ReconciliationCheck(f"mass_balance:{metric}", SKIPPED, "metric unavailable on one stage"))
             continue
         base_grouped = base.groupby(keys, dropna=False)[metric].sum()
         report_grouped = report.groupby(keys, dropna=False)[metric].sum()
         aligned = pd.concat(
             [base_grouped.rename("base"), report_grouped.rename("report")], axis=1
-        ).fillna(0.0)
+        )
+        if config.absent_entity_policy == "missing" and aligned.isna().any().any():
+            checks.append(ReconciliationCheck(f"mass_balance:{metric}", SKIPPED, "grain coverage incomplete"))
+            continue
+        aligned = aligned.fillna(0.0)
         residual = (aligned["report"] - aligned["base"]).abs()
         scale = aligned["base"].abs().where(aligned["base"].abs() > 1e-9, 1.0)
         relative = residual / scale
@@ -126,15 +137,11 @@ def _count_consistency(
     """
     checks: list[ReconciliationCheck] = []
     week = config.week_column
-    group_keys = [week] + [
-        column
-        for column in config.report_grain
-        if column in report.columns and column in base.columns
-    ]
+    group_keys = [week, *config.report_grain]
     for count, entity in config.count_entity_map:
         if count not in report.columns or entity not in base.columns:
             continue
-        if len(group_keys) > 1 and all(key in base.columns for key in group_keys):
+        if all(key in base.columns and key in report.columns for key in group_keys):
             expected = (
                 base.groupby(group_keys, dropna=False)[entity]
                 .nunique()
@@ -201,7 +208,8 @@ def _ratio_flags(base: pd.DataFrame, config: DatasetConfig) -> list[dict]:
     ratios = grouped["dollar"] / grouped["units"]
     median = float(ratios.median())
     mad = float((ratios - median).abs().median())
-    if mad <= 0:
+    # Floating-point dust around a constant ratio is not a price outlier.
+    if mad <= 1e-9 * max(abs(median), 1.0):
         return []
     flags = []
     for week_id, ratio in ratios.items():

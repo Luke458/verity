@@ -231,5 +231,5 @@ def test_cli_weekly_with_mapping(tmp_path):
                 str(tmp_path / "weekly"),
             ]
         )
-        == 0
+        == 4
     )

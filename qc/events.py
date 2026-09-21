@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .jsonutil import dumps as json_dumps
 from .lifecycle import NEW_BACKFILL, LifecycleEvent
 
 
@@ -27,7 +28,7 @@ def load_registry(path: str | Path) -> list[dict[str, Any]]:
 
 def save_registry(entries: list[dict[str, Any]], path: str | Path) -> None:
     Path(path).write_text(
-        json.dumps({"events": list(entries)}, indent=2, sort_keys=True)
+        json_dumps({"events": list(entries)}, indent=2, sort_keys=True)
     )
 
 

@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
+from .jsonutil import dumps as json_dumps
 from .versions import VersionPair
 
 RELATIONSHIP_TYPES: tuple[str, ...] = (
@@ -78,7 +79,7 @@ class RelationshipStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as handle:
             handle.write(
-                json.dumps(relationship.to_dict(), sort_keys=True) + "\n"
+                json_dumps(relationship.to_dict(), sort_keys=True) + "\n"
             )
 
     def load(self) -> list[EntityRelationship]:
@@ -132,20 +133,9 @@ def _fisher_p_value(correlation: float, n: int) -> float:
 
 
 def _benjamini_hochberg(p_values: Sequence[float], q: float = 0.05) -> list[bool]:
-    """Benjamini-Hochberg step-up; returns a keep mask over the input order."""
-    n = len(p_values)
-    if n == 0:
-        return []
-    order = sorted(range(n), key=lambda index: p_values[index])
-    cutoff_rank = 0
-    for rank, index in enumerate(order, start=1):
-        if p_values[index] <= q * rank / n:
-            cutoff_rank = rank
-    keep = [False] * n
-    for rank, index in enumerate(order, start=1):
-        if rank <= cutoff_rank:
-            keep[index] = True
-    return keep
+    from .conformal import benjamini_hochberg
+
+    return benjamini_hochberg(p_values, q)[1]
 
 
 def _weekly_series(

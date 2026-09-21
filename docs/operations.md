@@ -22,6 +22,9 @@ Tables:
 | `runs` | immutable machine payload per run, plus the versioned feature vector used for retrieval |
 | `outcomes` | append-only analyst confirmations; the latest outcome per run wins |
 | `registry` | expected-event entries revisioned by save; `load_registry` returns the latest revision per event |
+| `assessments` | immutable complete-input identity, results and publication journal |
+| `attempts` | separate execution attempts, including retries |
+| `calibration_revisions` | append-only evidence with observation cutoffs |
 | `relationships` | entity relationships, deduplicated per `(source, target, entity type, relationship)` |
 
 Rules:
@@ -58,8 +61,7 @@ trusting calibration after a pipeline or model change.
 
 ```text
 refresh completes
-  -> qc delta-run / qc run            (deterministic + temporal + decisions)
-  -> qc report                        (human + machine artifacts)
+  -> qc weekly --store data/qc.db     (assessment journal and report publication)
   -> scheduled agent reads reports    (investigation, polls)
   -> analyst confirms outcome         (qc store add-outcome)
   -> qc drift                         (calibration health)
@@ -68,3 +70,7 @@ refresh completes
 
 Threshold governance (who may change `materiality_ratio`, temporal thresholds
 or promotion gates, and when) remains a process decision, not code.
+
+Schema 4 migrations back up existing stores and preserve labels/provenance.
+Historical retrieval selects the latest revision available at its cutoff.
+See [weekly recovery and exit codes](weekly-run.md).

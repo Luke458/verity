@@ -17,8 +17,8 @@ import numpy as np
 
 def sanitize_json(value: Any) -> Any:
     """Recursively replace non-finite floats with ``None``."""
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
+    if isinstance(value, (float, np.floating)):
+        return float(value) if math.isfinite(value) else None
     if isinstance(value, dict):
         return {key: sanitize_json(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -41,6 +41,6 @@ def json_default(value: Any) -> Any:
 
 def dumps(value: Any, **kwargs: Any) -> str:
     """Strict JSON: non-finite floats sanitized, NaN/Infinity disallowed."""
-    kwargs.setdefault("allow_nan", False)
+    kwargs["allow_nan"] = False
     kwargs.setdefault("default", json_default)
     return json.dumps(sanitize_json(value), **kwargs)

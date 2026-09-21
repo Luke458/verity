@@ -9,10 +9,11 @@ provenance in the pilot database. This module checks those prerequisites so
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .jsonutil import dumps as json_dumps
 
 
 @dataclass
@@ -26,10 +27,14 @@ class PilotReadiness:
     plan_hash_verified: bool = False
     min_analyst_labels: int = 10
     detail: str = ""
+    engineering_ready: bool | None = None
+    label_prerequisites_met: bool = False
+    evaluation_complete: bool = False
+    production_eligible: bool = False
 
     @property
     def ready(self) -> bool:
-        return self.status == "READY"
+        return self.label_prerequisites_met
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -81,7 +86,7 @@ def pilot_readiness(
         else:
             plan = CohortPlan.from_json(plan_file)
             plan_sha = hashlib.sha256(
-                json.dumps(plan.to_dict(), sort_keys=True).encode()
+                json_dumps(plan.to_dict(), sort_keys=True).encode()
             ).hexdigest()
             digest_path = plan_file.with_suffix(plan_file.suffix + ".sha256")
             if not digest_path.exists():
@@ -98,9 +103,10 @@ def pilot_readiness(
                 else:
                     plan_hash_verified = True
 
-    status = "READY" if not blockers else "NOT_READY"
+    status = "LABEL_PREREQUISITES_MET" if not blockers else "NOT_READY"
     return PilotReadiness(
         status=status,
+        label_prerequisites_met=not blockers,
         blockers=blockers,
         analyst_labels=analyst,
         synthetic_labels=synthetic,

@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from .config import DatasetConfig
+from .jsonutil import dumps as json_dumps
 from .labels import LabelStore, oracle_labels_for_result
 from .prequential import CalibrationRecord, PrequentialStore
 from .registry import FileRegistry, RegistryStore, StaticRegistry
@@ -98,10 +99,10 @@ def _summarize(
         "registry_mode": registry_mode,
         "scenarios": len(records),
         "engine_status_counts": status_counts,
-        "detection_rate": rate([r.engine_status != "PASS" for r in faulty]),
+        "detection_rate": rate([r.engine_status not in ("PASS", "PASS_WITH_EXPLANATION") for r in faulty]),
         "false_positive_rate": rate(
             [
-                r.historical_status not in (None, "PASS")
+                r.historical_status not in (None, "PASS", "PASS_WITH_EXPLANATION")
                 for r in controls
             ]
         ),
@@ -174,6 +175,10 @@ def run_shadow(
     suite_dir = Path(suite_dir)
     config = config or DatasetConfig()
     suite = json.loads((suite_dir / "suite.json").read_text())
+    if not config.calendar_anchor_date and suite.get("profile"):
+        from qcgen.config import dataset_calendar
+
+        config = replace(config, **dataset_calendar(str(suite["profile"])))
     from qcgen.oracle_vault import OracleVault, default_oracle_root
 
     vault = OracleVault(oracle_dir or default_oracle_root(suite_dir))
@@ -295,12 +300,12 @@ def run_shadow(
         out.mkdir(parents=True, exist_ok=True)
         (out / "shadow.jsonl").write_text(
             "\n".join(
-                json.dumps(record.to_dict(), default=_json_default)
+                json_dumps(record.to_dict(), default=_json_default)
                 for record in records
             )
             + "\n"
         )
         (out / "shadow.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True, default=_json_default)
+            json_dumps(summary, indent=2, sort_keys=True, default=_json_default)
         )
     return summary

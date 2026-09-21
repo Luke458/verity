@@ -12,3 +12,6 @@ data/*
 !data/.gitkeep
 reports/*
 !reports/.gitkeep
+
+.venv-laya/
+.laya/

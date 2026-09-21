@@ -82,6 +82,19 @@ def _json_default(value):
 
 
 def _load_provider(path: str | None):
+    if path and path.startswith("systemone-config:"):
+        config = json.loads(Path(path.split(":", 1)[1]).read_text())
+        artifact = config.get("artifact")
+        if config.get("schema_version") != 1 or not isinstance(artifact, dict):
+            raise ValueError("remote provider config requires schema_version=1 and artifact")
+        if not artifact.get("revision") or not isinstance(artifact.get("weights_sha256"), str) or len(artifact["weights_sha256"]) != 64:
+            raise ValueError("remote provider requires pinned revision and weights_sha256")
+        return SystemOneDecisionProvider(url=config["url"], model=config["model"],
+                                         timeout=config.get("timeout", 60),
+                                         artifact_identity={"model": config["model"], **artifact})
+    if path == "laya" or (path and path.startswith("laya:")):
+        from .laya import LayaDecisionProvider
+        return LayaDecisionProvider(url=path.split(":", 1)[1]) if path != "laya" else LayaDecisionProvider()
     if path in (None, "", "rule"):
         return None
     if path.startswith("systemone:"):
@@ -216,9 +229,8 @@ def _run_scenario(args, config, provider, registry=None):
     source = mapped(raw_source, config.column_map_dict())
     current = args.current if getattr(args, "current", None) else None
     previous = args.previous if getattr(args, "previous", None) else None
-    default_current, default_previous = _scenario_versions(source)
-    current = current or default_current
-    previous = previous or default_previous
+    from .versions import select_versions
+    current, previous = select_versions(source.list_versions(), current, previous)
     if current is None or previous is None:
         raise SystemExit("need at least two versions under the scenario directory")
     return run_qc(
@@ -270,7 +282,10 @@ def _cmd_decide(args: argparse.Namespace) -> int:
 
 def _cmd_train(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    if args.labels:
+    if args.cohort:
+        from .store_cohort import training_records_from_cohort
+        records = training_records_from_cohort(json.loads(Path(args.cohort).read_text()))
+    elif args.labels:
         records = LabelStore(args.labels).load()
         if not records:
             print(f"no label records in {args.labels}", file=sys.stderr)
@@ -314,6 +329,9 @@ def _cmd_train(args: argparse.Namespace) -> int:
     )
     for split in ("train", "validation", "test"):
         split_metrics = metrics[split]
+        if split_metrics.get("status") == "DEFERRED":
+            print(f"  {split}: deferred until frozen challenger selection")
+            continue
         print(
             f"  {split:<11} n={split_metrics['n']:<4} "
             f"overall_accuracy={split_metrics['overall_accuracy']:.3f}"
@@ -604,10 +622,11 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
         storage_options=options,
         stage=args.stage,
         stage_tables=stage_tables,
+        version_map=json.loads(args.version_map) if args.version_map else None,
     )
     versions = delta_source.list_versions()
-    current = args.current or (versions[-1] if versions else None)
-    previous = args.previous or (versions[-2] if len(versions) > 1 else None)
+    from .versions import select_versions
+    current, previous = select_versions(versions, args.current, args.previous)
     if current is None or previous is None:
         print("need at least two versions in the table", file=sys.stderr)
         return 2
@@ -686,6 +705,24 @@ def _cmd_prequential(args: argparse.Namespace) -> int:
 
 
 def _cmd_cohort(args: argparse.Namespace) -> int:
+    if args.source == "store":
+        from .store_cohort import freeze_store_cohort
+        if not args.store or not args.cutoff:
+            raise ValueError("--source store requires --store and --cutoff")
+        report = freeze_store_cohort(args.store, args.cutoff, args.out)
+        if args.provider:
+            from .store_cohort import evaluate_frozen_cohort
+            selection = json.loads(Path(args.selection).read_text()) if args.selection else None
+            if args.out and (Path(args.out) / f"{args.split}-evaluation.json").exists():
+                raise ValueError("evaluation already exists; choose development work before accessing test")
+            report = evaluate_frozen_cohort(report, _load_provider(args.provider) or RuleDecisionProvider(), args.split, selection)
+            if args.out:
+                target = Path(args.out) / f"{args.split}-evaluation.json"
+                if target.exists():
+                    raise ValueError("evaluation already exists; do not repeatedly inspect the test set")
+                target.write_text(_json_dumps(report, indent=2, default=_json_default))
+        print(_json_dumps(report, indent=2, default=_json_default))
+        return 0 if report["status"] in ("FROZEN", "EVALUATED") else 4
     if args.plan:
         plan = CohortPlan.from_json(args.plan)
     else:
@@ -710,12 +747,12 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
         return 0
     print(
         f"cohort cases={result.metrics['cases']} "
-        f"detection_rate={result.metrics['detection_rate']:.3f} "
+        f"detection_rate={result.metrics['detection_rate']} "
         f"ci=[{result.metrics['detection_rate_ci_low']:.3f}, "
         f"{result.metrics['detection_rate_ci_high']:.3f}] "
-        f"false_positive_rate={result.metrics['false_positive_rate']:.3f} "
-        f"expected_match={result.metrics['expected_status_match_rate']:.3f} "
-        f"reconstruction={result.metrics['mean_reconstruction_score']:.3f}"
+        f"false_positive_rate={result.metrics['false_positive_rate']} "
+        f"expected_match={result.metrics['expected_status_match_rate']} "
+        f"reconstruction={result.metrics['mean_reconstruction_score']}"
     )
     for check in result.gate_results:
         state = "PASS" if check["passed"] else "FAIL"
@@ -1239,13 +1276,158 @@ def _cmd_pilot_check(args: argparse.Namespace) -> int:
     return 0 if report.ready else 1
 
 
+def _explain_payload(args: argparse.Namespace) -> dict[str, Any] | None:
+    from pathlib import Path
+
+    if args.report:
+        directory = Path(args.report)
+        machine_path = directory / "report.json"
+        if not machine_path.is_file():
+            raise ValueError(f"report.json not found under {directory}")
+        payload: dict[str, Any] = {
+            "source": str(directory),
+            "machine": json.loads(machine_path.read_text()),
+        }
+        evidence_path = directory / "evidence.json"
+        payload["evidence"] = (
+            json.loads(evidence_path.read_text()) if evidence_path.is_file() else None
+        )
+        return payload
+    from .store import SqliteStore
+
+    if not args.store:
+        raise ValueError("explain requires --report or --store")
+    with SqliteStore(args.store) as store:
+        assessment = (
+            store.assessment(args.assessment)
+            if args.assessment
+            else store.latest_assessment(args.dataset)
+        )
+    if assessment is None:
+        return None
+    payload = {
+        "source": f"{args.store}:{assessment['assessment_id']}",
+        "machine": assessment["result"],
+        "evidence": (
+            json.loads(assessment["artifacts"]["evidence.json"])
+            if "evidence.json" in assessment["artifacts"]
+            else None
+        ),
+    }
+    payload["assessment_id"] = assessment["assessment_id"]
+    return payload
+
+
+def _cmd_explain(args: argparse.Namespace) -> int:
+    try:
+        payload = _explain_payload(args)
+    except (ValueError, OSError) as error:
+        print(f"explain failed: {error}", file=sys.stderr)
+        return 2
+    if payload is None:
+        print("no matching assessment found", file=sys.stderr)
+        return 2
+    if args.json:
+        print(_json_dumps(payload, indent=2, default=_json_default))
+        return 0
+    machine = payload["machine"]
+    print(f"status: {machine.get('status')}  run: {machine.get('run_id')}")
+    findings = machine.get("findings", [])
+    for item in findings:
+        if item.get("outcome") == "PASS":
+            continue
+        print(
+            f"  {item.get('check')} [{item.get('scope')}] "
+            f"{item.get('outcome')} -> {item.get('disposition')}"
+            + (f" basis={item.get('clearance_basis')}" if item.get("clearance_basis") else "")
+        )
+    for item in machine.get("clearance", []):
+        print(
+            f"  clearance: {item.get('finding_id')} -> {item.get('certificate_id')} "
+            f"({item.get('basis')})"
+        )
+    ledger = machine.get("ledger")
+    if ledger:
+        print(
+            "ledger: raw={:.3f} explained={:.3f} unexplained={:.3f} support={}".format(
+                ledger.get("raw_movement", 0.0),
+                ledger.get("net_explained", 0.0),
+                ledger.get("net_unexplained", 0.0),
+                ledger.get("support_level"),
+            )
+        )
+        for contribution in ledger.get("contributions", []):
+            print(
+                f"  {contribution.get('category')} [{contribution.get('scope')}] "
+                f"{contribution.get('value'):.3f} ({contribution.get('support')})"
+            )
+    evidence = payload.get("evidence")
+    if evidence:
+        for certificate in evidence.get("certificates", []):
+            print(
+                f"  certificate {certificate.get('scope')}: {certificate.get('status')}"
+                + (
+                    " reasons=" + ", ".join(certificate.get("reasons", []))
+                    if certificate.get("reasons")
+                    else ""
+                )
+            )
+    return 0
+
+
+def _cmd_evidence_bench(args: argparse.Namespace) -> int:
+    from .evidence_bench import DEFAULT_THRESHOLDS, run_evidence_bench
+
+    thresholds = (
+        tuple(float(value) for value in args.thresholds.split(","))
+        if args.thresholds
+        else DEFAULT_THRESHOLDS
+    )
+    scenario_ids = (
+        tuple(args.scenarios.split(",")) if args.scenarios else None
+    )
+    result = run_evidence_bench(
+        args.suite,
+        config=load_dataset_config(args.config) if args.config else None,
+        thresholds=thresholds,
+        minimum_detection_rate=args.min_detection_rate,
+        maximum_false_positive_rate=args.max_false_positive_rate,
+        scenario_ids=scenario_ids,
+    )
+    if args.out:
+        from pathlib import Path
+
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(_json_dumps(result.to_dict(), indent=2, default=_json_default))
+    if args.json:
+        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
+    else:
+        selection = result.selection.get("selected")
+        print(
+            f"evidence-bench suite={result.suite} "
+            f"selected={selection['materiality_ratio'] if selection else 'none'} "
+            f"gates={result.gates['status']}"
+        )
+        for item in result.selection.get("candidates", []):
+            print(
+                f"  ratio={item['materiality_ratio']} safe={item['safe']} "
+                f"review={item['review_rate']} false_clearance={item['false_clearance_rate']}"
+            )
+        for level, metrics in result.ablation.get("results", {}).items():
+            print(
+                f"  ablation {level}: review={metrics['review_rate']} "
+                f"false_clearance={metrics['false_clearance_rate']}"
+            )
+    return 0 if result.gates["status"] == "PASS" else 2
+
+
 def _cmd_weekly(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
     # Storage credentials may arrive via the environment so they never appear
     # in the process argument list.
     options_raw = args.storage_options or os.environ.get("QC_STORAGE_OPTIONS")
-    options = json.loads(options_raw) if options_raw else None
     try:
+        config = load_dataset_config(args.config) if args.config else DatasetConfig()
+        options = json.loads(options_raw) if options_raw else None
         result = run_weekly(
             args.uri,
             config=config,
@@ -1258,10 +1440,15 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
             expectations_path=args.expectations,
             reference_uri=args.reference_uri,
             reference_spec_path=args.reference_spec,
+            reference_version=args.reference_version,
+            reference_stage=args.reference_stage,
             storage_options=options,
             min_samples=args.min_samples,
             decision_provider=_load_provider(args.provider),
             force=args.force,
+            stage_tables=json.loads(args.stage_tables) if args.stage_tables else None,
+            dim_tables=json.loads(args.dim_tables) if args.dim_tables else None,
+            version_map=json.loads(args.version_map) if args.version_map else None,
         )
     except Exception as error:  # noqa: BLE001 - the scheduler sees a failure
         print(
@@ -1296,11 +1483,12 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
         if result.report_dir:
             print(f"  report: {result.report_dir}")
 
-    if args.allow_investigate and result.status == "INVESTIGATE":
-        return 0
+    if result.status in ("PASS", "PASS_WITH_EXPLANATION") and result.decision and result.decision.get("requires_investigation"):
+        return 2
     return {
         "ALREADY_PROCESSED": 0,
-        "LOCKED": 0,
+        "LOCKED": 75,
+        "INCOMPLETE": 4,
         "PASS": 0,
         "PASS_WITH_EXPLANATION": 0,
         "INVESTIGATE": 2,
@@ -1335,6 +1523,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--suite-dir", default=None)
     train.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
     train.add_argument("--labels", default=None, help="label store JSONL")
+    train.add_argument("--cohort", default=None, help="frozen store-cohort.json; test scoring deferred")
     train.add_argument("--out", required=True)
     train.add_argument("--config", default=None)
     train.add_argument("--validation-fraction", type=float, default=0.3)
@@ -1422,6 +1611,12 @@ def build_parser() -> argparse.ArgumentParser:
     cohort = subparsers.add_parser(
         "cohort", help="run a frozen dev/held-out cohort evaluation"
     )
+    cohort.add_argument("--provider", default=None)
+    cohort.add_argument("--split", choices=("development", "test"), default="development")
+    cohort.add_argument("--selection", default=None)
+    cohort.add_argument("--source", choices=("synthetic", "store"), default="synthetic")
+    cohort.add_argument("--store", default=None)
+    cohort.add_argument("--cutoff", default=None)
     cohort.add_argument("--plan", default=None, help="cohort plan JSON")
     cohort.add_argument("--profile", default=None)
     cohort.add_argument("--scenarios-per-family", type=int, default=None)
@@ -1474,6 +1669,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     delta_run.add_argument("--uri", required=True)
     delta_run.add_argument("--current", default=None)
+    delta_run.add_argument("--version-map", default=None, help="JSON mapping snapshot -> stage/dim:name -> table version")
     delta_run.add_argument("--previous", default=None)
     delta_run.add_argument("--stage", default="warehouse")
     delta_run.add_argument(
@@ -1699,6 +1895,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     weekly.add_argument("--uri", required=True)
     weekly.add_argument("--stage", default="warehouse")
+    weekly.add_argument("--stage-tables", default=None, help="JSON stage to Delta URI map")
+    weekly.add_argument("--dim-tables", default=None, help="JSON dimension to Delta URI map")
+    weekly.add_argument("--version-map", default=None, help="JSON snapshot to stage/dim:name version map")
     weekly.add_argument("--config", default=None)
     weekly.add_argument("--store", default=None, help="SQLite store for runs/outcomes")
     weekly.add_argument(
@@ -1710,6 +1909,8 @@ def build_parser() -> argparse.ArgumentParser:
     weekly.add_argument("--expectations", default=None)
     weekly.add_argument("--reference-uri", default=None)
     weekly.add_argument("--reference-spec", default=None)
+    weekly.add_argument("--reference-version", default=None)
+    weekly.add_argument("--reference-stage", default=None)
     weekly.add_argument("--storage-options", default=None, help="JSON object")
     weekly.add_argument("--min-samples", type=int, default=9)
     weekly.add_argument("--provider", default=None)
@@ -1717,10 +1918,37 @@ def build_parser() -> argparse.ArgumentParser:
     weekly.add_argument(
         "--allow-investigate",
         action="store_true",
-        help="return 0 even when the run requires investigation",
+        help="deprecated compatibility flag; review exit codes remain unchanged",
     )
     weekly.add_argument("--json", action="store_true")
     weekly.set_defaults(func=_cmd_weekly)
+
+    explain = subparsers.add_parser(
+        "explain",
+        help="show an assessment's findings, ledger and clearance certificates",
+    )
+    explain.add_argument("--report", default=None, help="report directory")
+    explain.add_argument("--store", default=None, help="SQLite journal")
+    explain.add_argument("--assessment", default=None, help="assessment id")
+    explain.add_argument("--dataset", default=None, help="latest assessment for dataset")
+    explain.add_argument("--json", action="store_true")
+    explain.set_defaults(func=_cmd_explain)
+
+    bench = subparsers.add_parser(
+        "evidence-bench",
+        help="frozen evidence benchmark: materiality selection, gates and ablation",
+    )
+    bench.add_argument("--suite", required=True, help="generated suite directory")
+    bench.add_argument("--config", default=None)
+    bench.add_argument(
+        "--thresholds", default=None, help="comma-separated materiality ratios"
+    )
+    bench.add_argument("--scenarios", default=None, help="comma-separated scenario ids")
+    bench.add_argument("--min-detection-rate", type=float, default=0.9)
+    bench.add_argument("--max-false-positive-rate", type=float, default=0.1)
+    bench.add_argument("--out", default=None)
+    bench.add_argument("--json", action="store_true")
+    bench.set_defaults(func=_cmd_evidence_bench)
 
     return parser
 

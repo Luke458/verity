@@ -50,7 +50,7 @@ EXPECTATIONS = {
         "status": "INVESTIGATE",
         "classification": "ENTITY_HISTORY_TRUNCATED",
         "fraction_min": 0.99,
-        "latest_week_anomaly": False,
+        "latest_week_anomaly": True,
     },
     "commodity_remap": {
         "status": "INVESTIGATE",

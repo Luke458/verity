@@ -85,7 +85,8 @@ at one entity level only, chosen by `explanation_entity_types` priority
 (store, then banner/state, then product/commodity), so parent and child events
 cannot double count.
 
-`status` is decided as follows:
+Historical attribution is classified as follows; this is one input to the
+final status policy, not the final assessment:
 
 | Condition | Status |
 |---|---|
@@ -205,21 +206,38 @@ Evidence per series:
 | EWMA z | deviation from the exponentially weighted level |
 | change point | strongest recent mean-shift t-statistic (history evidence, not a target-week flag) |
 
-The forecast percentile is calibrated on rolling origins from the previous
-version (coverage per nominal quantile is reported). A target-week anomaly
-must move materially versus the forecast median
+Model selection, fitting and residual calibration use only observations before
+the assessment target; rolling origins never score an observation with a
+forecast that saw it. Series are dense over the observed week span: missing
+weeks are explicit NaN rows with a `missing` marker instead of being compressed
+into consecutive observations. Errors are standardized per origin and pooled by
+metric, aggregation level, model revision and forecast horizon, so a
+different-volume series cannot dominate a shared pool. `forecaster: auto`
+selects on pre-target rolling-origin absolute error over the fixed grid
+(seasonal-naive; ridge trend; ridge trend + annual Fourier order 1-3 + declared
+calendar event indicators, penalties 0.1/1/10), ties break on interval score
+then the simpler model, and the choice is frozen before interval calibration.
+Annual-seasonality candidates require at least 104 completed weeks. `baseline`
+and `chronos` remain available as fixed choices; `chronos` needs the optional
+`[forecast]` extra.
+
+Calibrated prediction intervals come from held-out raw errors
+(`temporal_interval_alpha`, default 0.1) and are reported with history length,
+observed/missing weeks, forecast error, coverage and width. A target-week
+anomaly must move materially versus the forecast median
 (`temporal_min_relative_residual`, default 2%) and then either be a forecast
 extreme or seasonal deviation, or carry corroborating robust-z and EWMA flags;
 a lone robust-z on a low-variance series is noise and is reported without
-flagging. Structural additions from newly appearing entities are subtracted
-from the target week before scoring, at one entity level only (store before
-product) to avoid double counting; registered backfills therefore do not
-trigger latest-week anomalies.
-
-`forecaster` selects `baseline` (seasonal-difference, dependency-free, default)
-or `chronos` (optional `[forecast]` extra, auto-dispatches Chronos-2 / Bolt /
-T5 checkpoints). `forecaster: chronos` with `chronos_model` works on CPU; the
-tiny checkpoint is a useful local smoke test.
+flagging. Forecast-tail flags on leaf series pass Benjamini-Hochberg control
+(`temporal_fdr_q`) before escalation. Same-direction leaf residuals are
+combined within their parent level before materiality testing, so a coordinated
+small movement can escalate when the individual series cannot. Sparse leaves
+fall back to parent expectation times a historically estimated child share and
+are labelled `parent_share`; the fallback cannot support statistical clearance.
+Structural additions from newly appearing entities are subtracted from the
+target week before scoring, at one entity level only (store before product) to
+avoid double counting; registered backfills therefore do not trigger
+latest-week anomalies.
 
 The top-level status is the historical revision status, upgraded to
 `INVESTIGATE` when a latest-week anomaly is flagged and the historical verdict
@@ -268,3 +286,24 @@ status, classification, explained fraction and conservation ratio for each.
   precomputed once per version rather than recomputed per run.
 - Incident memory and the decision layer are implemented in Milestones D; real
   semantic accuracy requires analyst labels (docs/semantic-layer.md).
+
+## Final assessment policy
+
+After contracts, reconciliation, references, temporal checks, recurrence and
+scoped approvals, versioned findings determine one final status. Contract
+failures win; unexplained integrity/anomaly findings yield INVESTIGATE;
+unavailable required evidence yields INCOMPLETE; otherwise explained actionable
+findings yield PASS_WITH_EXPLANATION, and all required successful checks yield
+PASS. Each finding carries a disposition (`HARD_FAILURE`, `UNAVAILABLE_EVIDENCE`,
+`UNEXPLAINED_ANOMALY`, `STATISTICALLY_EXPLAINED`, `HUMAN_APPROVED`,
+`INFORMATIONAL`) and its clearance basis. A finding is cleared only by a
+verified `ExplanationCertificate` for its scope or by explicit human approval;
+certificates require integrity, calibrated support, an interval that contains
+the observation, no contradictory evidence and residual impact below the frozen
+materiality threshold. Arithmetic attribution alone never authorizes clearance.
+Findings recurring in at least two of the last three refreshes escalate when
+the cumulative unexplained impact is material. Optional missing checks remain
+visible. Model requests may add review but cannot clear deterministic review.
+Approval coverage lists exact finding IDs, and approval observation timestamps
+must precede the assessment cutoff. Temporal-only anomalies have UNKNOWN cause
+unless independent evidence exists.

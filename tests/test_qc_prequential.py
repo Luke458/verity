@@ -20,11 +20,12 @@ def test_pool_latest_wins_and_bounds_size():
     assert pool.add(_record(10, 1.0)) is True
     # A corrected residual supersedes the stale one instead of being rejected.
     assert pool.add(_record(10, 5.0)) is True
-    assert [record.residual for record in pool.records] == [5.0]
+    assert [record.residual for record in pool.records] == [1.0, 5.0]
+    assert [record.residual for record in pool.usable(11, 11)] == [5.0]
     for target in (11, 12, 13):
         pool.add(_record(target, float(target)))
-    assert len(pool.records) == 3
-    assert [record.target_week for record in pool.records] == [11, 12, 13]
+    assert len(pool.records) == 5
+    assert [record.target_week for record in pool.usable(14, 14)] == [11, 12, 13]
 
 
 def test_pool_rejects_non_finite_residuals():

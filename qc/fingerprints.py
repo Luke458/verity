@@ -9,12 +9,12 @@ be persisted next to each Delta version.
 from __future__ import annotations
 
 import hashlib
-import json
 
 import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
+from .jsonutil import dumps as json_dumps
 
 
 def manifest_data_fingerprint(manifest: dict) -> str:
@@ -24,7 +24,7 @@ def manifest_data_fingerprint(manifest: dict) -> str:
         name: info.get("fingerprints", {}) for name, info in versions.items()
     }
     return hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode()
+        json_dumps(payload, sort_keys=True).encode()
     ).hexdigest()[:16]
 
 
@@ -46,11 +46,8 @@ def structural_fingerprint(frame: pd.DataFrame, config: DatasetConfig) -> dict:
     week = config.week_column
     metrics = [column for column in config.metric_columns if column in frame.columns]
     entities = [column for column in config.entity_columns if column in frame.columns]
-    key_columns = [week] + [
-        column
-        for column in config.entity_key_columns
-        if column in frame.columns and column != week
-    ]
+    key_columns = [week, *config.entity_key_columns]
+    missing_keys = [key for key in key_columns if key not in frame]
     return {
         "rows": int(len(frame)),
         "weeks": int(frame[week].nunique()) if week in frame.columns else 0,
@@ -58,11 +55,14 @@ def structural_fingerprint(frame: pd.DataFrame, config: DatasetConfig) -> dict:
             int(frame[metrics].isna().sum().sum()) if metrics else 0
         ),
         "duplicate_keys": (
-            int(frame.duplicated(subset=key_columns).sum()) if key_columns else 0
+            int(frame.duplicated(subset=key_columns).sum()) if not missing_keys else None
         ),
+        "missing_grain_columns": missing_keys,
         "entity_set_hash": _entity_set_hash(frame, entities),
         "metric_sums": {
-            metric: float(frame[metric].sum()) for metric in metrics
+            metric: float((frame.loc[frame[week] == frame[week].max(), metric]
+                           if metric in config.snapshot_metrics and week in frame else frame[metric]).sum(min_count=1))
+            for metric in metrics
         },
         "distinct_counts": {
             entity: int(frame[entity].nunique()) for entity in entities
@@ -73,7 +73,8 @@ def structural_fingerprint(frame: pd.DataFrame, config: DatasetConfig) -> dict:
 def fingerprint_deltas(previous: dict, current: dict) -> dict[str, float]:
     deltas: dict[str, float] = {}
     for key in ("rows", "null_cells", "duplicate_keys", "weeks"):
-        deltas[key] = float(current.get(key, 0) - previous.get(key, 0))
+        if current.get(key) is not None and previous.get(key) is not None:
+            deltas[key] = float(current[key] - previous[key])
     for metric, value in current.get("metric_sums", {}).items():
         deltas[f"metric:{metric}"] = float(
             value - previous.get("metric_sums", {}).get(metric, 0.0)

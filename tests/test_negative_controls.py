@@ -93,7 +93,7 @@ def _duplicate_fraction_fails() -> None:
             "units": [1, 1, 2],
         }
     )
-    result = validate_contracts(frame, frame, DatasetConfig())
+    result = validate_contracts(frame, frame, DatasetConfig(entity_key_columns=("store_id",)))
     assert result.status == "DATA_CONTRACT_FAILURE"
     assert _failed(result, "duplicate_fraction")
 
@@ -110,7 +110,7 @@ def _mass_balance_fails() -> None:
     )
     report = base.copy()
     report["dollar"] = [30.0, 20.0]
-    result = run_reconciliation(base, report, DatasetConfig())
+    result = run_reconciliation(base, report, DatasetConfig(report_grain=()))
     assert result.status == "RECONCILIATION_FAILURE"
     assert _failed(result, "mass_balance:dollar")
 
@@ -125,7 +125,7 @@ def _mass_balance_per_key_fails() -> None:
     report = pd.DataFrame(
         {"week": [1, 2], "dollar": [50.0, 50.0], "units": [1, 1]}
     )
-    result = run_reconciliation(base, report, DatasetConfig())
+    result = run_reconciliation(base, report, DatasetConfig(report_grain=()))
     assert result.status == "RECONCILIATION_FAILURE"
     assert _failed(result, "mass_balance:dollar")
 
@@ -135,7 +135,7 @@ def _self_comparison_is_skipped() -> None:
     frame = pd.DataFrame(
         {"week": [1, 2], "dollar": [1.0, 2.0], "units": [1, 2]}
     )
-    result = run_reconciliation(frame, frame.copy(), DatasetConfig())
+    result = run_reconciliation(frame, frame, DatasetConfig())
     assert result.status == "NOT_EVALUATED"
     assert result.checks
     assert all(check.status == "SKIPPED" for check in result.checks)

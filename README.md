@@ -36,8 +36,15 @@ A synthetic analyst simulator exercises the feedback loop with honest
 provenance until real analyst outcomes exist. Verity's spine is ported:
 historical replay, scoped ratio expectations, independent reference controls,
 a bounded RCA loop and prequential point-in-time forecasting. `qc weekly` is
-the single scheduler entry point for a refresh (idempotent per version,
-alertable exit codes); its idempotency and atomicity are being hardened.
+the scheduler entry point for a refresh with content-addressed assessment
+identity, separate attempts, a SQLite journal and recoverable report publication.
+Versioned findings determine final status; model recommendations cannot clear
+deterministic failures. An optional pinned Laya CPU service is a challenger.
+
+See the [weekly runbook](docs/weekly-run.md), [evaluation workflow](docs/evaluation.md),
+[Laya setup](docs/laya.md), and [acceptance/limitations register](docs/reliability-limitations.md).
+Required unavailable checks produce INCOMPLETE. Store-backed evaluation freezes
+observation-time evidence; insufficient independent labels cannot pass gates.
 
 "Implemented" below means the code path exists and is exercised on synthetic
 data. It does not mean validated. [docs/claims.md](docs/claims.md) records the
@@ -139,11 +146,19 @@ uv pip install --python .venv/bin/python -e ".[test]"
 .venv/bin/qc prequential-forecast --uri ./lake/fact --versions 40,41,42 \
   --min-samples 9 --out data/calibration.jsonl
 
+# Explain an assessment: findings, ledger and clearance certificates
+.venv/bin/qc explain --report reports/weekly/<dataset>/<assessment-id> --json
+.venv/bin/qc explain --store data/qc.db --dataset retail --json
+
+# Frozen evidence benchmark: materiality selection, gates and ablation
+.venv/bin/qc evidence-bench --suite data/suites/demo \
+  --thresholds 0.0005,0.001,0.002 --out reports/bench/evidence.json
+
 # Weekly entry point for a scheduler (idempotent; exit 2 = INVESTIGATE)
 .venv/bin/qc weekly --uri ./lake/fact --store data/qc.db \
-  --calibration-store data/calibration.jsonl --out reports/weekly
+  --out reports/weekly
 
-# Real-data pilot readiness gate (see docs/real-pilot.md)
+# Real-data pilot label prerequisites (see docs/real-pilot.md)
 .venv/bin/qc pilot-check --store data/pilot.db --plan config/cohort.json
 
 # Tests
@@ -177,13 +192,14 @@ status and known weaknesses of each row.
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
 | C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; reconciliation and relationships hardened |
 | Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; statistical and gate fixes landed (M3) |
+| Evidence engine | Declared calendar, frozen CPU model selection, hierarchy and ledger evidence, verified certificate clearance, `qc explain` / `qc evidence-bench` | implemented; synthetic qualification only |
 | Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance, locking and atomicity enforced (M4) |
-| Substrates | Frozen-encoder text probe (ModernBERT-class) | research; non-analyst labels block production eligibility |
+| Substrates | Frozen-encoder text probe (ModernBERT-class) | research; eligibility requires a pinned real evaluation and operational checks |
 | Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; paired selection and provenance enforced; real-label selection pending |
 | Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
 | Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research; tags from simulated cause |
 | Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |
-| Weekly run | `qc weekly` orchestrator, idempotent per version, alertable exit codes, cron script | implemented; locked and atomic (M4) |
+| Weekly run | `qc weekly` orchestrator, immutable assessment identity, recoverable journal, review exit codes | implemented; SQLite transactions plus atomic report publication |
 | Integration | Jev/djev-compatible remote decision provider + fallback | implemented; protocol validation enforced (M4) |
 
 See [docs/engine.md](docs/engine.md) for engine semantics and status codes,

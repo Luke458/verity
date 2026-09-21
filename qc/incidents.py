@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from .decisions import DecisionSet, FeatureEncoder
+from .jsonutil import dumps as json_dumps
 
 
 @dataclass
@@ -81,7 +82,7 @@ class IncidentStore:
     def add(self, record: IncidentRecord) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as handle:
-            handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+            handle.write(json_dumps(record.to_dict(), sort_keys=True) + "\n")
 
     def load(self) -> list[IncidentRecord]:
         if not self.path.exists():

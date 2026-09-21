@@ -1,88 +1,35 @@
-# Real-data pilot runbook
+# Real-data analyst shadow runbook
 
-The pilot is the only path to a `production_eligible` claim. Everything before
-it validates plumbing and deterministic semantics on synthetic data
-([claims.md](claims.md)).
+There is no real-data effectiveness evidence yet. The supported path is local
+CPU with Parquet/delta-rs and read-only source access. Rules stay the default.
 
-## Prerequisites
+1. Onboard a table with at least two committed versions: `qc onboard --uri
+   <table> --out config/datasets/pilot.yaml`. Review declared grain, metrics,
+   calendar and field mappings. Supply explicit stage/dimension version maps.
+2. Persist each assessment before importing labels: `qc weekly --uri <table>
+   --config config/datasets/pilot.yaml --store data/pilot.db --out reports/pilot`.
+   Read the final status and every required unavailable finding. INCOMPLETE
+   requires review; it is not a pass. See [weekly recovery](weekly-run.md).
+3. Import outcomes with `qc store import --store data/pilot.db --csv outcomes.csv
+   --dry-run`, then repeat without `--dry-run`. Use the stored run ID, explicit
+   `provenance=analyst`, analyst identity, review label, incident group and label
+   observation timestamp. Corrections append revisions; they never overwrite.
+4. `qc pilot-check` checks label prerequisites against a pinned plan. Its
+   `LABEL_PREREQUISITES_MET` status does not certify engineering readiness,
+   completed evaluation or production eligibility. These are separate fields.
+5. Freeze the real store cohort at an explicit UTC cutoff and follow the
+   [evaluation workflow](evaluation.md). Train, calibrate, select on development,
+   then confirm one frozen challenger on untouched test incidents. Insufficient
+   groups, classes, controls or confidence bounds cannot pass. Keep repeated
+   snapshots and related incidents together; never substitute row splits.
+6. Central eligibility requires a pinned real analyst test artifact, passed
+   confidence-bound and paired comparison gates, and completed operational
+   checks. Trainers, pilot readiness and synthetic benchmark wins cannot grant
+   eligibility. Do not change a validation claim to real until it links to
+   actual supporting data and results.
 
-- One production-like Delta table with at least two committed versions.
-- A dataset YAML from onboarding (`qc onboard --out config/datasets/<name>.yaml`).
-- Analyst capacity to confirm outcomes in the durable store.
-- A frozen cohort plan committed with its `.sha256` digest
-  (`config/cohort.json` + `config/cohort.json.sha256`).
-
-## Steps
-
-1. **Onboard the table**
-
-   ```sh
-   qc onboard --uri <table-uri> --previous <v-1> --current <v> \
-     --out config/datasets/pilot.yaml
-   qc delta-info --uri <table-uri>
-   ```
-
-2. **Run shadow over historical version pairs** (no registry, no oracle)
-
-   ```sh
-   qc delta-run --uri <table-uri> --previous <v-1> --current <v> \
-     --config config/datasets/pilot.yaml --json > reports/pilot/run.json
-   ```
-
-   Inspect `historical_revision`, `latest_week`, `lineage`, and every
-   `NOT_EVALUATED`/`SKIPPED` check. Record disagreements with analysts.
-
-3. **Import confirmed analyst outcomes**
-
-   ```sh
-   qc store import --store data/pilot.db --csv outcomes.csv --dry-run
-   qc store import --store data/pilot.db --csv outcomes.csv
-   ```
-
-   Outcomes must carry `provenance=analyst` explicitly; the importer defaults
-   to `imported`, never `analyst`.
-
-4. **Check readiness**
-
-   ```sh
-   qc pilot-check --store data/pilot.db --plan config/cohort.json
-   ```
-
-   `NOT_READY` lists every blocker: label count, synthetic provenance in the
-   pilot database, unpinned or changed plan. Do not proceed until `READY`.
-
-5. **Freeze the real held-out cohort and score**
-
-   ```sh
-   qc cohort --plan config/cohort.json --out reports/cohort/pilot-v1
-   ```
-
-   The cohort run verifies the plan hash, hashes the engine source, and reports
-   Wilson intervals on detection and false positives. Real-label cohort wiring
-   (store-backed cases) is the remaining engineering task.
-
-6. **Select a champion on the frozen cohort**
-
-   ```sh
-   qc champion --store data/pilot.db --suite-dir <held-out-suite> \
-     --out reports/artifacts/champion-pilot
-   ```
-
-   Selection requires complete gates, homogeneous cohorts, no train/eval
-   overlap, and a paired test that separates the leaders. Only then can
-   `production_eligible` be true.
-
-## Exit criteria
-
-- `qc pilot-check` returns `READY`.
-- Frozen cohort gates pass with reported confidence intervals.
-- Champion selection is significant and trained on analyst-only labels.
-- Every README claim in [claims.md](claims.md) for the used components moves
-  from `validated-synthetic` to `validated-real` with a link to the artifact.
-
-## What is explicitly out of scope until then
-
-- Databricks/Spark execution. The pilot runs on delta-rs against the same
-  versioned snapshots.
-- TSPulse, text probe and remote Jev promotion: each has its own
-  pre-registered gate and stays `research` until it passes.
+The reproducible [local walkthrough](reliability-limitations.md) uses synthetic
+feedback and must remain insufficient for real qualification. Approval and label
+authority, threshold governance and operational sign-off remain organizational
+decisions. Spark/Databricks deployment, automatic publication blocking and GPU
+serving are excluded. See the explicit [limitations register](reliability-limitations.md).

@@ -9,7 +9,6 @@ presented as validated on real refresh behaviour.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,7 @@ from .decisions import (
     TrainedDecisionProvider,
     default_fields,
 )
+from .jsonutil import dumps as json_dumps
 from .labels import LabelRecord
 
 
@@ -47,6 +47,10 @@ def split_records(
 
 def _group_key(record: LabelRecord) -> str:
     """Group sibling scenarios so they cannot straddle a split."""
+    if record.metadata.get("incident_group"):
+        return str(record.metadata["incident_group"])
+    if record.metadata.get("snapshot_identity"):
+        return str(record.metadata["snapshot_identity"])
     suite_id = record.metadata.get("suite_id")
     family = record.family or record.metadata.get("scenario_id")
     return f"{suite_id or '-'}:{family or record.run_id}"
@@ -94,12 +98,65 @@ def split_records_grouped(
         train = validation or test
         validation = []
         test = []
-    if not test and not validation:
-        # Everything landed in train (tiny input): fall back to a row split.
-        train, validation = split_records(
-            records, validation_fraction=validation_fraction, seed=seed
-        )
     return train, validation, test
+
+
+def split_records_four(records, validation_fraction=.3, test_fraction=.2, seed=0):
+    """Disjoint train/calibration/development/test groups; chronological for analyst data."""
+    if not 0 < validation_fraction < 1 or not 0 < test_fraction < 1 or validation_fraction + test_fraction >= 1:
+        raise ValueError("calibration/test fractions must be positive and sum to less than one")
+    frozen = [record.metadata.get("frozen_split") for record in records]
+    if any(frozen):
+        names = ("train", "calibration", "development", "test")
+        if any(value not in names for value in frozen) or len({r.metadata.get("cohort_hash") for r in records}) != 1:
+            raise ValueError("invalid mixed frozen splits")
+        buckets = tuple([r for r in records if r.metadata["frozen_split"] == name] for name in names)
+        if any(not bucket for bucket in buckets):
+            raise ValueError("INSUFFICIENT_EVIDENCE: empty frozen split")
+        seen: set[str] = set()
+        for bucket in buckets:
+            group_ids = {_group_key(r) for r in bucket}
+            if seen & group_ids:
+                raise ValueError("frozen incident groups overlap")
+            seen.update(group_ids)
+        for left, right in zip(buckets, buckets[1:]):
+            if max(r.metadata["observed_at"] for r in left) >= min(r.metadata["observed_at"] for r in right):
+                raise ValueError("frozen splits overlap chronologically")
+        return buckets
+    groups: dict[str, list[LabelRecord]] = {}
+    for record in records:
+        groups.setdefault(_group_key(record), []).append(record)
+    if len(groups) < 4:
+        raise ValueError("INSUFFICIENT_EVIDENCE: at least four independent groups required")
+    analyst = any(record.source == "analyst" for record in records)
+    if analyst:
+        if any(not record.metadata.get("observed_at") for record in records):
+            raise ValueError("INSUFFICIENT_EVIDENCE: observation times required")
+        keys = sorted(groups, key=lambda key: max(r.metadata["observed_at"] for r in groups[key]))
+    else:
+        keys = sorted(groups)
+        keys = [keys[int(index)] for index in np.random.default_rng(seed).permutation(len(keys))]
+    # Reserve development separately from calibration; never reuse a row or group.
+    n_test = max(1, round(len(keys) * test_fraction))
+    n_cal = max(1, round(len(keys) * validation_fraction))
+    n_dev = max(1, round(len(keys) * .15))
+    while n_test + n_cal + n_dev >= len(keys):
+        if n_cal > 1:
+            n_cal -= 1
+        elif n_test > 1:
+            n_test -= 1
+        elif n_dev > 1:
+            n_dev -= 1
+        else:
+            raise ValueError("INSUFFICIENT_EVIDENCE")
+    cuts = [len(keys) - n_cal - n_dev - n_test, len(keys) - n_dev - n_test, len(keys) - n_test]
+    buckets = (keys[:cuts[0]], keys[cuts[0]:cuts[1]], keys[cuts[1]:cuts[2]], keys[cuts[2]:])
+    result = tuple([record for key in bucket for record in groups[key]] for bucket in buckets)
+    if analyst:
+        for left, right in zip(result, result[1:]):
+            if max(r.metadata["observed_at"] for r in left) >= min(r.metadata["observed_at"] for r in right):
+                raise ValueError("INSUFFICIENT_EVIDENCE: incident groups overlap chronologically")
+    return result
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -258,12 +315,14 @@ def train_decision_provider(
                     f"label {value!r} is not a class of {field_name!r}"
                 )
 
-    train_records, validation_records, test_records = split_records_grouped(
+    train_records, validation_records, development_records, test_records = split_records_four(
         records,
         validation_fraction=validation_fraction,
         test_fraction=test_fraction,
         seed=seed,
     )
+    if not train_records or not validation_records or (test_fraction > 0 and not test_records):
+        raise ValueError("INSUFFICIENT_EVIDENCE: independent train/calibration/test groups required")
     train_features = np.asarray(
         [record.features for record in train_records], dtype=float
     )
@@ -314,32 +373,30 @@ def train_decision_provider(
     metrics = {
         "train": evaluate_decision_provider(provider, train_records),
         "validation": evaluate_decision_provider(provider, validation_records),
-        "test": evaluate_decision_provider(provider, test_records),
+        "development": evaluate_decision_provider(provider, development_records),
+        "test": ({"status": "DEFERRED", "n": 0, "overall_accuracy": None, "fields": {}}
+                 if records[0].metadata.get("cohort_hash") else evaluate_decision_provider(provider, test_records)),
         "temperatures": {
             name: head.temperature for name, head in heads.items()
         },
     }
     sources = sorted({record.source for record in records})
     families = sorted({str(record.family) for record in records})
-    production_eligible = bool(sources) and all(
-        source == "analyst" for source in sources
-    )
+    production_eligible = False
     provider.metadata = {
+        "cohort_hash": records[0].metadata.get("cohort_hash"),
+        "fit_groups": sorted({_group_key(r) for r in train_records + validation_records}),
+        "fit_run_ids": sorted({r.run_id for r in train_records + validation_records}),
         "n_records": len(records),
         "n_train": len(train_records),
         "n_validation": len(validation_records),
         "n_test": len(test_records),
+        "n_development": len(development_records),
         "label_sources": sources,
         "families": families,
         "feature_version": provider.encoder.feature_version,
         "production_eligible": production_eligible,
-        "warning": (
-            "Trained on non-analyst labels (oracle/synthetic); plumbing only. "
-            "Retrain on real analyst labels before relying on probabilities."
-            if not production_eligible
-            else "Trained on analyst labels; probability calibration is not "
-            "certified."
-        ),
+        "warning": "Training provenance is not production eligibility; independent pinned evaluation and operational gates remain required.",
     }
     return provider, metrics
 
@@ -352,6 +409,6 @@ def save_training_run(
     path = Path(directory)
     provider.save(path)
     (path / "metrics.json").write_text(
-        json.dumps(metrics, indent=2, sort_keys=True)
+        json_dumps(metrics, indent=2, sort_keys=True)
     )
     return path

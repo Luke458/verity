@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
@@ -50,10 +51,11 @@ def _null_fraction(frame: pd.DataFrame, columns: tuple[str, ...]) -> float:
     return nulls / total
 
 
-def _duplicate_fraction(frame: pd.DataFrame, week_column: str) -> float:
+def _duplicate_fraction(frame: pd.DataFrame, keys: list[str]) -> float:
     if len(frame) == 0:
         return 0.0
-    keys = [column for column in frame.columns if column.endswith("_id") or column == week_column]
+    if any(key not in frame.columns for key in keys):
+        return 0.0
     if not keys:
         return 0.0
     duplicates = int(frame.duplicated(subset=keys).sum())
@@ -66,6 +68,11 @@ def _week_progression_ok(frame: pd.DataFrame, week_column: str) -> tuple[bool, s
     weeks = frame[week_column]
     if weeks.isna().any():
         return False, "null weeks present"
+    if not pd.api.types.is_numeric_dtype(weeks):
+        return False, "sequential weeks must be numeric integers"
+    values = weeks.to_numpy(dtype=float, na_value=np.nan)
+    if not np.isfinite(values).all() or not (values == np.floor(values)).all():
+        return False, "weeks must be finite integers"
     unique = sorted(int(value) for value in weeks.unique())
     contiguous = all(
         right - left == 1 for left, right in zip(unique, unique[1:])
@@ -79,8 +86,19 @@ def validate_contracts(
     current: pd.DataFrame,
     previous: pd.DataFrame | None,
     config: DatasetConfig,
+    stage: str | None = None,
 ) -> ContractResult:
     checks: list[ContractCheck] = []
+    if not current.columns.is_unique:
+        return ContractResult("DATA_CONTRACT_FAILURE", [ContractCheck("unique_columns", False)])
+    grain = dict(config.stage_keys).get(stage or "", config.report_grain if stage == config.contract_stage else config.entity_key_columns)
+    keys = [config.week_column, *grain]
+    missing_keys = [key for key in keys if key not in current.columns]
+    checks.append(ContractCheck("business_keys", not missing_keys, str(missing_keys)))
+    if not missing_keys:
+        checks.append(ContractCheck("key_nulls", not current[keys].isna().any().any()))
+        checks.append(ContractCheck("duplicate_keys", not current.duplicated(keys).any()))
+    checks.append(ContractCheck("unique_columns", current.columns.is_unique))
 
     missing = [column for column in config.required_columns if column not in current.columns]
     checks.append(ContractCheck("required_columns", not missing, ", ".join(missing)))
@@ -92,6 +110,10 @@ def validate_contracts(
         if not pd.api.types.is_numeric_dtype(current[column])
     ]
     checks.append(ContractCheck("metric_dtypes", not non_numeric, ", ".join(non_numeric)))
+
+    nonfinite = [column for column in metrics if column not in non_numeric
+                 and not np.isfinite(current[column].to_numpy(dtype=float, na_value=np.nan)).all()]
+    checks.append(ContractCheck("finite_measures", not nonfinite, ", ".join(nonfinite)))
 
     progression_ok, progression_detail = _week_progression_ok(current, config.week_column)
     checks.append(ContractCheck("week_progression", progression_ok, progression_detail))
@@ -112,7 +134,7 @@ def validate_contracts(
         )
     )
 
-    duplicate_fraction = _duplicate_fraction(current, config.week_column)
+    duplicate_fraction = _duplicate_fraction(current, keys)
     checks.append(
         ContractCheck(
             "duplicate_fraction",
@@ -120,6 +142,14 @@ def validate_contracts(
             f"{duplicate_fraction:.4f} (limit {config.duplicate_fraction_limit})",
         )
     )
+
+    if previous is not None:
+        prior = validate_contracts(previous, None, config, stage)
+        checks.extend(ContractCheck(f"previous:{c.name}", c.passed, c.detail) for c in prior.checks)
+        checks.append(ContractCheck("compatible_schema", set(current.columns) == set(previous.columns)))
+        compatible_keys = all(pd.api.types.is_numeric_dtype(current[key]) == pd.api.types.is_numeric_dtype(previous[key])
+                              for key in keys if key in current and key in previous)
+        checks.append(ContractCheck("compatible_key_types", compatible_keys))
 
     status = (
         "DATA_CONTRACT_FAILURE"

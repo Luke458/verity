@@ -12,12 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from .config import DatasetConfig
 from .conformal import wilson_interval
+from .jsonutil import dumps as json_dumps
 from .run import run_qc
 
 DEFAULT_FAMILIES: tuple[str, ...] = (
@@ -114,7 +115,7 @@ class CohortPlan:
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(
-            json.dumps(self.to_dict(), indent=2, sort_keys=True)
+            json_dumps(self.to_dict(), indent=2, sort_keys=True)
         )
 
 
@@ -164,7 +165,7 @@ def code_sha256(root: str | Path | None = None) -> str:
     """Hash the engine, generator and dataset configs recursively."""
     base = Path(root or Path(__file__).resolve().parents[1])
     digest = hashlib.sha256()
-    for folder in ("qc", "qcgen", "config"):
+    for folder in ("qc", "qcgen", "config", "optional"):
         directory = base / folder
         if not directory.exists():
             continue
@@ -194,8 +195,8 @@ def git_dirty(root: str | Path | None = None) -> bool | None:
     return bool(completed.stdout.strip())
 
 
-def _rate(values: list[bool]) -> float:
-    return sum(values) / len(values) if values else 0.0
+def _rate(values: list[bool]) -> float | None:
+    return sum(values) / len(values) if values else None
 
 
 def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
@@ -227,6 +228,7 @@ def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
         "cases": len(cases),
         "fault_cases": len(faults),
         "control_cases": len(controls),
+        "undefined_reason": "No observations in the corresponding subset" if not controls or not faults or not reconstruction else None,
         "detection_rate": _rate(detected),
         "detection_rate_ci_low": detection_ci[0],
         "detection_rate_ci_high": detection_ci[1],
@@ -245,7 +247,7 @@ def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
             [case.engine_status == "DATA_CONTRACT_FAILURE" for case in expected_contracts]
         ),
         "mean_reconstruction_score": (
-            sum(reconstruction) / len(reconstruction) if reconstruction else 0.0
+            sum(reconstruction) / len(reconstruction) if reconstruction else None
         ),
         "lineage_first_divergence_accuracy": _rate(
             [
@@ -266,7 +268,7 @@ def _gate_results(metrics: dict[str, Any], gates: dict[str, float]) -> list[dict
                 "gate": "min_detection_rate",
                 "threshold": threshold,
                 "actual": metrics["detection_rate"],
-                "passed": metrics["detection_rate"] >= threshold,
+                "passed": metrics.get("detection_rate_ci_low", -1) >= threshold,
             }
         )
     if "max_false_positive_rate" in gates:
@@ -276,7 +278,7 @@ def _gate_results(metrics: dict[str, Any], gates: dict[str, float]) -> list[dict
                 "gate": "max_false_positive_rate",
                 "threshold": threshold,
                 "actual": metrics["false_positive_rate"],
-                "passed": metrics["false_positive_rate"] <= threshold,
+                "passed": metrics.get("false_positive_rate_ci_high", 2) <= threshold,
             }
         )
     if "min_reconstruction_score" in gates:
@@ -286,7 +288,7 @@ def _gate_results(metrics: dict[str, Any], gates: dict[str, float]) -> list[dict
                 "gate": "min_reconstruction_score",
                 "threshold": threshold,
                 "actual": metrics["mean_reconstruction_score"],
-                "passed": metrics["mean_reconstruction_score"] >= threshold,
+                "passed": metrics["mean_reconstruction_score"] is not None and metrics["mean_reconstruction_score"] >= threshold,
             }
         )
     if "min_lineage_first_divergence_accuracy" in gates:
@@ -327,16 +329,18 @@ def run_cohort(
     out_dir: str | Path | None = None,
     plan_path: str | Path | None = None,
 ) -> CohortResult:
-    from qcgen.config import suite_config
+    from qcgen.config import dataset_calendar, suite_config
     from qcgen.scenarios import build_scenario
     from qcgen.sources import ScenarioSource
 
     plan = plan or CohortPlan()
     config = config or DatasetConfig()
+    if not config.calendar_anchor_date:
+        config = replace(config, **dataset_calendar(plan.profile))
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     plan_sha = hashlib.sha256(
-        json.dumps(plan.to_dict(), sort_keys=True).encode()
+        json_dumps(plan.to_dict(), sort_keys=True).encode()
     ).hexdigest()
     plan_hash_verified = False
     if plan_path is not None:
@@ -403,13 +407,13 @@ def run_cohort(
                                 if run_result.attribution is not None
                                 else 0.0
                             ),
-                            detected=run_result.status != "PASS",
+                            detected=run_result.status not in ("PASS", "PASS_WITH_EXPLANATION"),
                             expected_match=(
                                 case.get("expected_status") is not None
                                 and run_result.status == case.get("expected_status")
                             ),
                             false_positive=(
-                                is_control and run_result.status != "PASS"
+                                is_control and run_result.status not in ("PASS", "PASS_WITH_EXPLANATION")
                             ),
                         )
                     )
@@ -443,10 +447,10 @@ def run_cohort(
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         (out / "cohort.json").write_text(
-            json.dumps(cohort_result.to_dict(), indent=2, sort_keys=True, default=str)
+            json_dumps(cohort_result.to_dict(), indent=2, sort_keys=True, default=str)
         )
         (out / "cases.jsonl").write_text(
-            "\n".join(json.dumps(case.to_dict(), sort_keys=True) for case in cases)
+            "\n".join(json_dumps(case.to_dict(), sort_keys=True) for case in cases)
             + "\n"
         )
     return cohort_result

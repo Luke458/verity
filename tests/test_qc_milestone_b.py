@@ -127,7 +127,7 @@ def test_counterfactual_wrong_entity_scores_low():
     result = reconstruct_counterfactual(previous, current, [wrong], CONFIG)
     # Values are recomputed from the frames, so pointing at the wrong entity
     # cannot produce a perfect reconstruction.
-    assert result.reconciliation_score == pytest.approx(0.5)
+    assert result.reconciliation_score == pytest.approx(0.0)  # per-key errors cannot offset
 
 
 # ---------------------------------------------------------------------------

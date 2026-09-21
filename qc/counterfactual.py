@@ -41,6 +41,7 @@ class CounterfactualResult:
     previous_total: float = 0.0
     reconciliation_score: float | None = None
     evaluated: bool = False
+    absolute_residual: float = 0.0
     by_week: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -52,6 +53,7 @@ class CounterfactualResult:
             "previous_total": self.previous_total,
             "reconciliation_score": self.reconciliation_score,
             "evaluated": self.evaluated,
+            "absolute_residual": self.absolute_residual,
             "by_week": list(self.by_week),
         }
 
@@ -79,98 +81,51 @@ def reconstruct_counterfactual(
     config: DatasetConfig,
 ) -> CounterfactualResult:
     metric = config.primary_metric
-    week = config.week_column
+    week, metric = config.week_column, config.primary_metric
     result = CounterfactualResult(metric=metric)
-    if metric not in previous.columns or metric not in current.columns:
+    keys = [week, *dict(config.stage_keys).get(config.analysis_stage, config.entity_key_columns)]
+    if any(key not in previous or key not in current for key in keys) or metric not in previous or metric not in current:
         return result
-    if week not in previous.columns or week not in current.columns:
-        return result
-
-    overlap = sorted(
-        {int(value) for value in previous[week].unique()}
-        & {int(value) for value in current[week].unique()}
-    )
+    overlap = sorted(set(previous[week]) & set(current[week]))
     if not overlap:
         return result
-
-    previous_week = previous.groupby(week)[metric].sum().astype(float)
-    current_week = current.groupby(week)[metric].sum().astype(float)
-    adjusted = current_week.copy()
-    relevant = [
-        event for event in events if event.classification in EXPLAINABLE_CLASSES
-    ]
-    if not relevant:
-        return result
-
-    reconstructable = 0
-    for event in relevant:
-        if event.classification in (NEW_BACKFILL, NEW_RECENT, EXTENDED):
-            column = _entity_column(event.entity_type, current)
-            weeks = list(event.historical_weeks_added)
-            if column is None or not weeks:
-                continue
-            contribution = _week_sum(current, column, event.entity_id, weeks, config)
-            adjusted = adjusted.subtract(contribution, fill_value=0.0)
-            reconstructable += 1
-        elif event.classification in (TRUNCATED, REMOVED):
-            column = _entity_column(event.entity_type, previous)
-            weeks = list(event.historical_weeks_removed)
-            if column is None or not weeks:
-                continue
-            contribution = _week_sum(previous, column, event.entity_id, weeks, config)
-            adjusted = adjusted.add(contribution, fill_value=0.0)
-            reconstructable += 1
+    remove = pd.Series(False, index=current.index)
+    restore = pd.Series(False, index=previous.index)
+    reconstructable = False
+    for event in events:
+        if event.classification not in EXPLAINABLE_CLASSES:
+            continue
+        column = _entity_column(event.entity_type, current)
+        if column is None or column not in previous:
+            continue
+        if event.classification in (NEW_BACKFILL, NEW_RECENT, EXTENDED) and event.historical_weeks_added:
+            remove |= current[column].astype(str).eq(event.entity_id) & current[week].isin(event.historical_weeks_added)
+            reconstructable = True
+        elif event.classification in (TRUNCATED, REMOVED) and event.historical_weeks_removed:
+            restore |= previous[column].astype(str).eq(event.entity_id) & previous[week].isin(event.historical_weeks_removed)
+            reconstructable = True
         elif event.classification == RECLASSIFIED:
-            # Net-conserving by definition; the score tests that conservation.
-            reconstructable += 1
-
-    if reconstructable == 0:
+            reconstructable = True
+    if not reconstructable:
         return result
-
-    raw = current_week - previous_week
-    reconstructed = adjusted - previous_week
-    overlap_index = [
-        value
-        for value in overlap
-        if value in adjusted.index and value in previous_week.index
-    ]
-    numerator = float(
-        sum(
-            abs(
-                float(adjusted.get(value, 0.0))
-                - float(previous_week.get(value, 0.0))
-            )
-            for value in overlap_index
-        )
-    )
-    denominator = float(
-        sum(abs(float(previous_week.get(value, 0.0))) for value in overlap_index)
-    )
-    if denominator <= 1e-9:
-        score = 1.0 if numerator <= 1e-9 else 0.0
-    else:
-        score = max(0.0, 1.0 - numerator / denominator)
-
-    return CounterfactualResult(
-        metric=metric,
-        raw_delta=float(raw.reindex(overlap_index).fillna(0.0).sum()),
-        explained_delta=float(
-            (current_week - adjusted).reindex(overlap_index).fillna(0.0).sum()
-        ),
-        reconstructed_delta=float(
-            reconstructed.reindex(overlap_index).fillna(0.0).sum()
-        ),
-        previous_total=float(
-            previous_week.reindex(overlap_index).fillna(0.0).sum()
-        ),
-        reconciliation_score=score,
-        evaluated=True,
-        by_week=[
-            {
-                "week": int(value),
-                "raw_delta": float(raw.get(value, 0.0)),
-                "reconstructed_delta": float(reconstructed.get(value, 0.0)),
-            }
-            for value in overlap_index
-        ],
-    )
+    adjusted = pd.concat([current.loc[~remove], previous.loc[restore]], ignore_index=True)
+    def grouped(frame):
+        return frame.loc[frame[week].isin(overlap)].groupby(keys, dropna=False)[metric].sum(min_count=1)
+    aligned = pd.concat([grouped(previous).rename("previous"), grouped(current).rename("current"),
+                         grouped(adjusted).rename("adjusted")], axis=1)
+    if config.absent_entity_policy != "zero" and aligned.isna().any().any():
+        return result
+    aligned = aligned.fillna(0.0)
+    raw = aligned.current - aligned.previous
+    residual = aligned.adjusted - aligned.previous
+    numerator = float(residual.abs().sum())
+    denominator = float(aligned.previous.abs().sum())
+    score = max(0., 1. - numerator / denominator) if denominator > 1e-9 else float(numerator <= 1e-9)
+    weekly_raw = raw.groupby(level=week).sum()
+    weekly_residual = residual.groupby(level=week).sum()
+    return CounterfactualResult(metric=metric, raw_delta=float(raw.sum()),
+        explained_delta=float((aligned.current - aligned.adjusted).sum()),
+        reconstructed_delta=float(residual.sum()), previous_total=float(aligned.previous.sum()),
+        reconciliation_score=score, evaluated=True, absolute_residual=numerator,
+        by_week=[{"week": int(value), "raw_delta": float(weekly_raw.get(value, 0.)),
+                  "reconstructed_delta": float(weekly_residual.get(value, 0.))} for value in overlap])

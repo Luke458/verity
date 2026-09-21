@@ -240,7 +240,9 @@ def test_outcome_without_provenance_is_not_analyst(tmp_path):
         store.record_result(result)
         store.record_outcome("case-x", root_cause="MISSING_STORES", confirmed=True)
     records = records_from_store(database)
-    assert records and records[0].source == "unknown"
+    assert records == []  # Review labels are missing; never infer them from cause.
+    with SqliteStore(database) as store:
+        assert store.latest_outcome("case-x")["provenance"] == "unknown"
 
 
 def test_cli_champion(cohorts, tmp_path, capsys):

@@ -39,13 +39,13 @@ def test_small_cohort_end_to_end(tmp_path):
     assert result.metrics["dev"]["cases"] == 2
     assert result.metrics["fault_cases"] == 2
     assert result.metrics["detection_rate"] == 1.0
-    assert result.metrics["false_positive_rate"] == 0.0
-    assert result.metrics["contract_failure_rate"] == 0.0
+    assert result.metrics["false_positive_rate"] is None
+    assert result.metrics["contract_failure_rate"] is None
     assert len(result.code_sha256) == 64
     assert result.plan_sha256
     assert result.production_eligible is False
     assert len(result.gate_results) == 3
-    assert result.gates_passed is True
+    assert result.gates_passed is False  # two faults and no controls cannot qualify
     assert any("Synthetic" in limitation for limitation in result.limitations)
 
     payload = json.loads((tmp_path / "out" / "cohort.json").read_text())

@@ -30,6 +30,7 @@ from .decisions import (
     field_index,
     score_index,
 )
+from .jsonutil import dumps as json_dumps
 
 STATE_LIMIT = 8000
 
@@ -41,7 +42,12 @@ def build_evidence_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
     temporal flags; raw rows are never sent.
     """
     machine = getattr(result, "machine", None) or {}
+    recorded = machine.get("recorded_evidence_state")
+    if isinstance(recorded, str) and len(recorded) <= max_chars:
+        return recorded
     state: dict[str, Any] = {
+        "findings": [f for f in machine.get("findings", []) if f.get("outcome") != "PASS"],
+        "reference": machine.get("reference"),
         "run_id": getattr(result, "run_id", ""),
         "status": getattr(result, "status", ""),
         "version_pair": machine.get("version_pair"),
@@ -96,7 +102,7 @@ def build_evidence_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
         },
         "reasons": list(getattr(result, "reasons", []) or []),
     }
-    serialized = json.dumps(state, default=str, sort_keys=True)
+    serialized = json_dumps(state, default=str, sort_keys=True)
     if len(serialized) <= max_chars:
         return serialized
 
@@ -106,7 +112,7 @@ def build_evidence_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
     if isinstance(temporal, dict):
         temporal.pop("series", None)
     state["reasons"] = list(state.get("reasons", []))[:10]
-    serialized = json.dumps(state, default=str, sort_keys=True)
+    serialized = json_dumps(state, default=str, sort_keys=True)
     if len(serialized) <= max_chars:
         return serialized
 
@@ -120,24 +126,28 @@ def build_evidence_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
                 event["weeks_removed"] = list(event.get("weeks_removed", []))[:10]
             trimmed_events.append(event)
         state["events"] = trimmed_events
-    serialized = json.dumps(state, default=str, sort_keys=True)
+    serialized = json_dumps(state, default=str, sort_keys=True)
     if len(serialized) <= max_chars:
         return serialized
 
     minimal = {
+        "historical_revision": state.get("historical_revision"),
         "run_id": state.get("run_id"),
         "status": state.get("status"),
         "truncated": True,
         "events": list(state.get("events", []))[:5],
         "reasons": list(state.get("reasons", []))[:5],
     }
-    serialized = json.dumps(minimal, default=str, sort_keys=True)
+    serialized = json_dumps(minimal, default=str, sort_keys=True)
     if len(serialized) <= max_chars:
         return serialized
 
     minimal.pop("events", None)
     minimal.pop("reasons", None)
-    serialized = json.dumps(minimal, default=str, sort_keys=True)
+    serialized = json_dumps(minimal, default=str, sort_keys=True)
+    if len(serialized) > max_chars:
+        minimal.pop("historical_revision", None)
+        serialized = json_dumps(minimal, default=str, sort_keys=True)
     if len(serialized) > max_chars:
         raise ValueError(
             f"evidence state cannot fit in {max_chars} characters; "
@@ -424,6 +434,7 @@ class SystemOneDecisionProvider:
     state_limit: int = STATE_LIMIT
     max_response_bytes: int = 4 * 1024 * 1024
     name: str = "systemone"
+    artifact_identity: dict[str, Any] | None = None
 
     def decide(self, result: Any) -> DecisionSet:
         payload = {
@@ -445,7 +456,7 @@ class SystemOneDecisionProvider:
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(
             self.url,
-            data=json.dumps(payload).encode("utf-8"),
+            data=json_dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
                 **(
@@ -460,7 +471,7 @@ class SystemOneDecisionProvider:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:400]
+            detail = error.read(self.max_response_bytes + 1).decode("utf-8", errors="replace")[:400]
             raise RuntimeError(
                 f"systemone request failed with HTTP {error.code}: {detail}"
             ) from error

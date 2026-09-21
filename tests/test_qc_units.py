@@ -25,7 +25,7 @@ from qc.lifecycle import (
 from qc.revision import build_revision_cube, cube_summary
 from qc.versions import build_version_pair
 
-CONFIG = DatasetConfig()
+CONFIG = DatasetConfig(entity_key_columns=("store_id",))
 
 
 def _fact(rows):
@@ -356,6 +356,8 @@ def test_attribution_matches_expected_events_and_status():
     registry = [
         {
             "event_id": "evt-1",
+            "dataset": "synthetic-retail", "confirmed": True, "approved_by": "fixture",
+            "expected_history_start": 1, "expected_history_end": 2,
             "event_type": "new_store_historical_backfill",
             "entity_type": "store",
             "entity_ids": ["S9"],

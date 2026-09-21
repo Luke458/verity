@@ -15,11 +15,11 @@ STAGES = ("source", "coded", "warehouse", "report")
 
 def test_compare_reference_statuses():
     spec = ReferenceSpec("r1", "dataset", ("dollar",))
-    current = pd.DataFrame({"dollar": [10.0, 20.0]})
+    current = pd.DataFrame({"week": [1, 2], "dollar": [10.0, 20.0]})
     assert compare_reference(current, current.copy(), spec)["status"] == "MATCH"
 
     mismatched = compare_reference(
-        current, pd.DataFrame({"dollar": [10.0, 10.0]}), spec
+        current, pd.DataFrame({"week": [1, 2], "dollar": [10.0, 10.0]}), spec
     )
     assert mismatched["status"] == "MISMATCH"
     assert mismatched["checks"][0]["relative_delta"] > 0

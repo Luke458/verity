@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from .decisions import CAUSE_VALUES, DecisionSet
+from .jsonutil import dumps as json_dumps
 
 # Environment variables passed to an agent command by default. Everything else
 # (cloud credentials, API keys, tokens) is withheld unless explicitly listed in
@@ -543,7 +544,7 @@ class CommandAgent:
         def write_stdin() -> None:
             try:
                 assert process.stdin is not None
-                process.stdin.write(json.dumps(brief.to_dict()))
+                process.stdin.write(json_dumps(brief.to_dict()))
                 process.stdin.close()
             except (BrokenPipeError, OSError, ValueError):
                 pass

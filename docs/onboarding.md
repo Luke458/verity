@@ -75,7 +75,9 @@ qc store import --store data/qc.db --delta abfss://.../feedback --dry-run
 
 Required columns: `run_id`, `root_cause`. Optional: `likely_origin` (or
 `origin`), `severity`, `resolution`, `summary`, `analyst`, `confirmed`,
-`requires_investigation`, `symptom_tags` (comma separated), `created`.
+`requires_investigation`, `symptom_tags` (comma separated), `created`,
+`provenance` and `incident_group`. Real evaluation requires explicit analyst
+provenance and identity; synthetic outcomes remain synthetic.
 Unknown `run_id`s are reported as errors and never created; `--dry-run`
 validates without writing. Once outcomes are confirmed, `records_from_store`
 feeds `qc champion` directly.
@@ -89,10 +91,11 @@ feeds `qc champion` directly.
    first real assessment (contracts, revision, lineage, temporal, decisions).
 4. `qc report --scenario-dir ...` is synthetic-only; for Delta use
    `delta-run --json` and capture the machine output.
-5. Start `qc store add-run` weekly (or import run payloads) and collect
+5. Use `qc weekly --store data/qc.db` to persist the shadow assessment before collecting
    confirmed outcomes with `qc store import`.
-6. Freeze a held-out cohort, then `qc champion --store data/qc.db --suite-dir
-   <held-out set> --text-embedder ...` and follow the gates.
+6. Freeze `qc cohort --source store --store data/qc.db --cutoff <UTC timestamp>
+   --out reports/real-cohort`, then follow the separate development/test steps
+   in [evaluation](evaluation.md). Sparse evidence must remain insufficient.
 
 Limitations: onboarding reads a sample, so rare null/duplicate patterns can
 hide beyond 50k rows; raise `--sample-rows` or use `--count`. Version pairs are

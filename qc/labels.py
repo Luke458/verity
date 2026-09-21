@@ -19,6 +19,7 @@ from .config import DatasetConfig
 from .decisions import FeatureEncoder
 from .evidence_text import evidence_text
 from .fingerprints import manifest_data_fingerprint
+from .jsonutil import dumps as json_dumps
 
 CAUSE_BY_ORACLE: dict[str, str] = {
     "missing_stores": "MISSING_STORES",
@@ -100,7 +101,7 @@ class LabelStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as handle:
             for record in records:
-                handle.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
+                handle.write(json_dumps(record.to_dict(), sort_keys=True) + "\n")
 
     def load(self) -> list[LabelRecord]:
         if not self.path.exists():
@@ -194,8 +195,7 @@ def records_from_store(
     outcome is authoritative and is never overridden by the caller: a
     ``synthetic`` or unknown outcome can never be relabelled ``analyst``. The
     `requires_investigation` label uses the explicit outcome field when set,
-    otherwise it is derived (a confirmed non-unknown root cause implies an
-    investigation happened).
+    otherwise the record is omitted; missing review labels are not inferred.
     """
     from .store import SqliteStore
 
@@ -209,13 +209,9 @@ def records_from_store(
             record_source = str(row.get("provenance") or "unknown")
             requires = row.get("requires_investigation")
             if requires is None:
-                requires_label = (
-                    "True"
-                    if str(row.get("root_cause") or "UNKNOWN") != "UNKNOWN"
-                    else "False"
-                )
-            else:
-                requires_label = "True" if bool(requires) else "False"
+                continue  # Missing analyst review labels are not inferred from cause.
+            requires_label = "True" if bool(requires) else "False"
+            payload = json.loads(row["payload"])
             records.append(
                 LabelRecord(
                     run_id=str(row["run_id"]),
@@ -229,7 +225,9 @@ def records_from_store(
                     },
                     features=[float(value) for value in json.loads(row["features"])],
                     feature_version=int(row.get("feature_version") or 1),
-                    metadata={"dataset": row["dataset"]},
+                    metadata={"dataset": row["dataset"], "observed_at": row["created"],
+                              "incident_group": row.get("incident_group") or payload.get("incident_group", row["dataset"]),
+                              "snapshot_identity": payload.get("snapshot_manifest")},
                     text=row.get("evidence_text"),
                 )
             )

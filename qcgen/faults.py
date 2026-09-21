@@ -136,6 +136,12 @@ def inject_new_store_backfill(
     if expected:
         registry = {
             "event_id": f"{ctx.scenario_id}-event",
+            "schema_version": 2,
+            "dataset": "synthetic-retail",
+            "confirmed": True,
+            "approved_by": "synthetic-fixture",
+            "approved_at": "2000-01-01T00:00:00+00:00",
+            "provenance": "synthetic",
             "event_type": "new_store_historical_backfill",
             "entity_type": "store",
             "entity_ids": list(new_ids),

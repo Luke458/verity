@@ -337,7 +337,7 @@ def run_tspulse_benchmark(
         zero_revision_series=zero_revision,
         scenario_holdout_accuracy=holdout_accuracy,
         gate=gate,
-        production_eligible=bool(gate.get("passed", False)),
+        production_eligible=False,
         transformations=sorted(
             {case.transformation for case in embedded if case.transformation}
         ),

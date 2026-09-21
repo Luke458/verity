@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Sequence
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +30,7 @@ from .incidents import cosine_similarity
 from .jsonutil import dumps as json_dumps
 from .relationships import EntityRelationship
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 PROVENANCE_VALUES = (
     "analyst",
     "synthetic",
@@ -62,7 +64,8 @@ CREATE TABLE IF NOT EXISTS outcomes (
     severity TEXT,
     resolution TEXT,
     summary TEXT,
-    symptom_tags TEXT
+    symptom_tags TEXT,
+    incident_group TEXT
 );
 CREATE TABLE IF NOT EXISTS registry (
     event_id TEXT NOT NULL,
@@ -85,6 +88,30 @@ CREATE TABLE IF NOT EXISTS relationships (
 """
 
 
+JOURNAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS assessments (
+ assessment_id TEXT PRIMARY KEY, identity TEXT NOT NULL, status TEXT NOT NULL,
+ artifacts TEXT NOT NULL, checksums TEXT NOT NULL, result TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attempts (
+ attempt_id TEXT PRIMARY KEY, assessment_id TEXT NOT NULL,
+ observed_at TEXT NOT NULL, state TEXT NOT NULL, error TEXT
+);
+CREATE TABLE IF NOT EXISTS calibration_revisions (
+ assessment_id TEXT NOT NULL, series_id TEXT NOT NULL, target_week INTEGER NOT NULL,
+ observed_at TEXT NOT NULL, payload TEXT NOT NULL,
+ PRIMARY KEY (assessment_id, series_id, target_week)
+);
+"""
+
+
+def observation_time(value: str | None = None) -> str:
+    timestamp = datetime.fromisoformat(value) if value else datetime.now(UTC)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return timestamp.astimezone(UTC).isoformat()
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -103,6 +130,17 @@ def import_outcomes(
     ``confirmed``, ``requires_investigation``, ``symptom_tags`` (comma
     separated), ``created``. Unknown runs are reported, never created.
     """
+    if dry_run:
+        clone = object.__new__(SqliteStore)
+        clone.connection = sqlite3.connect(":memory:")
+        clone.connection.row_factory = sqlite3.Row
+        clone._transaction_depth = 0
+        store.connection.backup(clone.connection)
+        try:
+            report = import_outcomes(clone, rows, dry_run=False)
+            return {**report, "dry_run": True}
+        finally:
+            clone.close()
     imported = 0
     errors: list[dict[str, Any]] = []
     for index, row in enumerate(rows):
@@ -150,6 +188,7 @@ def import_outcomes(
                 symptom_tags=tags,
                 requires_investigation=requires,
                 provenance=str(row.get("provenance") or "imported"),
+                incident_group=row.get("incident_group") or None,
                 created=(
                     str(row["created"]) if row.get("created") not in (None, "") else None
                 ),
@@ -163,6 +202,7 @@ def import_outcomes(
 
 class SqliteStore:
     def __init__(self, path: str | Path):
+        self._transaction_depth = 0
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(str(self.path), timeout=30)
@@ -171,7 +211,7 @@ class SqliteStore:
         self.connection.execute("PRAGMA busy_timeout=30000")
         self.connection.execute("PRAGMA foreign_keys=ON")
         self._migrate()
-        self.connection.commit()
+        self._commit()
 
     def _migrate(self) -> None:
         """Create or version-check the schema.
@@ -182,15 +222,40 @@ class SqliteStore:
         """
         row = self.connection.execute("PRAGMA user_version").fetchone()
         version = int(row[0]) if row is not None else 0
-        if version == 0:
-            self.connection.executescript(SCHEMA)
+        if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+            raise ValueError(f"unsupported store schema version {version}")
+        existing = self.connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'").fetchone()
+        if version in (1, 2, 3) or (version == 0 and existing is not None):
+            backup = self.path.with_name(self.path.name + f".v{version}.backup-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}")
+            with sqlite3.connect(backup) as target:
+                self.connection.backup(target)
+        self.connection.execute("BEGIN IMMEDIATE")
+        with self.connection:
+            for statement in (SCHEMA + JOURNAL_SCHEMA).split(";"):
+                if statement.strip():
+                    self.connection.execute(statement)
+            columns = {row[1] for row in self.connection.execute("PRAGMA table_info(outcomes)")}
+            for name, definition in {
+                "provenance": "TEXT NOT NULL DEFAULT 'unknown'",
+                "requires_investigation": "INTEGER",
+                "incident_group": "TEXT",
+            }.items():
+                if name not in columns:
+                    self.connection.execute(f"ALTER TABLE outcomes ADD COLUMN {name} {definition}")
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            return
-        if version != SCHEMA_VERSION:
-            raise ValueError(
-                f"store schema version {version} is not supported by this "
-                f"build (expected {SCHEMA_VERSION}); recreate the store"
-            )
+
+    def _commit(self) -> None:
+        if not self._transaction_depth:
+            self.connection.commit()
+
+    @contextmanager
+    def transaction(self):
+        self._transaction_depth += 1
+        try:
+            with self.connection:
+                yield
+        finally:
+            self._transaction_depth -= 1
 
     def close(self) -> None:
         self.connection.close()
@@ -224,9 +289,9 @@ class SqliteStore:
                 (
                     run_id,
                     dataset,
-                    created or "",
+                    observation_time(created),
                     status,
-                    json.dumps(list(features)) if features is not None else None,
+                    json_dumps(list(features)) if features is not None else None,
                     feature_version,
                     evidence_text,
                     json_dumps(payload, sort_keys=True, default=str),
@@ -236,7 +301,7 @@ class SqliteStore:
             raise ValueError(
                 f"run {run_id!r} is already recorded; runs are immutable"
             ) from error
-        self.connection.commit()
+        self._commit()
 
     def record_result(
         self, result: Any, created: str | None = None
@@ -258,6 +323,62 @@ class SqliteStore:
         return self.connection.execute(
             "SELECT * FROM runs WHERE run_id = ?", (run_id,)
         ).fetchone()
+
+    def assessment(self, assessment_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM assessments WHERE assessment_id = ?", (assessment_id,)
+        ).fetchone()
+        return self._assessment_payload(row)
+
+    def latest_assessment(self, dataset: str | None = None) -> dict[str, Any] | None:
+        rows = self.connection.execute(
+            "SELECT * FROM assessments ORDER BY rowid DESC"
+        ).fetchall()
+        for row in rows:
+            payload = self._assessment_payload(row)
+            if payload is None:
+                continue
+            if dataset is None or payload["result"].get("dataset") == dataset:
+                return payload
+        return None
+
+    @staticmethod
+    def _assessment_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {
+            "assessment_id": row["assessment_id"],
+            "identity": json.loads(row["identity"]),
+            "status": row["status"],
+            "artifacts": json.loads(row["artifacts"]),
+            "checksums": json.loads(row["checksums"]),
+            "result": json.loads(row["result"]),
+        }
+
+    def recent_refreshes(
+        self, dataset: str, limit: int = 2
+    ) -> list[dict[str, Any]]:
+        """Most recent stored machine payloads for recurrence assessment."""
+        rows = self.connection.execute(
+            "SELECT payload FROM runs WHERE dataset = ? "
+            "ORDER BY created DESC, run_id DESC LIMIT ?",
+            (dataset, int(limit)),
+        ).fetchall()
+        refreshes: list[dict[str, Any]] = []
+        for row in rows:
+            payload = json.loads(row["payload"])
+            historical = payload.get("historical_revision") or {}
+            refreshes.append(
+                {
+                    "run_id": payload.get("run_id"),
+                    "status": payload.get("status"),
+                    "findings": payload.get("findings", []),
+                    "ledger": payload.get("ledger"),
+                    "unexplained_delta": historical.get("unexplained_delta", 0.0),
+                    "materiality_threshold": payload.get("materiality_threshold", 0.0),
+                }
+            )
+        return refreshes
 
     def list_runs(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
@@ -292,6 +413,7 @@ class SqliteStore:
         symptom_tags: Sequence[str] = (),
         requires_investigation: bool | None = None,
         provenance: str = "unknown",
+        incident_group: str | None = None,
         created: str | None = None,
     ) -> int:
         if provenance not in PROVENANCE_VALUES:
@@ -303,11 +425,11 @@ class SqliteStore:
         cursor = self.connection.execute(
             "INSERT INTO outcomes (run_id, created, analyst, confirmed, "
             "requires_investigation, provenance, root_cause, likely_origin, "
-            "severity, resolution, summary, symptom_tags) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "severity, resolution, summary, symptom_tags, incident_group) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
-                created or "",
+                observation_time(created),
                 analyst,
                 int(confirmed),
                 None if requires_investigation is None else int(requires_investigation),
@@ -317,33 +439,34 @@ class SqliteStore:
                 severity,
                 resolution,
                 summary,
-                json.dumps(list(symptom_tags)),
+                json_dumps(list(symptom_tags)),
+                incident_group,
             ),
         )
-        self.connection.commit()
+        self._commit()
         return int(cursor.lastrowid or 0)
 
-    def latest_outcome(self, run_id: str) -> dict[str, Any] | None:
+    def latest_outcome(self, run_id: str, as_of: str | None = None) -> dict[str, Any] | None:
         row = self.connection.execute(
-            "SELECT * FROM outcomes WHERE run_id = ? "
-            "ORDER BY outcome_id DESC LIMIT 1",
-            (run_id,),
+            "SELECT * FROM outcomes WHERE run_id = ? AND created != '' AND created <= ? "
+            "ORDER BY created DESC, outcome_id DESC LIMIT 1",
+            (run_id, observation_time(as_of)),
         ).fetchone()
         return dict(row) if row is not None else None
 
-    def confirmed_runs(self) -> list[dict[str, Any]]:
+    def confirmed_runs(self, as_of: str | None = None) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """
             SELECT r.*, o.root_cause, o.likely_origin, o.severity,
                    o.resolution, o.summary, o.symptom_tags, o.analyst,
-                   o.requires_investigation, o.provenance
+                   o.requires_investigation, o.provenance, o.incident_group
             FROM runs AS r
             JOIN outcomes AS o ON o.outcome_id = (
                 SELECT outcome_id FROM outcomes
-                WHERE run_id = r.run_id AND confirmed = 1
-                ORDER BY outcome_id DESC LIMIT 1
-            )
-            """
+                WHERE run_id = r.run_id AND created != '' AND created <= ?
+                ORDER BY created DESC, outcome_id DESC LIMIT 1
+            ) WHERE o.confirmed = 1 AND r.created != '' AND r.created <= ?
+            """, (observation_time(as_of), observation_time(as_of))
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -352,12 +475,13 @@ class SqliteStore:
         features: Sequence[float] | np.ndarray,
         k: int = 3,
         tags: Sequence[str] | None = None,
+        as_of: str | None = None,
     ) -> list[dict[str, Any]]:
         """Confirmed-only similarity retrieval, blending stored features."""
         query = np.asarray(features, dtype=float)
         query_tags = {str(tag) for tag in (tags or [])}
         scored: list[dict[str, Any]] = []
-        for row in self.confirmed_runs():
+        for row in self.confirmed_runs(as_of):
             if not row.get("features"):
                 continue
             vector = np.asarray(json.loads(row["features"]), dtype=float)
@@ -401,28 +525,28 @@ class SqliteStore:
         for entry in entries:
             event_id = str(entry["event_id"])
             self.connection.execute(
-                "INSERT OR REPLACE INTO registry (event_id, revision, created, "
+                "INSERT INTO registry (event_id, revision, created, "
                 "payload) VALUES (?, ?, ?, ?)",
                 (
                     event_id,
                     int(revision),
-                    created or "",
-                    json.dumps(entry, sort_keys=True),
+                    observation_time(created),
+                    json_dumps(entry, sort_keys=True),
                 ),
             )
-        self.connection.commit()
+        self._commit()
         return int(revision)
 
-    def load_registry(self) -> list[dict[str, Any]]:
+    def load_registry(self, as_of: str | None = None) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """
             SELECT payload FROM registry AS current
             WHERE revision = (
                 SELECT MAX(revision) FROM registry
-                WHERE event_id = current.event_id
+                WHERE event_id = current.event_id AND created != '' AND created <= ?
             )
             ORDER BY event_id
-            """
+            """, (observation_time(as_of),)
         ).fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
@@ -452,11 +576,11 @@ class SqliteStore:
                 relationship.entity_type,
                 relationship.relationship,
                 int(relationship.confirmed),
-                created or "",
+                observation_time(created),
                 json_dumps(relationship.to_dict(), sort_keys=True),
             ),
         )
-        self.connection.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def relationships(

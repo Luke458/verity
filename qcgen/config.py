@@ -166,6 +166,29 @@ def suite_config(profile: str = "small", **overrides: Any) -> SuiteConfig:
     return replace(base, **overrides)
 
 
+def dataset_calendar(profile: str = "small") -> dict[str, Any]:
+    """Explicit Australian calendar fields for a synthetic profile.
+
+    Synthetic histories are generated on a Saturday-ending week grid with
+    Christmas, Easter and EOFY boosts; declaring the same calendar keeps the
+    engine's event windows aligned with the generator instead of assuming a
+    geography. The returned mapping is expanded into ``DatasetConfig``.
+    """
+    import datetime as _dt
+
+    start = _dt.date.fromisoformat(profile_history(profile).start_week)
+    anchor = start - _dt.timedelta(days=6)
+    return {
+        "calendar_anchor_date": anchor.isoformat(),
+        "calendar_anchor_week": 1,
+        "calendar_events": (
+            ("christmas", "12-25", 0, 0),
+            ("easter", "easter", 0, 0),
+            ("eofy", "06-30", 0, 0),
+        ),
+    }
+
+
 def _apply_section(base: Any, data: Mapping[str, Any] | None, name: str) -> Any:
     if data is None:
         return base

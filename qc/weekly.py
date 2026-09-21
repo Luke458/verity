@@ -1,27 +1,17 @@
-"""Weekly refresh orchestrator: one entry point after each load.
+"""SQLite-journaled local weekly shadow assessments and recoverable publication.
 
-Runs the full chain for a newly committed version and returns a status that a
-scheduler can alert on:
-
-    version resolution -> contracts/engine -> optional reference control
-    -> scoped expectations -> engine run -> regression/decision layer
-    -> calibration append -> drift check -> durable store -> report + brief
-
-Idempotent by report directory: a version already processed is returned as
-``ALREADY_PROCESSED`` without doing work unless ``force`` is set. Nothing here
-schedules itself; it is designed to be called from cron, Airflow, or a
-Databricks job once the refresh commit lands.
+Immutable assessment identities include snapshot content, configuration, references,
+approvals, engine code and provider identity. Each invocation journals a separate
+execution attempt; cached assessments preserve their original QC status.
 """
 
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
-import os
-import shutil
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +40,8 @@ class WeeklyResult:
     notes: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     code_sha256: str = ""
+    assessment_id: str = ""
+    attempt_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -93,6 +85,10 @@ def _version_key(value: str) -> tuple[int, object]:
     return (0, int(text)) if text.isdigit() else (1, text)
 
 
+def _checkpoint(name: str) -> None:
+    """Fault-injection seam used by crash-recovery regression tests."""
+
+
 def run_weekly(
     uri: str,
     config: DatasetConfig | None = None,
@@ -111,261 +107,183 @@ def run_weekly(
     min_samples: int = 9,
     decision_provider: Any | None = None,
     force: bool = False,
+    stage_tables: dict[str, str] | None = None,
+    dim_tables: dict[str, str] | None = None,
+    version_map: dict[str, dict[str, int]] | None = None,
 ) -> WeeklyResult:
+    from datetime import datetime
+    from uuid import uuid4
+
+    import pandas as pd
+
+    from .assessment import artifact_checksums, digest, publish, snapshot_manifest
     from .delta import DeltaSource
-    from .drift import monitor_drift
-    from .expectations import apply_expectations, load_expectations
-    from .prequential import PrequentialStore, records_from_result
+    from .expectations import load_expectations
+    from .prequential import records_from_result
+    from .reference import ReferenceSpec
     from .reporting import render_markdown
     from .run import run_qc
-    from .source import mapped
+    from .source import CachedSource, mapped
+    from .store import SqliteStore
+    from .versions import select_versions
 
     started = time.time()
     config = config or DatasetConfig()
-    source = mapped(
-        DeltaSource(uri=uri, storage_options=storage_options, stage=stage),
-        config.column_map_dict(),
-    )
-    versions = source.list_versions()
-    current = current or (versions[-1] if versions else None)
-    previous = previous or (versions[-2] if len(versions) > 1 else None)
-    if not current or not previous:
-        raise ValueError("weekly run needs at least two versions")
-    config_hash = hashlib.sha256(
-        json.dumps(config.to_dict(), sort_keys=True, default=str).encode()
-    ).hexdigest()[:8]
-    run_id = f"{config.name}:{stage}:{current}:{config_hash}"
-    report_dir = Path(out_root) / config.name / str(current)
-
-    out_root_path = Path(out_root)
-    out_root_path.mkdir(parents=True, exist_ok=True)
-    lock_path = out_root_path / f".{config.name}.lock"
-    lock_handle = lock_path.open("w")
+    from .source import ParquetManifestSource
+    raw_source = ParquetManifestSource(uri) if uri.endswith(".json") else DeltaSource(uri=uri, storage_options=storage_options, stage=stage, stage_tables=stage_tables, dim_tables=dim_tables, version_map=version_map)
+    source = CachedSource(mapped(raw_source, config.column_map_dict()), config)
+    current, previous = select_versions(source.list_versions(), current, previous)
+    source_id = str(Path(uri).resolve()) if "://" not in uri else uri
+    identity = snapshot_manifest(source, previous, current, config, source_id)
+    committed = identity["snapshots"][-1]["metadata"].get("committed_at_ms")
+    assessment_cutoff = datetime.fromtimestamp(committed / 1000, UTC).isoformat() if committed else datetime.now(UTC).isoformat()
+    identity["observation_cutoff"] = assessment_cutoff
+    from .calendar import calendar_identity
+    from .evidence_package import EVIDENCE_POLICY_VERSION
+    identity.update(engine=code_sha256(), config=config.to_dict(),
+                    reference_uri=reference_uri, reference_version=reference_version,
+                    reference_stage=reference_stage, min_samples=min_samples,
+                    calendar=calendar_identity(config),
+                    evidence_policy=EVIDENCE_POLICY_VERSION,
+                    finding_schema=2, machine_schema=3)
+    expectations = load_expectations(expectations_path) if expectations_path else []
+    identity["expectations"] = [item.to_dict() for item in expectations]
+    reference_frame, reference_spec = None, None
+    if reference_uri or reference_spec_path:
+        if not reference_spec_path:
+            raise ValueError("configured reference requires a specification")
+        reference_spec = ReferenceSpec.from_dict(json.loads(Path(reference_spec_path).read_text()))
+        if reference_uri and reference_version is not None:
+            ref_source = DeltaSource(uri=reference_uri, storage_options=storage_options,
+                                     stage=reference_stage or stage)
+            reference_meta = ref_source.snapshot_metadata(reference_version)
+            identity["reference_snapshot"] = reference_meta
+            reference_commit = reference_meta.get("committed_at_ms")
+            if committed and (reference_commit is None or reference_commit > committed):
+                reference_frame = pd.DataFrame()
+            else:
+                reference_frame = ref_source.read_fact(reference_version, reference_stage or stage)
+        else:
+            reference_frame = pd.DataFrame()
+        from .assessment import frame_digest
+        identity["reference"] = {"spec": reference_spec.to_dict(), "content": frame_digest(reference_frame)}
+    if decision_provider is not None:
+        serializer = getattr(decision_provider, "to_dict", None)
+        artifact = serializer() if serializer else getattr(decision_provider, "artifact_identity", None)
+        if artifact is None:
+            raise ValueError("weekly providers require pinned artifact_identity or to_dict()")
+        identity["provider"] = {"artifact": artifact,
+                                "endpoint": getattr(decision_provider, "url", None),
+                                "timeout": getattr(decision_provider, "timeout", None),
+                                "state_limit": getattr(decision_provider, "state_limit", None)}
+    else:
+        identity["provider"] = "rule"
+    assessment_id = digest(identity)
+    run_id = f"{config.name}:{assessment_id}"
+    attempt_id = str(uuid4())
+    observed_at = datetime.now(UTC).isoformat()
+    report_dir = Path(out_root) / config.name / assessment_id
+    out = Path(out_root)
+    out.mkdir(parents=True, exist_ok=True)
+    lock_handle = (out / f".{config.name}.lock").open("w")
     try:
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         lock_handle.close()
-        return WeeklyResult(
-            dataset=config.name,
-            current_version=current,
-            previous_version=previous,
-            stage=stage,
-            status="LOCKED",
-            run_id=run_id,
-            report_dir=str(report_dir),
-            skipped=True,
-            notes=["another weekly run holds the lock; retry later"],
-            elapsed_seconds=time.time() - started,
-            code_sha256=code_sha256(),
-        )
+        return WeeklyResult(config.name, current, previous, stage, "LOCKED", skipped=True)
+    store = None
     try:
-        completed = (report_dir / "weekly.json").exists()
-        if completed and not force:
-            return WeeklyResult(
-                dataset=config.name,
-                current_version=current,
-                previous_version=previous,
-                stage=stage,
-                status="ALREADY_PROCESSED",
-                run_id=run_id,
-                report_dir=str(report_dir),
-                skipped=True,
-                notes=["completed report exists; use force=true to rerun"],
-                elapsed_seconds=time.time() - started,
-                code_sha256=code_sha256(),
-            )
-
-        notes: list[str] = []
-        if report_dir.exists() and not completed:
-            notes.append(
-                "incomplete report directory found (no weekly.json); reprocessing"
-            )
-
-        reference_frame = None
-        reference_spec = None
-        if reference_uri and reference_spec_path:
-            from .reference import ReferenceSpec
-
-            reference_source = DeltaSource(
-                uri=reference_uri,
-                storage_options=storage_options,
-                stage=reference_stage or stage,
-            )
-            reference_spec = ReferenceSpec.from_dict(
-                json.loads(Path(reference_spec_path).read_text())
-            )
-            reference_versions = reference_source.list_versions()
-            chosen = reference_version
-            if chosen is None:
-                if current in reference_versions:
-                    chosen = current
-                else:
-                    eligible = [
-                        value
-                        for value in reference_versions
-                        if _version_key(value) <= _version_key(current)
-                    ]
-                    chosen = (
-                        max(eligible, key=_version_key) if eligible else None
-                    )
-            elif _version_key(chosen) > _version_key(current):
-                notes.append(
-                    "reference version is later than current; reference skipped"
-                )
-                chosen = None
-            if chosen is None:
-                notes.append("reference table has no usable version; reference skipped")
-                reference_spec = None
-            else:
-                reference_frame = reference_source.read_fact(
-                    chosen, reference_stage or stage
-                )
-        elif reference_uri or reference_spec_path:
-            notes.append("reference_uri and reference_spec are both required; skipped")
-
-        result = run_qc(
-            source,
-            current,
-            previous,
-            config,
-            run_id=run_id,
-            decision_provider=decision_provider,
-            reference_frame=reference_frame,
-            reference_spec=reference_spec,
+        store = SqliteStore(store_path or out / "assessments.sqlite")
+        connection = store.connection
+        connection.execute("INSERT INTO attempts VALUES (?, ?, ?, ?, NULL)",
+                           (attempt_id, assessment_id, observed_at, "STARTED"))
+        connection.commit()
+        _checkpoint("after_attempt")
+        row = connection.execute("SELECT * FROM assessments WHERE assessment_id = ?", (assessment_id,)).fetchone()
+        if row is not None:
+            if json.loads(row["identity"]) != json.loads(json_dumps(identity, default=str)):
+                raise ValueError("assessment identity mismatch")
+            artifacts = json.loads(row["artifacts"])
+            checksums = json.loads(row["checksums"])
+            publish(report_dir, artifacts, checksums)
+            connection.execute("UPDATE attempts SET state = 'PUBLISHED' WHERE attempt_id = ?", (attempt_id,))
+            connection.commit()
+            cached = WeeklyResult(**json.loads(row["result"]))
+            cached.skipped = True
+            cached.notes.append("reused immutable assessment; verified/regenerated journal artifacts")
+            if force:
+                cached.notes.append("forced recovery attempt; immutable evidence was reused")
+            cached.attempt_id = attempt_id
+            cached.report_dir = str(report_dir)
+            cached.artifacts = {name: str(report_dir / Path(path).name) for name, path in cached.artifacts.items()}
+            return cached
+        prior_refreshes = store.recent_refreshes(
+            config.name, limit=max(0, config.recurrence_window - 1)
         )
-
-        expectations_report = None
-        if expectations_path:
-            expectations = load_expectations(expectations_path)
-            target = (
-                int(result.temporal.target_week)
-                if result.temporal is not None
-                else 0
-            )
-            expectations_report = apply_expectations(
-                _ratio_flags(result),
-                expectations,
-                {"dataset": result.dataset, "as_of": str(target)},
-            )
-
-        calibration_added = 0
-        if calibration_path:
-            records = records_from_result(result, scope=config.name)
-            if records:
-                PrequentialStore(calibration_path).add(records)
-            calibration_added = len(records)
-
-        drift = None
-        if calibration_path:
-            pool = PrequentialStore(calibration_path).pool(min_samples=min_samples)
-            drift_target = (
-                int(result.temporal.target_week)
-                if result.temporal is not None
-                else None
-            )
-            if drift_target is not None:
-                drift = monitor_drift(
-                    pool,
-                    as_of=drift_target,
-                    target_week=drift_target,
-                    scope=config.name,
-                ).to_dict()
-                if drift["status"] == "DRIFT":
-                    notes.append(
-                        "calibration drift detected; refit before trusting intervals"
-                    )
-
-        recorded = False
-        if store_path:
-            from .store import SqliteStore
-
-            try:
-                with SqliteStore(store_path) as store:
-                    store.record_result(result)
-                recorded = True
-            except ValueError as error:
-                notes.append(str(error))
-
-        brief = None
+        result = run_qc(source, current, previous, config, run_id=run_id,
+                        decision_provider=decision_provider, reference_frame=reference_frame,
+                        reference_spec=reference_spec, expectations=expectations,
+                        observed_at=assessment_cutoff, prior_refreshes=prior_refreshes)
+        result.machine["snapshot_manifest"] = identity
+        result.machine["observed_at"] = observed_at
+        records = records_from_result(result, scope=config.name)
+        drift_report = None
+        if result.temporal is not None:
+            from .drift import monitor_drift
+            from .prequential import CalibrationPool, CalibrationRecord
+            pool = CalibrationPool(min_samples=min_samples)
+            for prior in connection.execute("SELECT payload FROM calibration_revisions WHERE observed_at < ? ORDER BY observed_at", (assessment_cutoff,)):
+                pool.add(CalibrationRecord.from_dict(json.loads(prior["payload"])))
+            target = result.temporal.target_week
+            drift_report = monitor_drift(pool, target, target, scope=config.name).to_dict()
+            drift_report["observation_cutoff"] = assessment_cutoff
+        artifacts = {"report.md": render_markdown(result),
+                     "report.json": json_dumps(result.machine, indent=2, sort_keys=True, default=str)}
+        if result.evidence_package is not None:
+            package = result.evidence_package.to_dict()
+            package["certificates"] = [
+                certificate.to_dict() for certificate in result.certificates
+            ]
+            artifacts["evidence.json"] = json_dumps(package, indent=2, sort_keys=True, default=str)
         if result.decisions is not None and result.decisions.requires_investigation:
             from .agent import build_investigation_brief
-            from .decisions import FeatureEncoder
-            from .incidents import symptom_tags_for
-
-            incidents: list = []
-            if store_path:
-                try:
-                    with SqliteStore(store_path) as store:
-                        incidents = store.retrieve(
-                            FeatureEncoder().encode(result),
-                            k=3,
-                            tags=symptom_tags_for(result, result.decisions),
-                        )
-                except Exception as error:  # noqa: BLE001 - memory is optional
-                    notes.append(f"incident retrieval failed: {error}")
-            brief = build_investigation_brief(result, result.decisions, incidents)
-
-        tmp_dir = report_dir.with_name(
-            f"{report_dir.name}.tmp-{os.getpid()}"
-        )
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-        tmp_dir.mkdir(parents=True)
-        try:
-            markdown_path = tmp_dir / "report.md"
-            machine_path = tmp_dir / "report.json"
-            markdown_path.write_text(render_markdown(result, brief))
-            machine_path.write_text(
-                json_dumps(result.machine, indent=2, sort_keys=True, default=str)
-            )
-            artifacts = {
-                "markdown": str(report_dir / "report.md"),
-                "machine": str(report_dir / "report.json"),
-            }
-            if brief is not None:
-                brief_path = tmp_dir / "brief.json"
-                brief_path.write_text(
-                    json_dumps(brief.to_dict(), indent=2, sort_keys=True, default=str)
-                )
-                artifacts["brief"] = str(report_dir / "brief.json")
-
-            manifest = WeeklyResult(
-                dataset=config.name,
-                current_version=current,
-                previous_version=previous,
-                stage=stage,
-                status=result.status,
-                run_id=run_id,
-                report_dir=str(report_dir),
-                artifacts=artifacts,
-                decision=_decision_summary(result),
-                drift=drift,
-                prequential_records=calibration_added,
-                expectations=expectations_report,
-                reference=result.machine.get("reference"),
-                recorded=recorded,
-                notes=notes,
-                elapsed_seconds=time.time() - started,
-                code_sha256=code_sha256(),
-            )
-            (tmp_dir / "weekly.json").write_text(
-                json_dumps(manifest.to_dict(), indent=2, sort_keys=True, default=str)
-            )
-
-            backup = report_dir.with_name(f"{report_dir.name}.bak")
-            if report_dir.exists():
-                if backup.exists():
-                    shutil.rmtree(backup)
-                os.replace(report_dir, backup)
-            os.replace(tmp_dir, report_dir)
-            if backup.exists():
-                shutil.rmtree(backup, ignore_errors=True)
-        except Exception:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise
+            artifacts["brief.json"] = json_dumps(build_investigation_brief(result, result.decisions, []).to_dict(), default=str)
+        manifest = WeeklyResult(config.name, current, previous, stage, result.status,
+            run_id=run_id, report_dir=str(report_dir),
+            artifacts={name: str(report_dir / name) for name in artifacts},
+            decision=_decision_summary(result), prequential_records=len(records), drift=drift_report,
+            expectations=result.machine.get("expectations"), reference=result.reference,
+            recorded=True, elapsed_seconds=time.time() - started, code_sha256=identity["engine"],
+            assessment_id=assessment_id, attempt_id=attempt_id)
+        if calibration_path:
+            manifest.notes.append("calibration revisions are authoritative in SQLite; legacy JSONL is not appended")
+        artifacts["weekly.json"] = json_dumps(manifest.to_dict(), indent=2, default=str)
+        checksums = artifact_checksums(artifacts)
+        _checkpoint("before_commit")
+        with store.transaction():
+            store.record_result(result, created=observed_at)
+            connection.execute("INSERT INTO assessments VALUES (?, ?, ?, ?, ?, ?)",
+                (assessment_id, json_dumps(identity, default=str), result.status,
+                 json_dumps(artifacts), json_dumps(checksums), json_dumps(manifest.to_dict())))
+            for record in records:
+                connection.execute("INSERT INTO calibration_revisions VALUES (?, ?, ?, ?, ?)",
+                    (assessment_id, record.series_id, record.target_week, observed_at, json_dumps(record.to_dict())))
+            connection.execute("UPDATE attempts SET state = 'COMMITTED' WHERE attempt_id = ?", (attempt_id,))
+        _checkpoint("after_commit")
+        _checkpoint("before_publish")
+        publish(report_dir, artifacts, checksums)
+        _checkpoint("after_publish")
+        connection.execute("UPDATE attempts SET state = 'PUBLISHED' WHERE attempt_id = ?", (attempt_id,))
+        connection.commit()
         return manifest
+    except Exception as error:
+        if store is not None:
+            store.connection.rollback()
+            store.connection.execute("UPDATE attempts SET error = ? WHERE attempt_id = ?", (str(error), attempt_id))
+            store.connection.commit()
+        raise
     finally:
-        try:
-            fcntl.flock(lock_handle, fcntl.LOCK_UN)
-        finally:
-            lock_handle.close()
+        if store is not None:
+            store.close()
+        fcntl.flock(lock_handle, fcntl.LOCK_UN)
+        lock_handle.close()

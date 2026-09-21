@@ -30,6 +30,35 @@ def minimum_samples(alpha: float) -> int:
     return max(0, math.ceil(1.0 / alpha - 1.0 - 1e-9))
 
 
+def benjamini_hochberg(
+    p_values: Sequence[float], q: float = 0.05
+) -> tuple[list[float], list[bool]]:
+    """Benjamini-Hochberg adjusted p-values and discoveries at level ``q``.
+
+    Returns the step-up adjusted p-value for each input in input order and
+    whether it is a discovery. An empty input yields empty lists rather than
+    claiming any discovery.
+    """
+    if not 0.0 < q < 1.0:
+        raise ValueError("q must be in (0, 1)")
+    values = [float(value) for value in p_values]
+    for value in values:
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError("p-values must be finite and in [0, 1]")
+    count = len(values)
+    if count == 0:
+        return [], []
+    order = sorted(range(count), key=lambda index: values[index])
+    adjusted = [1.0] * count
+    running = 1.0
+    for rank in range(count, 0, -1):
+        index = order[rank - 1]
+        running = min(running, values[index] * count / rank)
+        adjusted[index] = running
+    significant = [adjusted[index] <= q for index in range(count)]
+    return adjusted, significant
+
+
 def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
     """Wilson score interval for a binomial proportion."""
     if n == 0:

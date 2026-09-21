@@ -26,6 +26,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from .config import DatasetConfig
+from .jsonutil import dumps as json_dumps
 
 CAUSE_VALUES: tuple[str, ...] = (
     "MISSING_STORES",
@@ -228,6 +229,11 @@ class FeatureEncoder:
         return list(self._names)
 
     def encode(self, result: Any) -> np.ndarray:
+        recorded = getattr(result, "recorded_features", None)
+        if recorded is not None:
+            if len(recorded) != len(self._names) or not np.isfinite(recorded).all():
+                raise ValueError("invalid recorded feature evidence")
+            return np.asarray(recorded, dtype=float)
         values: dict[str, float] = {name: 0.0 for name in self._names}
         contracts = getattr(result, "contracts", None)
         if contracts is not None and contracts.status == "DATA_CONTRACT_FAILURE":
@@ -341,8 +347,8 @@ class RuleDecisionProvider:
 
     The rules mirror the deterministic semantics: registered structural changes
     do not require investigation, unregistered ones do, material unexplained
-    changes escalate, and a temporal-only movement is reported as market
-    movement rather than a pipeline defect.
+    changes escalate, and unexplained temporal-only movements require review
+    with UNKNOWN cause.
     """
 
     name = "rule"
@@ -350,7 +356,23 @@ class RuleDecisionProvider:
     def __init__(self, config: DatasetConfig | None = None):
         self.config = config or DatasetConfig()
 
+    def to_dict(self) -> dict:
+        from .cohort import code_sha256
+        return {"provider": self.name, "config": self.config.to_dict(), "engine_hash": code_sha256()}
+
     def decide(self, result: Any) -> DecisionSet:
+        if not hasattr(result, "contracts"):
+            from types import SimpleNamespace
+            recorded = result.machine.get("rule_evidence")
+            if recorded is None:
+                raise ValueError("recorded rule evidence is unavailable")
+            def restore(value):
+                if isinstance(value, dict):
+                    return SimpleNamespace(**{k: restore(v) for k, v in value.items()})
+                if isinstance(value, list):
+                    return [restore(v) for v in value]
+                return value
+            result = SimpleNamespace(run_id=result.run_id, **{k: restore(v) for k, v in recorded.items()})
         cause, origin, severity, requires, strength, evidence = self._infer(result)
         distributions = {
             "likely_cause": _heuristic_distribution(cause, CAUSE_VALUES, strength),
@@ -497,7 +519,7 @@ class RuleDecisionProvider:
                 for item in temporal.series
                 if item.anomaly
             ]
-            return "MARKET_MOVEMENT", "UNKNOWN", "LOW", False, 0.6, evidence
+            return "UNKNOWN", "UNKNOWN", "LOW", True, 0.4, evidence
 
         return "UNKNOWN", "UNKNOWN", "LOW", False, 0.4, []
 
@@ -626,7 +648,7 @@ class TrainedDecisionProvider:
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
         target = path / "provider.json"
-        target.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True))
+        target.write_text(json_dumps(self.to_dict(), indent=2, sort_keys=True))
         return target
 
     @classmethod

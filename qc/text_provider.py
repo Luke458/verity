@@ -30,8 +30,16 @@ from .decisions import (
     score_index,
 )
 from .evidence_text import EVIDENCE_TEXT_VERSION, evidence_text
+from .jsonutil import dumps as json_dumps
 from .labels import LabelRecord
-from .training import _brier, _ece, fit_head, fit_temperature, split_records
+from .training import (
+    _brier,
+    _ece,
+    _group_key,
+    fit_head,
+    fit_temperature,
+    split_records_four,
+)
 
 
 class TextEmbedder(Protocol):
@@ -182,7 +190,7 @@ class TextDecisionProvider:
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
         target = path / "provider.json"
-        target.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True))
+        target.write_text(json_dumps(self.to_dict(), indent=2, sort_keys=True))
         return target
 
     @classmethod
@@ -292,9 +300,11 @@ def train_text_provider(
             if value not in fields[field_name].values:
                 raise ValueError(f"label {value!r} is not a class of {field_name!r}")
 
-    train_records, validation_records = split_records(
+    train_records, validation_records, development_records, test_records = split_records_four(
         usable, validation_fraction=validation_fraction, seed=seed
     )
+    if not train_records or not validation_records or not test_records:
+        raise ValueError("INSUFFICIENT_EVIDENCE: independent train/calibration/test groups required")
     train_embeddings = embedder.embed(
         [str(record.text) for record in train_records]
     )
@@ -344,15 +354,19 @@ def train_text_provider(
     metrics = {
         "train": evaluate_text_provider(provider, train_records),
         "validation": evaluate_text_provider(provider, validation_records),
+        "development": evaluate_text_provider(provider, development_records),
+        "test": ({"status": "DEFERRED", "n": 0, "overall_accuracy": None, "fields": {}}
+                 if usable[0].metadata.get("cohort_hash") else evaluate_text_provider(provider, test_records)),
         "temperatures": {
             name: head.temperature for name, head in heads.items()
         },
     }
     sources = sorted({record.source for record in usable})
-    production_eligible = bool(sources) and all(
-        source == "analyst" for source in sources
-    )
+    production_eligible = False
     provider.metadata = {
+        "cohort_hash": usable[0].metadata.get("cohort_hash"),
+        "fit_groups": sorted({_group_key(r) for r in train_records + validation_records}),
+        "fit_run_ids": sorted({r.run_id for r in train_records + validation_records}),
         "n_records": len(usable),
         "n_train": len(train_records),
         "n_validation": len(validation_records),
@@ -361,11 +375,6 @@ def train_text_provider(
         "text_version": EVIDENCE_TEXT_VERSION,
         "embedder": embedder.metadata(),
         "production_eligible": production_eligible,
-        "warning": (
-            "Trained on non-analyst labels (oracle/synthetic); plumbing only. "
-            "Retrain on real analyst labels before relying on probabilities."
-            if not production_eligible
-            else "Trained on analyst labels; calibration is not certified."
-        ),
+        "warning": "Training provenance is not production eligibility; independent pinned evaluation and operational gates remain required.",
     }
     return provider, metrics

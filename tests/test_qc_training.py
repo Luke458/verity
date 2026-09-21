@@ -69,7 +69,7 @@ def test_train_evaluate_and_reload(label_records, tmp_path):
     loaded = TrainedDecisionProvider.load(directory)
     assert loaded.metadata["label_sources"] == ["oracle"]
     assert loaded.metadata["production_eligible"] is False
-    assert "Retrain on real analyst labels" in loaded.metadata["warning"]
+    assert "independent pinned evaluation" in loaded.metadata["warning"]
 
     from qc.run import run_qc
     from qcgen.scenarios import build_scenario
