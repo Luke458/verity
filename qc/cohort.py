@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -259,28 +260,71 @@ def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
     }
 
 
+def _evaluation_cases(cases: Sequence[CohortCase]) -> list[Any]:
+    """Map cohort cases onto the one common evaluation-case contract."""
+    from .evaluation import EvaluationCase
+
+    return [
+        EvaluationCase(
+            case_id=case.case_id,
+            family=case.family,
+            group=case.case_id,
+            actionable=not case.is_control,
+            verifier_status=case.engine_status,
+            challenger_status=case.engine_status,
+            effective_status=case.engine_status,
+            verifier_review=case.detected,
+            challenger_review=case.detected,
+            effective_review=case.detected,
+            expected_review=not case.is_control,
+        )
+        for case in cases
+    ]
+
+
+def _common_gate_results(
+    cases: Sequence[CohortCase], gates: dict[str, float]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The one gate implementation shared by every evaluation path."""
+    from .evaluation import evaluation_gates
+
+    common = evaluation_gates(
+        _evaluation_cases(cases),
+        minimum_detection_rate=gates["min_detection_rate"],
+        maximum_false_positive_rate=gates["max_false_positive_rate"],
+    )
+    nested = common["gates"]
+    checks = [
+        {
+            "gate": "min_detection_rate",
+            "threshold": gates["min_detection_rate"],
+            "actual": nested["detection_rate"]["value"],
+            "passed": nested["detection_rate"]["status"] == "PASS",
+        },
+        {
+            "gate": "max_false_positive_rate",
+            "threshold": gates["max_false_positive_rate"],
+            "actual": nested["false_positive_rate"]["value"],
+            "passed": nested["false_positive_rate"]["status"] == "PASS",
+        },
+        {
+            "gate": "false_clearance_upper_bound",
+            "threshold": 0.01,
+            "actual": nested["false_clearance"]["bound"].get("upper_bound"),
+            "passed": nested["false_clearance"]["status"] == "PASS",
+        },
+        {
+            "gate": "independent_label_errors",
+            "threshold": 0,
+            "actual": len(nested["deterministic_fixture_errors"].get("errors", [])),
+            "passed": nested["deterministic_fixture_errors"]["status"] == "PASS",
+        },
+    ]
+    return checks, common
+
+
 def _gate_results(metrics: dict[str, Any], gates: dict[str, float]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    if "min_detection_rate" in gates:
-        threshold = gates["min_detection_rate"]
-        checks.append(
-            {
-                "gate": "min_detection_rate",
-                "threshold": threshold,
-                "actual": metrics["detection_rate"],
-                "passed": metrics.get("detection_rate_ci_low", -1) >= threshold,
-            }
-        )
-    if "max_false_positive_rate" in gates:
-        threshold = gates["max_false_positive_rate"]
-        checks.append(
-            {
-                "gate": "max_false_positive_rate",
-                "threshold": threshold,
-                "actual": metrics["false_positive_rate"],
-                "passed": metrics.get("false_positive_rate_ci_high", 2) <= threshold,
-            }
-        )
     if "min_reconstruction_score" in gates:
         threshold = gates["min_reconstruction_score"]
         checks.append(
@@ -422,12 +466,15 @@ def run_cohort(
     dev = [case for case in cases if case.split == "dev"]
     metrics = _metrics(heldout)
     metrics["dev"] = _metrics(dev)
-    gates = _gate_results(metrics, plan.gates)
+    common_checks, common = _common_gate_results(heldout, plan.gates)
+    metrics["common_gates"] = common
+    gates = common_checks + _gate_results(metrics, plan.gates)
     cohort_result = CohortResult(
         plan=plan.to_dict(),
         metrics=metrics,
         gate_results=gates,
-        gates_passed=all(check["passed"] for check in gates),
+        gates_passed=all(check["passed"] for check in gates)
+        and common["status"] == "PASS",
         code_sha256=code_sha256(),
         plan_sha256=plan_sha,
         plan_path=str(plan_path) if plan_path is not None else None,

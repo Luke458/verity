@@ -136,7 +136,14 @@ class TextDecisionProvider:
         return (embeddings - self.feature_mean) / safe
 
     def decide(self, result: Any) -> DecisionSet:
-        embedding = self.embedder.embed([evidence_text(result)])
+        text = evidence_text(result)
+        if isinstance(getattr(result, "machine", None), dict):
+            from .evidence_package import evidence_digest
+
+            result.machine["provider_payload_digest"] = evidence_digest(
+                {"provider": "text_probe", "text": text}
+            )
+        embedding = self.embedder.embed([text])
         features = self._standardize(embedding)
         specs = field_index()
         values: dict[str, DecisionValue] = {}
@@ -291,6 +298,23 @@ def train_text_provider(
     usable = [record for record in records if record.text]
     if len(usable) < 4:
         raise ValueError("at least four label records with evidence text are required")
+    from .decisions import FEATURE_VERSION
+
+    for record in usable:
+        if record.feature_version != FEATURE_VERSION:
+            raise ValueError(
+                "INCOMPATIBLE_EVIDENCE: label feature version "
+                f"{record.feature_version} != {FEATURE_VERSION}"
+            )
+        recorded_text_version = record.metadata.get("text_version")
+        if (
+            recorded_text_version is None
+            or int(recorded_text_version) != EVIDENCE_TEXT_VERSION
+        ):
+            raise ValueError(
+                "INCOMPATIBLE_EVIDENCE: label text version "
+                f"{recorded_text_version!r} != {EVIDENCE_TEXT_VERSION}"
+            )
     config = config or DatasetConfig()
     fields = {spec.name: spec for spec in default_fields()}
     for record in usable:

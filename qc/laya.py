@@ -7,10 +7,11 @@ from typing import Any
 
 from .decisions import DecisionSet, default_fields
 from .systemone import (
+    ProviderAbstention,
     SystemOneDecisionProvider,
     _questions,
     answers_to_decisions,
-    build_evidence_state,
+    build_provider_state,
 )
 
 MODEL = "convaiinnovations/laya"
@@ -71,15 +72,19 @@ class LayaDecisionProvider(SystemOneDecisionProvider):
         questions["requires_investigation"]["instructions"] = (
             "Does a failed or incomplete required check need analyst review?"
         )
-        response = self._post(
-            {
-                "model": MODEL,
-                "state": build_evidence_state(result, self.state_limit),
-                "questions": questions,
-            }
-        )
+        state = build_provider_state(result, self.state_limit)
+        payload = {
+            "model": MODEL,
+            "state": state,
+            "questions": questions,
+        }
+        if isinstance(getattr(result, "machine", None), dict):
+            from .evidence_package import evidence_digest
+
+            result.machine["provider_payload_digest"] = evidence_digest(payload)
+        response = self._post(payload)
         if response.get("abstained"):
-            raise ValueError("Laya abstained")
+            raise ProviderAbstention("Laya abstained")
         metadata = response.get("metadata", {})
         if metadata.get("revision") != REVISION or metadata.get("model") != MODEL:
             raise ValueError("Laya model identity mismatch")

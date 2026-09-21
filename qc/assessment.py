@@ -55,7 +55,7 @@ def snapshot_manifest(source, previous, current, config, identity: str) -> dict:
         "source": identity,
         "snapshots": snapshots,
         "config_hash": digest(config.to_dict()),
-        "engine_version": "0.20.0",
+        "engine_version": "0.22.0",
     }
 
 

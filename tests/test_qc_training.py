@@ -32,7 +32,7 @@ def test_oracle_labels_are_versioned(label_records):
     assert len(label_records) == 13
     for record in label_records:
         assert record.source == "oracle"
-        assert record.feature_version == 1
+        assert record.feature_version == 3
         assert record.text and "status=" in record.text
         assert set(record.labels) == {
             "likely_cause",

@@ -65,7 +65,7 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
         assert oracle["expected_events"] == []
     elif family == "expected_event":
         assert case["kind"] == "expected_event"
-        assert case["expected_status"] == "PASS_WITH_EXPLANATION"
+        assert case["expected_status"] == "INVESTIGATE"
         events = oracle["expected_events"]
         assert len(events) == 1
         assert events[0]["entity_ids"] == case["affected"]["stores"]

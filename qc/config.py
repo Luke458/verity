@@ -101,6 +101,12 @@ class DatasetConfig:
     snapshot_metrics: tuple[str, ...] = ("stock",)
     required_dimensions: tuple[str, ...] = ()
     temporal_required: bool = True
+    # Explicit temporal measures. Empty values derive required measures from
+    # the declared required columns and optional measures from the remaining
+    # metric columns; snapshot measures are compared within a period and are
+    # never summed across time.
+    temporal_required_metrics: tuple[str, ...] = ()
+    temporal_optional_metrics: tuple[str, ...] = ()
     optional_checks: tuple[str, ...] = ()
     absent_entity_policy: str = "zero"
     stage_keys: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -172,6 +178,22 @@ class DatasetConfig:
                 raise ValueError("period_map indices must be unique")
         if self.primary_metric not in self.metric_columns:
             raise ValueError("primary_metric must be declared in metric_columns")
+        for declared in (self.temporal_required_metrics, self.temporal_optional_metrics):
+            for metric in declared:
+                if metric not in self.metric_columns:
+                    raise ValueError(
+                        f"temporal metric {metric!r} must be declared in metric_columns"
+                    )
+        if set(self.temporal_required_metrics) & set(self.temporal_optional_metrics):
+            raise ValueError(
+                "temporal required and optional metrics must be disjoint"
+            )
+        if self.temporal_required_metrics and (
+            self.primary_metric not in self.temporal_required_metrics
+        ):
+            raise ValueError(
+                "primary_metric must be a required temporal metric"
+            )
         if self.unit_value_metric and self.unit_value_metric not in self.metric_columns:
             raise ValueError("unit_value_metric must be declared in metric_columns")
         if self.unit_value_quantity and self.unit_value_quantity not in self.metric_columns:
@@ -207,9 +229,15 @@ class DatasetConfig:
     temporal_z_threshold: float = 3.0
     temporal_change_point_threshold: float = 5.0
     temporal_min_relative_residual: float = 0.02
+    # Absolute materiality floor per metric/period/scope; never an accumulated
+    # historical total.
+    temporal_materiality_abs: float = 0.0
     temporal_lower_percentile: float = 0.01
     temporal_upper_percentile: float = 0.99
     temporal_backtest_origins: int = 26
+    # The latest origins are reserved exclusively for interval calibration and
+    # never reused for model selection.
+    temporal_calibration_origins: int = 12
     # Annual-seasonality explanations require at least two full retail years.
     temporal_min_annual_history: int = 104
     # Reported prediction intervals use the held-out residual quantiles.
@@ -218,8 +246,10 @@ class DatasetConfig:
     # the fallback is labelled and cannot support statistical clearance.
     temporal_sparse_fallback: bool = True
     # Verified certificates may clear their specific finding without a new
-    # human approval; integrity failures still always require review.
+    # human approval; integrity failures still always require review. A pinned
+    # qualification artifact is required before any automatic clearance.
     statistical_clearance_enabled: bool = True
+    qualification_path: str = ""
     # Leaf anomaly screening controls false discoveries before escalation.
     temporal_fdr_enabled: bool = True
     temporal_fdr_q: float = 0.05
@@ -229,6 +259,10 @@ class DatasetConfig:
     recurrence_enabled: bool = True
     recurrence_window: int = 3
     recurrence_minimum: int = 2
+    # Registered cumulative materiality budget as a multiple of the largest
+    # scoped per-period threshold. Summing each observation's threshold cannot
+    # detect a sequence whose members all stay individually below threshold.
+    recurrence_budget_ratio: float = 1.0
     forecast_quantiles: tuple[float, ...] = (
         0.01,
         0.05,
@@ -250,6 +284,36 @@ class DatasetConfig:
     relationship_correlation_threshold: float = 0.9
     relationship_min_weeks: int = 4
     relationship_ratio_bounds: tuple[float, float] = (0.5, 2.0)
+
+    def required_temporal_metrics(self) -> tuple[str, ...]:
+        """Measures whose absence makes the temporal assessment incomplete."""
+        if self.temporal_required_metrics:
+            return self.temporal_required_metrics
+        return tuple(
+            metric
+            for metric in self.metric_columns
+            if metric in self.required_columns
+            and metric not in self.snapshot_metrics
+        )
+
+    def optional_temporal_metrics(self) -> tuple[str, ...]:
+        """Declared measures assessed when present and reported when absent."""
+        if self.temporal_optional_metrics:
+            return self.temporal_optional_metrics
+        required = set(self.required_temporal_metrics())
+        return tuple(
+            metric for metric in self.metric_columns if metric not in required
+        )
+
+    def temporal_metrics(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                (
+                    *self.required_temporal_metrics(),
+                    *self.optional_temporal_metrics(),
+                )
+            )
+        )
 
     def analysis_stages(self) -> tuple[str, ...]:
         return (self.analysis_stage, *self.stage_preference)

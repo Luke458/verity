@@ -1,5 +1,15 @@
 # Evidence-complete retail QC and dependable review decisions
 
+> **Schema note (v0.22.0).** The review-remediation increments
+> ([qc-review-remediation-plan.md](qc-review-remediation-plan.md),
+> [qc-second-remediation-plan.md](qc-second-remediation-plan.md)) advanced the
+> schemas named below: machine reports schema 5, findings schema 4, evidence
+> packages and explanation certificates schema 3, qualification schema 2,
+> recurrence payload schema 3 (input manifest 2), evaluation schema 3,
+> features 3, evidence text 3 and SQLite schema 6. Every configured measure and
+> appended period is now assessed separately. Readers still tolerate the
+> earlier artifacts, and no missing historical evidence is invented.
+
 > **Implementation status.** Delivered across the four increments below.
 >
 > 1. *Historical correctness and evidence contracts*: target-isolated

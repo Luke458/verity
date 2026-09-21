@@ -215,17 +215,20 @@ class SarimaxForecaster:
 # ---------------------------------------------------------------------------
 
 
-def build_temporal_series(fact: pd.DataFrame, config: DatasetConfig) -> pd.DataFrame:
+def build_temporal_series(
+    fact: pd.DataFrame, config: DatasetConfig, metric: str | None = None
+) -> pd.DataFrame:
     """Dense, explicit series over the complete observed week span.
 
     Every series carries a row for every business week in the combined span;
     missing weeks are ``value = NaN`` with ``missing = True`` instead of being
     compressed into consecutive observations. The explicit ``missing`` marker
     is what lets later evidence say "this series is sparse" rather than invent
-    an observation that never existed.
+    an observation that never existed. One frame is built per measure, so a
+    series identifier always means the same metric/scope in every layer.
     """
     week = config.week_column
-    metric = config.primary_metric
+    metric = metric or config.primary_metric
     if fact.empty or week not in fact.columns or metric not in fact.columns:
         return pd.DataFrame(columns=[week, "series_id", "value", "missing"])
     frames: list[pd.DataFrame] = []
@@ -651,6 +654,37 @@ def fit_model(
     return _RidgeModel(spec, fitted, calendar, windows)
 
 
+def _rolling_evaluations(
+    pairs: Sequence[tuple[int, float]],
+    horizon: int,
+    config: DatasetConfig,
+    origins: int | None,
+) -> list[tuple[int, int]]:
+    """Eligible (target index, training endpoint index) rolling origins.
+
+    The endpoint is the last observed week at or before ``target - horizon``,
+    so missing weeks never compress into a shorter forecast step and the
+    evaluated step gap is exactly ``horizon`` business weeks.
+    """
+    origins = origins or config.temporal_backtest_origins
+    eligible: list[tuple[int, int]] = []
+    for index, (target_week, _) in enumerate(pairs):
+        endpoint = None
+        for position in range(index - 1, -1, -1):
+            if pairs[position][0] <= target_week - horizon:
+                endpoint = position
+                break
+        if endpoint is None:
+            continue
+        training = pairs[: endpoint + 1]
+        if len(training) < config.temporal_min_history:
+            continue
+        eligible.append((index, endpoint))
+    if origins and len(eligible) > origins:
+        eligible = eligible[-origins:]
+    return eligible
+
+
 def rolling_origin_errors(
     weeks: Sequence[int],
     values: Sequence[float],
@@ -660,39 +694,46 @@ def rolling_origin_errors(
     config: DatasetConfig,
     origins: int | None = None,
     forecaster: Forecaster | None = None,
+    reserved_tail: int = 0,
+    evaluation: str = "selection",
 ) -> list[tuple[float, float]]:
     """One (standardized, raw) error per rolling origin.
 
-    Every forecast precedes the observation it is evaluated against. Errors are
-    standardized by a scale estimated only from that origin's history so that
-    series with different volumes can share a pool without one dominating it.
+    Every forecast precedes the observation it is evaluated against by exactly
+    ``horizon`` business weeks. Errors are standardized by a scale estimated
+    only from that origin's history so that series with different volumes can
+    share a pool without one dominating it.
+
+    ``reserved_tail`` holds back that many latest eligible origins exclusively
+    for calibration; ``evaluation`` selects which disjoint partition to return.
+    Selection and calibration observations are never reused across partitions.
     """
     pairs = [
         (int(week), float(value))
         for week, value in zip(weeks, values)
         if math.isfinite(float(value))
     ]
-    origins = origins or config.temporal_backtest_origins
-    if len(pairs) <= horizon:
+    eligible = _rolling_evaluations(pairs, horizon, config, origins)
+    if reserved_tail > 0:
+        if evaluation == "calibration":
+            eligible = eligible[-reserved_tail:]
+        else:
+            eligible = eligible[:-reserved_tail]
+    if evaluation == "calibration" and len(eligible) < reserved_tail:
         return []
     levels = list(config.forecast_quantiles)
     median_index = levels.index(0.5) if 0.5 in levels else len(levels) // 2
-    start = max(0, len(pairs) - origins)
     errors: list[tuple[float, float]] = []
-    for index in range(start, len(pairs)):
-        origin = index - horizon
-        if origin < 2:
-            continue
-        training = pairs[:origin]
-        if len(training) < config.temporal_min_history:
-            continue
+    for index, endpoint in eligible:
+        training = pairs[: endpoint + 1]
         target_week, actual = pairs[index]
         train_weeks = [week for week, _ in training]
         train_values = [value for _, value in training]
+        step = max(1, int(target_week) - int(training[-1][0]))
         if spec.kind == FIXED_KIND:
             if forecaster is None:
                 raise ValueError("fixed candidate requires a configured forecaster")
-            predictions = forecaster.predict(train_values, horizon, levels)[-1]
+            predictions = forecaster.predict(train_values, step, levels)[-1]
             predicted = float(predictions[median_index])
             scale = _forecast_scale(predictions, levels)
         else:
@@ -756,6 +797,7 @@ class SelectionOutcome:
     history_observed: int
     history_weeks: int
     evaluations: list[CandidateEvaluation] = field(default_factory=list)
+    calibration_origins: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -764,6 +806,7 @@ class SelectionOutcome:
             "horizon": self.horizon,
             "history_observed": self.history_observed,
             "history_weeks": self.history_weeks,
+            "calibration_origins": self.calibration_origins,
             "selected": self.spec.to_dict(),
             "evaluations": [item.to_dict() for item in self.evaluations],
         }
@@ -775,6 +818,7 @@ class SelectionOutcome:
             "horizon": self.horizon,
             "history_observed": self.history_observed,
             "history_weeks": self.history_weeks,
+            "calibration_origins": self.calibration_origins,
             "selected": self.spec.revision,
             "candidates": [
                 {
@@ -800,9 +844,13 @@ def select_candidate(
 ) -> SelectionOutcome:
     """Select a candidate on pre-target rolling-origin error.
 
-    The selection is frozen before interval calibration: the returned spec is
-    the only model fitted on the full pre-target history and used to score the
-    assessment target. Ties break on interval score, then on the simpler model.
+    The latest configured calibration origins are withheld from selection and
+    reserved for interval calibration. The selection is frozen before interval
+    calibration: the returned spec is the only model fitted on the full
+    pre-target history and used to score the assessment target. Ties break on
+    interval score, then on the simpler model. When the required partitions
+    cannot be formed the outcome is explicitly insufficient rather than
+    reusing selection observations as calibration.
     """
     observed = [
         (int(week), float(value))
@@ -812,6 +860,7 @@ def select_candidate(
     history_weeks = (
         int(observed[-1][0]) - int(observed[0][0]) + 1 if observed else 0
     )
+    reserved = max(0, int(getattr(config, "temporal_calibration_origins", 0)))
     if config.forecaster != "auto":
         spec = CandidateSpec(FIXED_KIND, fixed=config.forecaster)
         return SelectionOutcome(
@@ -821,18 +870,30 @@ def select_candidate(
             horizon=horizon,
             history_observed=len(observed),
             history_weeks=history_weeks,
+            calibration_origins=reserved,
         )
     evaluations: list[CandidateEvaluation] = []
     for spec in candidate_grid(config, len(observed)):
         errors = rolling_origin_errors(
-            weeks, values, spec, horizon, calendar, config, forecaster=forecaster
+            weeks,
+            values,
+            spec,
+            horizon,
+            calendar,
+            config,
+            forecaster=forecaster,
+            reserved_tail=reserved,
+            evaluation="selection",
         )
         if len(errors) < MIN_SELECTION_ORIGINS:
+            reason = f"{len(errors)} selection origins; need {MIN_SELECTION_ORIGINS}"
+            if reserved:
+                reason += f" after reserving {reserved} calibration origins"
             evaluations.append(
                 CandidateEvaluation(
                     spec,
                     False,
-                    f"{len(errors)} rolling origins; need {MIN_SELECTION_ORIGINS}",
+                    reason,
                     len(errors),
                     None,
                     None,
@@ -850,12 +911,13 @@ def select_candidate(
         fallback = CandidateSpec(NAIVE_KIND)
         return SelectionOutcome(
             spec=fallback,
-            mode="auto",
+            mode="insufficient",
             frozen=True,
             horizon=horizon,
             history_observed=len(observed),
             history_weeks=history_weeks,
             evaluations=evaluations,
+            calibration_origins=reserved,
         )
     eligible.sort(
         key=lambda item: (
@@ -872,6 +934,7 @@ def select_candidate(
         history_observed=len(observed),
         history_weeks=history_weeks,
         evaluations=evaluations,
+        calibration_origins=reserved,
     )
 
 
@@ -911,19 +974,67 @@ class ResidualPool:
         array = np.sort(np.asarray(self.residuals, dtype=float))
         return float(np.searchsorted(array, z, side="left") / len(array))
 
-    def conformal(self, center: float, alpha: float):
-        from .conformal import conformal_interval, leave_one_out_coverage
+    def conformal(
+        self,
+        center: float,
+        alpha: float,
+        scale: float = 1.0,
+        series_errors: Sequence[float] | None = None,
+    ):
+        """Interval in target units from pooled standardized residuals.
 
-        raw = self.raw_residuals or self.residuals
-        interval = conformal_interval(raw, center, alpha)
-        coverage = leave_one_out_coverage(raw, alpha)
+        The pooled standardized errors estimate the shape of the error
+        distribution; the target's own historical scale converts the radius
+        back into that target's units, so a large sibling cannot inflate a
+        small series' interval. Coverage is measured on the target's own
+        held-out errors, never on pooled in-sample counts.
+        """
+        from .conformal import ConformalInterval, conformal_interval
+
+        standardized = [float(value) for value in (self.residuals or self.raw_residuals)]
+        interval = conformal_interval(standardized, 0.0, alpha)
+        if interval.status != "OK" or interval.upper is None:
+            self.coverage = {
+                "alpha": alpha,
+                "coverage": None,
+                "evaluated": False,
+                "n": interval.n,
+            }
+            return ConformalInterval(
+                alpha,
+                None,
+                None,
+                interval.n,
+                interval.rank,
+                interval.status,
+                interval.detail,
+            )
+        radius = float(interval.upper)
+        coverage: float | None = None
+        evaluated = False
+        finite = [
+            float(value)
+            for value in (series_errors or ())
+            if math.isfinite(float(value))
+        ]
+        if finite:
+            coverage = sum(1 for value in finite if abs(value) <= radius) / len(finite)
+            evaluated = True
         self.coverage = {
             "alpha": alpha,
-            "coverage": coverage["coverage"],
-            "evaluated": coverage["evaluated"],
-            "n": coverage["n"],
+            "coverage": coverage,
+            "evaluated": evaluated,
+            "n": interval.n,
+            "series_n": len(finite),
         }
-        return interval
+        return ConformalInterval(
+            alpha,
+            center - scale * radius,
+            center + scale * radius,
+            interval.n,
+            interval.rank,
+            "OK",
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -960,19 +1071,27 @@ class CalibrationPools:
     pools: dict[str, ResidualPool] = field(default_factory=dict)
 
     def add(
-        self, level: str, revision: str, errors: Sequence[tuple[float, float]]
+        self,
+        level: str,
+        revision: str,
+        errors: Sequence[tuple[float, float]],
+        horizon: int | None = None,
     ) -> ResidualPool:
-        key = f"{self.metric}|{level}|{revision}|h{self.horizon}"
+        resolved_horizon = self.horizon if horizon is None else int(horizon)
+        key = f"{self.metric}|{level}|{revision}|h{resolved_horizon}"
         pool = self.pools.setdefault(
-            key, ResidualPool(self.metric, level, revision, self.horizon)
+            key, ResidualPool(self.metric, level, revision, resolved_horizon)
         )
         for standardized, raw in errors:
             pool.residuals.append(float(standardized))
             pool.raw_residuals.append(float(raw))
         return pool
 
-    def get(self, level: str, revision: str) -> ResidualPool | None:
-        return self.pools.get(f"{self.metric}|{level}|{revision}|h{self.horizon}")
+    def get(
+        self, level: str, revision: str, horizon: int | None = None
+    ) -> ResidualPool | None:
+        resolved_horizon = self.horizon if horizon is None else int(horizon)
+        return self.pools.get(f"{self.metric}|{level}|{revision}|h{resolved_horizon}")
 
     def aggregate(self, revision: str | None = None) -> CalibrationMap:
         residuals: list[float] = []
@@ -1020,7 +1139,7 @@ def coordinated_groups(
     evidence: Sequence[SeriesTemporalEvidence],
     config: DatasetConfig,
 ) -> list[dict[str, Any]]:
-    """Combine same-direction leaf residuals within a level before materiality.
+    """Combine same-direction leaf residuals within a level and period.
 
     Only groups where the combined movement crosses the materiality threshold
     and at least two contributors individually carry at least half of it are
@@ -1028,37 +1147,73 @@ def coordinated_groups(
     such so they add no duplicate escalation.
     """
     floor = config.temporal_min_relative_residual / 2.0
-    national = next(
-        (item for item in evidence if item.series_id == "national"), None
-    )
-    parent_value = abs(national.actual) if national is not None else 0.0
-    groups: dict[tuple[str, int], list[SeriesTemporalEvidence]] = {}
+    absolute_floor = float(getattr(config, "temporal_materiality_abs", 0.0))
+    national_by_target = {
+        (item.metric, item.target_week): item
+        for item in evidence
+        if item.series_id == "national"
+    }
+    groups: dict[tuple[str, int, str, int], list[SeriesTemporalEvidence]] = {}
     for item in evidence:
         if item.level == "national" or item.residual == 0.0:
             continue
         direction = 1 if item.residual > 0 else -1
         if abs(item.relative_residual) < floor:
             continue
-        groups.setdefault((item.level, direction), []).append(item)
+        groups.setdefault(
+            (item.metric, item.target_week, item.level, direction), []
+        ).append(item)
     coordinated: list[dict[str, Any]] = []
-    for (level, direction), items in sorted(groups.items()):
+    for (metric, target_week, level, direction), items in sorted(groups.items()):
         if len(items) < 2:
             continue
+        national = national_by_target.get((metric, target_week))
+        parent_value = abs(national.actual) if national is not None else 0.0
         combined = float(sum(item.residual for item in items))
         ratio = abs(combined) / parent_value if parent_value else 0.0
+        if abs(combined) < absolute_floor:
+            continue
         if ratio < config.temporal_min_relative_residual:
             continue
         coordinated.append(
             {
+                "metric": metric,
+                "target_week": target_week,
                 "level": level,
                 "direction": "increase" if direction > 0 else "decrease",
                 "series_ids": [item.series_id for item in items],
                 "combined_residual": combined,
                 "combined_ratio": ratio,
+                "materiality": max(
+                    absolute_floor,
+                    config.temporal_min_relative_residual * parent_value,
+                ),
                 "individually_flagged": any(item.anomaly for item in items),
             }
         )
-    return coordinated
+    # Hierarchy levels decompose the same parent movement; keep one group per
+    # measure/target/direction (the most granular, most material decomposition)
+    # so parent and child results are never counted twice.
+    best: dict[tuple[str, int, str], dict[str, Any]] = {}
+    for group in coordinated:
+        key = (group["metric"], group["target_week"], group["direction"])
+        current = best.get(key)
+        if current is None or (
+            group["combined_ratio"],
+            len(group["series_ids"]),
+        ) > (
+            current["combined_ratio"],
+            len(current["series_ids"]),
+        ):
+            best[key] = group
+    return sorted(
+        best.values(),
+        key=lambda group: (
+            group["metric"],
+            group["target_week"],
+            group["direction"],
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1108,12 +1263,18 @@ class SeriesTemporalEvidence:
     calibration_n: int = 0
     adjusted_p: float | None = None
     fdr_significant: bool | None = None
+    horizon: int = 0
+    materiality: float = 0.0
+    training_endpoint_week: int = 0
+    forecast_origin_week: int = 0
+    aggregation: str = "flow"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "series_id": self.series_id,
             "metric": self.metric,
             "level": self.level,
+            "aggregation": self.aggregation,
             "support": self.support,
             "parent_series": self.parent_series,
             "share": self.share,
@@ -1150,6 +1311,10 @@ class SeriesTemporalEvidence:
             "calibration_n": self.calibration_n,
             "adjusted_p": self.adjusted_p,
             "fdr_significant": self.fdr_significant,
+            "horizon": self.horizon,
+            "materiality": self.materiality,
+            "training_endpoint_week": self.training_endpoint_week,
+            "forecast_origin_week": self.forecast_origin_week,
         }
 
 
@@ -1163,17 +1328,23 @@ class TemporalResult:
     unavailable_series: list[str] = field(default_factory=list)
     calendar: dict[str, Any] = field(default_factory=dict)
     coordinated: list[dict[str, Any]] = field(default_factory=list)
+    targets: list[int] = field(default_factory=list)
+    unavailable: list[dict[str, Any]] = field(default_factory=list)
+    metric_status: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "target_week": self.target_week,
+            "targets": list(self.targets),
             "anomaly": self.anomaly,
             "flags": list(self.flags),
             "calibration": dict(self.calibration),
             "series": [item.to_dict() for item in self.series],
             "unavailable_series": self.unavailable_series,
+            "unavailable": [dict(item) for item in self.unavailable],
             "calendar": dict(self.calendar),
             "coordinated": [dict(item) for item in self.coordinated],
+            "metric_status": dict(self.metric_status),
         }
 
 
@@ -1190,6 +1361,8 @@ def new_period_adjustments(
     events: Sequence[Any],
     pair: VersionPair,
     config: DatasetConfig,
+    target: int | None = None,
+    metric: str | None = None,
 ) -> dict[str, float]:
     """Expected new-period contributions of newly appearing entities.
 
@@ -1197,8 +1370,8 @@ def new_period_adjustments(
     part of the latest-week movement and must not be counted as anomalies.
     """
     week = config.week_column
-    metric = config.primary_metric
-    target = pair.current_max_week
+    metric = metric or config.primary_metric
+    target = int(target if target is not None else pair.current_max_week)
     adjustments: dict[str, float] = {}
     if week not in current.columns or metric not in current.columns:
         return adjustments
@@ -1208,75 +1381,72 @@ def new_period_adjustments(
         for event in events
         if getattr(event, "classification", None) in (NEW_BACKFILL, NEW_RECENT)
     ]
-    # Adjust at one entity level only (store before product) so child events
-    # cannot subtract the same rows twice.
-    entity_type = next(
-        (
-            candidate
-            for candidate in config.explanation_entity_types
-            if any(
-                getattr(event, "entity_type", None) == candidate
-                for event in new_entity_events
-            )
-        ),
-        None,
-    )
-    if entity_type is None:
+    if not new_entity_events:
         return adjustments
-
+    # Select the union of rows belonging to any newly appearing entity, once:
+    # a product inside a new store matches both events but its movement is
+    # explained a single time.
+    mask = pd.Series(False, index=current.index)
+    matched = False
     for event in new_entity_events:
-        if getattr(event, "entity_type", None) != entity_type:
-            continue
+        entity_type = getattr(event, "entity_type", None)
         entity_id = getattr(event, "entity_id", None)
         column = f"{entity_type}_id"
-        rows = current.loc[
-            (current[column] == entity_id) & (current[week] == target)
-        ]
-        if rows.empty:
+        if not entity_type or column not in current.columns:
             continue
-        adjustments["national"] = adjustments.get("national", 0.0) + float(
-            rows[metric].sum()
-        )
-        for series_column in config.temporal_entity_columns:
-            if series_column not in rows.columns:
-                continue
-            for value, group in rows.groupby(series_column, dropna=False):
-                series_id = f"{series_column}:{value}"
-                adjustments[series_id] = adjustments.get(series_id, 0.0) + float(
-                    group[metric].sum()
-                )
+        matched = True
+        mask |= current[column] == entity_id
+    if not matched:
+        return adjustments
+    rows = current.loc[mask & (current[week] == target)]
+    if rows.empty:
+        return adjustments
+    adjustments["national"] = float(rows[metric].sum())
+    for series_column in config.temporal_entity_columns:
+        if series_column not in rows.columns:
+            continue
+        for value, group in rows.groupby(series_column, dropna=False):
+            series_id = f"{series_column}:{value}"
+            adjustments[series_id] = float(group[metric].sum())
     return adjustments
 
 
-def run_temporal_qc(
+def _run_single_target(
     previous: pd.DataFrame,
     current: pd.DataFrame,
     pair: VersionPair,
     config: DatasetConfig,
-    events: Sequence[Any] = (),
+    events: Sequence[Any],
+    target: int,
+    metric: str | None = None,
 ) -> TemporalResult | None:
     if not config.temporal_enabled or not pair.new_periods:
         return None
-    target = pair.current_max_week
+    metric = metric or config.primary_metric
     week = config.week_column
     # Train on the previous version only; new periods come from the current
     # version, so backfilled overlap history cannot inflate the baseline.
     current_new = current.loc[current[week].isin(list(pair.new_periods))]
     combined = pd.concat([previous, current_new], ignore_index=True, sort=False)
-    series = build_temporal_series(combined, config)
+    series = build_temporal_series(combined, config, metric)
     if series.empty:
         return None
+    aggregation = "snapshot" if metric in config.snapshot_metrics else "flow"
     calendar = build_calendar(config)
-    adjustments = new_period_adjustments(current, events, pair, config)
+    adjustments = new_period_adjustments(
+        current, events, pair, config, target=target, metric=metric
+    )
     forecaster = None if config.forecaster == "auto" else get_forecaster(config)
     horizon = max(1, target - pair.previous_max_week)
     levels = list(config.forecast_quantiles)
     median_index = levels.index(0.5) if 0.5 in levels else len(levels) // 2
     alpha = config.temporal_interval_alpha
-    pools = CalibrationPools(config.primary_metric, horizon, alpha)
+    reserved = max(0, int(getattr(config, "temporal_calibration_origins", 0)))
+    pools = CalibrationPools(metric, horizon, alpha)
     pending: list[dict[str, Any]] = []
     selections: dict[str, Any] = {}
-    unavailable: list[str] = []
+    unavailable_series: list[str] = []
+    unavailable: list[dict[str, Any]] = []
 
     for series_id, group in series.groupby("series_id", sort=True):
         group = group.sort_values(week)
@@ -1299,16 +1469,35 @@ def run_temporal_qc(
             for week_id, value in zip(weeks, values)
             if week_id == target and math.isfinite(value)
         ]
+        series_key = str(series_id)
         if (
             len(observed) < config.temporal_min_history
             or len(training) < config.temporal_min_history
-            or not actuals
         ):
-            unavailable.append(str(series_id))
+            unavailable_series.append(series_key)
+            unavailable.append(
+                {
+                    "series_id": series_key,
+                    "metric": metric,
+                    "target_week": target,
+                    "reason": "insufficient observed history",
+                }
+            )
+            continue
+        if not actuals:
+            unavailable_series.append(series_key)
+            unavailable.append(
+                {
+                    "series_id": series_key,
+                    "metric": metric,
+                    "target_week": target,
+                    "reason": "missing target observation",
+                }
+            )
             continue
         train_weeks = [week_id for week_id, _ in training]
         train_values = [value for _, value in training]
-        level = series_level(str(series_id))
+        level = series_level(series_key)
         selection = select_candidate(
             train_weeks, train_values, horizon, calendar, config, forecaster
         )
@@ -1334,17 +1523,25 @@ def run_temporal_qc(
                 str(level): float(prediction)
                 for level, prediction in zip(levels, predictions)
             }
-        residuals = rolling_origin_errors(
-            train_weeks,
-            train_values,
-            selection.spec,
-            horizon,
-            calendar,
-            config,
-            forecaster=forecaster,
+        # The latest configured origins are reserved exclusively for
+        # calibration; selection never reuses them.
+        calibration_errors = (
+            rolling_origin_errors(
+                train_weeks,
+                train_values,
+                selection.spec,
+                horizon,
+                calendar,
+                config,
+                forecaster=forecaster,
+                reserved_tail=reserved,
+                evaluation="calibration",
+            )
+            if reserved > 0
+            else []
         )
-        pool = pools.add(level, selection.spec.revision, residuals)
-        selections[str(series_id)] = selection.compact_dict()
+        pool = pools.add(level, selection.spec.revision, calibration_errors)
+        selections[f"{metric}|{series_key}"] = selection.compact_dict()
         history_weeks = target - min(weeks) + 1
         missing_weeks = tuple(
             int(week_id)
@@ -1353,7 +1550,7 @@ def run_temporal_qc(
         )
         pending.append(
             {
-                "series_id": str(series_id),
+                "series_id": series_key,
                 "level": level,
                 "actual": actuals[0],
                 "adjustment": float(adjustments.get(series_id, 0.0)),
@@ -1364,6 +1561,11 @@ def run_temporal_qc(
                 "quantiles": quantiles,
                 "scale": scale,
                 "pool": pool,
+                "horizon": horizon,
+                "forecast_origin_week": pair.previous_max_week,
+                "training_endpoint_week": train_weeks[-1],
+                "calibration_z": [z for z, _ in calibration_errors],
+                "calibration_raw": [raw for _, raw in calibration_errors],
                 "history_observed": len(training),
                 "history_weeks": history_weeks,
                 "missing_weeks": missing_weeks,
@@ -1374,20 +1576,23 @@ def run_temporal_qc(
         # Sparse leaves use the parent expectation scaled by their historical
         # share. The fallback is labelled and never yields calibration support.
         points = {item["series_id"]: item["point"] for item in pending}
-        for series_id in list(unavailable):
-            sid = str(series_id)
+        remaining_unavailable: list[dict[str, Any]] = []
+        for entry in unavailable:
+            sid = str(entry["series_id"])
             level = series_level(sid)
             if level == "national" or ":" not in sid or "national" not in points:
+                remaining_unavailable.append(entry)
                 continue
             child_value = sid.split(":", 1)[1]
             share = national_share(
                 combined, level, child_value, config, through_week=pair.previous_max_week
             )
             if share is None or share <= 0.0:
+                remaining_unavailable.append(entry)
                 continue
             group = series.loc[series["series_id"] == sid].sort_values(week)
-            weeks = [int(entry) for entry in group[week]]
-            values = [float(entry) for entry in group["value"]]
+            weeks = [int(value) for value in group[week]]
+            values = [float(value) for value in group["value"]]
             observed = [
                 (week_id, value_id)
                 for week_id, value_id in zip(weeks, values)
@@ -1404,14 +1609,14 @@ def run_temporal_qc(
                 if week_id == target and math.isfinite(value_id)
             ]
             if len(observed) < 4 or len(training) < 4 or not actuals:
+                remaining_unavailable.append(entry)
                 continue
-            unavailable.remove(series_id)
             pending.append(
                 {
                     "series_id": sid,
                     "level": level,
                     "actual": actuals[0],
-                    "adjustment": float(adjustments.get(series_id, 0.0)),
+                    "adjustment": float(adjustments.get(sid, 0.0)),
                     "train_weeks": [week_id for week_id, _ in training],
                     "train_values": [value_id for _, value_id in training],
                     "selection": None,
@@ -1419,6 +1624,11 @@ def run_temporal_qc(
                     "quantiles": {},
                     "scale": None,
                     "pool": None,
+                    "horizon": horizon,
+                    "forecast_origin_week": pair.previous_max_week,
+                    "training_endpoint_week": [week_id for week_id, _ in training][-1],
+                    "calibration_z": [],
+                    "calibration_raw": [],
                     "fallback": True,
                     "parent_series": "national",
                     "share": float(share),
@@ -1431,6 +1641,10 @@ def run_temporal_qc(
                     ),
                 }
             )
+        unavailable = remaining_unavailable
+        unavailable_series = sorted(
+            {str(entry["series_id"]) for entry in unavailable}
+        )
 
     evidence: list[SeriesTemporalEvidence] = []
     for item in pending:
@@ -1453,22 +1667,54 @@ def run_temporal_qc(
         else:
             pool = item["pool"]
             selection = item["selection"]
+            calibration_series = list(item.get("calibration_z", ()))
             if selection.spec.kind != FIXED_KIND:
+                scale = _difference_scale(
+                    np.asarray(item["train_values"], dtype=float),
+                    config.temporal_season,
+                )
                 if pool.residuals:
                     item["quantiles"] = {
-                        str(level): point + float(np.quantile(pool.residuals, level))
+                        str(level): point
+                        + scale * float(np.quantile(pool.residuals, level))
                         for level in levels
                     }
                 if not item["quantiles"]:
                     item["quantiles"] = {
                         str(0.5): point,
                     }
-                scale = _difference_scale(
-                    np.asarray(item["train_values"], dtype=float),
-                    config.temporal_season,
-                )
             else:
                 scale = item["scale"] or _residual_scale(pool.raw_residuals, point)
+            interval = pool.conformal(
+                point, alpha, scale, series_errors=calibration_series
+            )
+            interval_lower = interval.lower
+            interval_upper = interval.upper
+            interval_width = interval.width
+            interval_coverage = pool.coverage.get("coverage")
+            calibration_status = (
+                "OK"
+                if (
+                    interval.status == "OK"
+                    and calibration_series
+                    and selection.mode != "insufficient"
+                )
+                else "INSUFFICIENT_CALIBRATION"
+            )
+            calibration_pool = pool.key
+            calibration_n = len(calibration_series)
+            raw_calibration = item.get("calibration_raw", [])
+            forecast_error = (
+                float(np.mean(np.abs(np.asarray(raw_calibration, dtype=float))))
+                if raw_calibration
+                else None
+            )
+            selected_model = selection.spec.revision
+            support = "model"
+            calibrated = None
+        z = (adjusted_actual - point) / scale
+        nominal = _NORMAL.cdf(z)
+        if not item.get("fallback"):
             # An empirical percentile at a 1% tail needs enough held-out errors
             # to be meaningful; with too few samples every extreme z maps to 0/1
             # and would flag by construction. Insufficient calibration falls
@@ -1477,27 +1723,8 @@ def run_temporal_qc(
                 config.temporal_lower_percentile,
                 1.0 - config.temporal_upper_percentile,
             )
-            z = (adjusted_actual - point) / scale
-            calibrated = (
-                pool.percentile(z)
-                if pool.n >= minimum_samples(tail_alpha)
-                else None
-            )
-            interval = pool.conformal(point, alpha)
-            interval_lower = interval.lower
-            interval_upper = interval.upper
-            interval_width = interval.width
-            interval_coverage = pool.coverage.get("coverage")
-            calibration_status = (
-                "OK" if interval.status == "OK" else "INSUFFICIENT_CALIBRATION"
-            )
-            calibration_pool = pool.key
-            calibration_n = pool.n
-            forecast_error = pool.mean_absolute_error
-            selected_model = selection.spec.revision
-            support = "model"
-        z = (adjusted_actual - point) / scale
-        nominal = _NORMAL.cdf(z)
+            if calibration_n >= minimum_samples(tail_alpha):
+                calibrated = item["pool"].percentile(z)
 
         rz = robust_z(
             item["train_values"], adjusted_actual, config.temporal_window
@@ -1519,14 +1746,17 @@ def run_temporal_qc(
         flags: list[str] = []
         percentile = calibrated if calibrated is not None else nominal
         # Statistical significance is not enough: a target week must also move
-        # materially versus the forecast median before it can raise an anomaly.
+        # materially versus the same metric, period and scope's expected
+        # magnitude before it can raise an anomaly. The materiality carries a
+        # configured absolute floor and never uses an accumulated total.
         relative_residual = (
-            (adjusted_actual - point) / point if point else 0.0
+            (adjusted_actual - point) / abs(point) if point else 0.0
         )
-        material = (
-            point == 0.0
-            or abs(relative_residual) >= config.temporal_min_relative_residual
+        materiality = max(
+            float(getattr(config, "temporal_materiality_abs", 0.0)),
+            config.temporal_min_relative_residual * abs(point),
         )
+        material = point == 0.0 or abs(adjusted_actual - point) >= materiality
         if material:
             if percentile <= config.temporal_lower_percentile:
                 flags.append("forecast_lower")
@@ -1566,7 +1796,8 @@ def run_temporal_qc(
                 change_point_score=cp,
                 anomaly=anomaly,
                 flags=flags,
-                metric=config.primary_metric,
+                metric=metric,
+                aggregation=aggregation,
                 level=item["level"],
                 support=support,
                 parent_series=item.get("parent_series", ""),
@@ -1585,30 +1816,44 @@ def run_temporal_qc(
                 calibration_status=calibration_status,
                 calibration_pool=calibration_pool,
                 calibration_n=calibration_n,
+                horizon=int(item["horizon"]),
+                materiality=float(materiality),
+                training_endpoint_week=int(item["training_endpoint_week"]),
+                forecast_origin_week=int(item["forecast_origin_week"]),
             )
         )
     if config.temporal_fdr_enabled:
         from .conformal import benjamini_hochberg
 
-        leaves = [item for item in evidence if item.level != "national"]
-        p_values = [_two_sided_percentile(item) for item in leaves]
-        adjusted, significant = benjamini_hochberg(p_values, config.temporal_fdr_q)
-        for leaf, adjusted_p, is_significant in zip(leaves, adjusted, significant):
-            leaf.adjusted_p = float(adjusted_p)
-            leaf.fdr_significant = bool(is_significant)
-            if is_significant:
-                continue
-            if not {"forecast_lower", "forecast_upper"} & set(leaf.flags):
-                continue
-            leaf.flags = [
-                flag
-                for flag in leaf.flags
-                if flag not in ("forecast_lower", "forecast_upper")
-            ]
-            flag_set = set(leaf.flags)
-            leaf.anomaly = bool(flag_set & STRONG_TARGET_FLAGS) or (
-                len(flag_set & CONFIRMING_TARGET_FLAGS) >= 2
+        # Screening runs within one measure: p-values from different metrics
+        # are never pooled into a single false-discovery procedure.
+        by_metric: dict[str, list[SeriesTemporalEvidence]] = {}
+        for series_item in evidence:
+            if series_item.level != "national":
+                by_metric.setdefault(series_item.metric, []).append(series_item)
+        for leaves in by_metric.values():
+            p_values = [_two_sided_percentile(item) for item in leaves]
+            adjusted, significant = benjamini_hochberg(
+                p_values, config.temporal_fdr_q
             )
+            for leaf, adjusted_p, is_significant in zip(
+                leaves, adjusted, significant
+            ):
+                leaf.adjusted_p = float(adjusted_p)
+                leaf.fdr_significant = bool(is_significant)
+                if is_significant:
+                    continue
+                if not {"forecast_lower", "forecast_upper"} & set(leaf.flags):
+                    continue
+                leaf.flags = [
+                    flag
+                    for flag in leaf.flags
+                    if flag not in ("forecast_lower", "forecast_upper")
+                ]
+                flag_set = set(leaf.flags)
+                leaf.anomaly = bool(flag_set & STRONG_TARGET_FLAGS) or (
+                    len(flag_set & CONFIRMING_TARGET_FLAGS) >= 2
+                )
     coordinated = coordinated_groups(evidence, config)
     anomalies = [item for item in evidence if item.anomaly]
     overall_flags = sorted({flag for item in anomalies for flag in item.flags})
@@ -1620,9 +1865,13 @@ def run_temporal_qc(
                 str(round(1.0 - alpha, 4)), float(coverage_value)
             )
     calibration = {
+        "metric": metric,
         "n": sum(pool.n for pool in pools.pools.values()),
         "coverage": coverage,
         "horizon": horizon,
+        "horizons": sorted({pool.horizon for pool in pools.pools.values()}),
+        "targets": [target],
+        "calibration_origins": reserved,
         "alpha": alpha,
         "calendar": calendar_identity(config),
         "models": sorted({pool.revision for pool in pools.pools.values()}),
@@ -1630,6 +1879,7 @@ def run_temporal_qc(
         "selection": selections,
         "parent_share": [
             {
+                "metric": metric,
                 "series_id": item["series_id"],
                 "parent_series": item["parent_series"],
                 "share": item["share"],
@@ -1644,11 +1894,157 @@ def run_temporal_qc(
     ]
     return TemporalResult(
         target_week=target,
+        targets=[target],
         anomaly=bool(anomalies) or bool(coordinated_material),
         flags=overall_flags,
         calibration=calibration,
         series=evidence,
-        unavailable_series=unavailable,
+        unavailable_series=unavailable_series,
+        unavailable=unavailable,
         calendar=calendar_identity(config),
         coordinated=coordinated,
+        metric_status={metric: "ASSESSED"},
+    )
+
+
+def run_temporal_qc(
+    previous: pd.DataFrame,
+    current: pd.DataFrame,
+    pair: VersionPair,
+    config: DatasetConfig,
+    events: Sequence[Any] = (),
+    targets: Sequence[int] | None = None,
+) -> TemporalResult | None:
+    """Assess every configured measure and appended period.
+
+    Each measure/period gets its own period-specific forecasts, calibration
+    pool and evidence; snapshot measures are compared within a period and
+    never summed across time. Training for every target uses only
+    previous-snapshot observations: earlier newly appended periods never enter
+    training for later targets in the same assessment. Absent configured
+    measures are reported explicitly so required measures can make the
+    assessment incomplete instead of silently passing.
+    """
+    if not config.temporal_enabled or not pair.new_periods:
+        return None
+    requested = sorted(
+        {
+            int(value)
+            for value in (targets if targets is not None else pair.new_periods)
+        }
+    )
+    valid_targets = [
+        value for value in requested if value > pair.previous_max_week
+    ]
+    if not valid_targets:
+        return None
+    metrics = config.temporal_metrics() or (config.primary_metric,)
+    results: list[TemporalResult] = []
+    metric_status: dict[str, str] = {}
+    for metric in metrics:
+        metric_results = [
+            item
+            for item in (
+                _run_single_target(
+                    previous, current, pair, config, events, target, metric
+                )
+                for target in valid_targets
+            )
+            if item is not None
+        ]
+        metric_status[metric] = "ASSESSED" if metric_results else "ABSENT"
+        results.extend(metric_results)
+    if not results:
+        target = max(valid_targets)
+        return TemporalResult(
+            target_week=target,
+            targets=list(valid_targets),
+            anomaly=False,
+            flags=[],
+            calibration={
+                "unavailable_reason": "no configured measure is present",
+                "metric_status": dict(metric_status),
+            },
+            series=[],
+            unavailable_series=[],
+            unavailable=[
+                {
+                    "series_id": "national",
+                    "metric": metric,
+                    "target_week": target,
+                    "reason": "configured measure is absent",
+                }
+                for metric in metrics
+            ],
+            calendar=calendar_identity(config),
+            coordinated=[],
+            metric_status=metric_status,
+        )
+    if len(results) == 1:
+        result = results[0]
+        result.metric_status = dict(metric_status)
+        return result
+    series = [entry for result in results for entry in result.series]
+    coordinated = [group for result in results for group in result.coordinated]
+    unavailable = [entry for result in results for entry in result.unavailable]
+    unavailable_series = sorted(
+        {entry for result in results for entry in result.unavailable_series}
+    )
+    pools = [
+        pool for result in results for pool in result.calibration.get("pools", [])
+    ]
+    selections: dict[str, Any] = {}
+    parent_share: list[dict[str, Any]] = []
+    coverage: dict[str, Any] = {}
+    for result in results:
+        selections.update(result.calibration.get("selection", {}))
+        parent_share.extend(result.calibration.get("parent_share", []))
+        for horizon_key, value in (result.calibration.get("coverage") or {}).items():
+            horizon_name = str(result.calibration.get("horizon", ""))
+            coverage.setdefault(horizon_name, value)
+    calibration = {
+        "n": sum(int(pool.get("n", 0)) for pool in pools),
+        "coverage": coverage,
+        "horizon": max(int(result.calibration.get("horizon", 0)) for result in results),
+        "horizons": sorted(
+            {
+                int(result.calibration.get("horizon", 0))
+                for result in results
+            }
+        ),
+        "targets": list(valid_targets),
+        "calibration_origins": max(
+            int(result.calibration.get("calibration_origins", 0))
+            for result in results
+        ),
+        "alpha": config.temporal_interval_alpha,
+        "calendar": calendar_identity(config),
+        "models": sorted(
+            {
+                str(pool.get("revision", ""))
+                for pool in pools
+                if pool.get("revision")
+            }
+        ),
+        "pools": pools,
+        "selection": selections,
+        "parent_share": parent_share,
+    }
+    anomalies = [entry for entry in series if entry.anomaly]
+    coordinated_material = [
+        group for group in coordinated if not group["individually_flagged"]
+    ]
+    flags = sorted({flag for entry in anomalies for flag in entry.flags})
+    return TemporalResult(
+        target_week=max(valid_targets),
+        targets=list(valid_targets),
+        anomaly=bool(anomalies) or bool(coordinated_material),
+        flags=flags,
+        calibration=calibration,
+        series=series,
+        unavailable_series=unavailable_series,
+        unavailable=unavailable,
+        calendar=calendar_identity(config),
+        coordinated=coordinated,
+        metric_status=dict(metric_status),
     )

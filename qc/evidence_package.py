@@ -1,35 +1,92 @@
-"""Versioned assessment evidence and explanation certificates (schema 1).
+"""Versioned assessment evidence and explanation certificates (schema 2).
 
 ``AssessmentEvidence`` is the complete, serializable record behind a review
 decision: predictions with calibration and intervals, integrity checks,
 contributions, contradictions, net and gross unexplained residuals and the
 identities (snapshot, calendar, model, configuration, cutoff) that pin it.
 ``ExplanationCertificate`` names the exact findings a scoped clearance covers,
-the support it rests on and the remainder that stays unexplained.
+the support it rests on, the assessment identity, evidence digest, policy
+version and pinned qualification it was verified against.
 
-Providers receive a compressed view. The compression is allowed to drop detail
-but never mandatory evidence: when the budget cannot carry the mandatory
-fields the view abstains instead.
+Providers receive a compressed view built independently of whether automatic
+clearance is enabled. Compression may drop detail but never mandatory evidence:
+when the budget cannot carry the mandatory fields the view abstains instead.
 """
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import asdict, dataclass
+import math
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .conformal import minimum_samples
 from .jsonutil import dumps as json_dumps
 
-EVIDENCE_PACKAGE_SCHEMA = 1
-EVIDENCE_POLICY_VERSION = "1"
-CERTIFICATE_SCHEMA = 1
+EVIDENCE_PACKAGE_SCHEMA = 3
+EVIDENCE_POLICY_VERSION = "3"
+CERTIFICATE_SCHEMA = 3
+
+_FAILED_STATUSES = frozenset(
+    {"CONTRACT_FAILURE", "DATA_CONTRACT_FAILURE", "FAIL"}
+)
+
+
+def _contract_failed(status: Any) -> bool:
+    return str(status or "").upper() in _FAILED_STATUSES
 
 
 def evidence_digest(value: Any) -> str:
     return hashlib.sha256(
         json_dumps(value, sort_keys=True, default=str).encode()
     ).hexdigest()
+
+
+_MAX_DETAIL_CHARS = 160
+
+
+def _compact_text(value: str) -> str:
+    """Bound a verbose detail into a stable reference, never discard it."""
+    if len(value) <= _MAX_DETAIL_CHARS:
+        return value
+    digest = hashlib.sha256(value.encode()).hexdigest()[:12]
+    return f"{value[:96]}...<sha256:{digest}>"
+
+
+def _compact_check(check: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(check)
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        payload["detail"] = _compact_text(detail)
+    return payload
+
+
+def _bounded_omissions(omissions: list[str]) -> list[str]:
+    """Record every omission as a count plus a bounded sample of references."""
+    counts: dict[str, int] = {}
+    samples: dict[str, list[str]] = {}
+    for entry in omissions:
+        section = entry.split(":", 1)[0]
+        counts[section] = counts.get(section, 0) + 1
+        if len(samples.setdefault(section, [])) < 5:
+            samples[section].append(entry)
+    bounded: list[str] = []
+    for section in sorted(counts):
+        bounded.append(f"{section}:{counts[section]} omitted")
+        bounded.extend(samples[section])
+    return bounded
+
+
+def _compress_view(value: Any) -> Any:
+    """Recursively bound long strings while preserving structure and identity."""
+    if isinstance(value, str):
+        return _compact_text(value)
+    if isinstance(value, dict):
+        return {key: _compress_view(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_compress_view(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)
@@ -61,6 +118,12 @@ class PredictionEvidence:
     selected_model: str
     anomaly: bool
     flags: tuple[str, ...]
+    horizon: int = 0
+    support: str = "model"
+    materiality: float = 0.0
+    training_endpoint_week: int = 0
+    forecast_origin_week: int = 0
+    aggregation: str = "flow"
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -98,6 +161,12 @@ class PredictionEvidence:
             "selected_model": str(data.get("selected_model", "")),
             "anomaly": bool(data.get("anomaly", False)),
             "flags": tuple(str(value) for value in data.get("flags", [])),
+            "horizon": int(data.get("horizon", 0)),
+            "support": str(data.get("support", "model")),
+            "materiality": float(data.get("materiality", 0.0)),
+            "training_endpoint_week": int(data.get("training_endpoint_week", 0)),
+            "forecast_origin_week": int(data.get("forecast_origin_week", 0)),
+            "aggregation": str(data.get("aggregation", "flow")),
         }
         return cls(**fields)
 
@@ -131,6 +200,7 @@ class AssessmentEvidence:
     lineage: dict[str, Any] | None = None
     contributions: tuple[ContributionEvidence, ...] = ()
     ledger: dict[str, Any] | None = None
+    metric_ledgers: dict[str, Any] = field(default_factory=dict)
     cross_metric: tuple[str, ...] = ()
     contradictions: tuple[str, ...] = ()
     net_unexplained: float = 0.0
@@ -140,6 +210,12 @@ class AssessmentEvidence:
     evidence_ids: tuple[str, ...] = ()
     omitted: tuple[str, ...] = ()
     approval_ids: tuple[str, ...] = ()
+    provenance: str = "synthetic"
+    target_week: int | None = None
+    failed_checks: tuple[dict[str, Any], ...] = ()
+    missing_required: tuple[str, ...] = ()
+    qualification_digest: str = ""
+    qualification_provenance: str = ""
     schema_version: int = EVIDENCE_PACKAGE_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
@@ -159,6 +235,7 @@ class AssessmentEvidence:
             "lineage": self.lineage,
             "contributions": [item.to_dict() for item in self.contributions],
             "ledger": self.ledger,
+            "metric_ledgers": dict(self.metric_ledgers),
             "cross_metric": list(self.cross_metric),
             "contradictions": list(self.contradictions),
             "net_unexplained": self.net_unexplained,
@@ -168,6 +245,12 @@ class AssessmentEvidence:
             "evidence_ids": list(self.evidence_ids),
             "omitted": list(self.omitted),
             "approval_ids": list(self.approval_ids),
+            "provenance": self.provenance,
+            "target_week": self.target_week,
+            "failed_checks": [dict(item) for item in self.failed_checks],
+            "missing_required": list(self.missing_required),
+            "qualification_digest": self.qualification_digest,
+            "qualification_provenance": self.qualification_provenance,
         }
 
     @classmethod
@@ -198,6 +281,10 @@ class AssessmentEvidence:
                 for item in data.get("contributions", [])
             ),
             ledger=data.get("ledger"),
+            metric_ledgers={
+                str(key): value
+                for key, value in dict(data.get("metric_ledgers", {})).items()
+            },
             cross_metric=tuple(str(value) for value in data.get("cross_metric", [])),
             contradictions=tuple(
                 str(value) for value in data.get("contradictions", [])
@@ -209,7 +296,19 @@ class AssessmentEvidence:
             evidence_ids=tuple(str(value) for value in data.get("evidence_ids", [])),
             omitted=tuple(str(value) for value in data.get("omitted", [])),
             approval_ids=tuple(str(value) for value in data.get("approval_ids", [])),
-            schema_version=int(data.get("schema_version", 1)),
+            provenance=str(data.get("provenance", "synthetic")),
+            target_week=data.get("target_week"),
+            failed_checks=tuple(
+                dict(item) for item in data.get("failed_checks", [])
+            ),
+            missing_required=tuple(
+                str(value) for value in data.get("missing_required", [])
+            ),
+            qualification_digest=str(data.get("qualification_digest", "")),
+            qualification_provenance=str(
+                data.get("qualification_provenance", "")
+            ),
+            schema_version=int(data.get("schema_version", 0)),
         )
 
     @property
@@ -217,7 +316,12 @@ class AssessmentEvidence:
         return evidence_digest(self.to_dict())
 
     def mandatory_payload(self) -> dict[str, Any]:
-        """Evidence a provider view must retain to be usable at all."""
+        """Evidence a provider view must retain to be usable at all.
+
+        Failed checks and their compact structured evidence, missing required
+        inputs, uncertainty and identity are mandatory by decision dependency
+        and are never dropped, only compressed.
+        """
         return {
             "schema_version": self.schema_version,
             "assessment_id": self.assessment_id,
@@ -231,12 +335,41 @@ class AssessmentEvidence:
             "gross_unexplained": self.gross_unexplained,
             "materiality_threshold": self.materiality_threshold,
             "contradictions": list(self.contradictions),
+            "failed_checks": [dict(item) for item in self.failed_checks],
+            "missing_required": list(self.missing_required),
             "omitted": list(self.omitted),
         }
 
-    def provider_view(self, budget_chars: int) -> dict[str, Any]:
-        """Compress for a provider, or abstain when mandatory evidence will not fit."""
-        mandatory = self.mandatory_payload()
+    def provider_predictions(self) -> list[dict[str, Any]]:
+        """Underlying prediction evidence with derived verdicts removed.
+
+        Final status, anomaly verdicts, flags and certificate outcomes are
+        policy outputs and never enter a provider input. Forecast uncertainty,
+        residuals, calibration support and provenance remain.
+        """
+        output: list[dict[str, Any]] = []
+        for item in self.predictions:
+            payload = item.to_dict()
+            for key in ("anomaly", "flags"):
+                payload.pop(key, None)
+            output.append(payload)
+        return output
+
+    def provider_view(
+        self, budget_chars: int, level: str = "complete"
+    ) -> dict[str, Any]:
+        """Compress for a provider, or abstain when mandatory evidence will not fit.
+
+        ``level`` constructs an independent evidence view for ablation:
+        ``summary`` retains mandatory identity, uncertainty, integrity results
+        and failed-check references only, ``forecast`` adds predictions,
+        ``hierarchy`` adds ledger and contributions, and ``complete`` adds
+        cross-metric and relationship evidence. Verbose details are compressed
+        into bounded references before optional sections are dropped, and every
+        omission is recorded after packing completes. Mandatory evidence is
+        never dropped: the view abstains instead.
+        """
+        mandatory = _compress_view(self.mandatory_payload())
         if len(json_dumps(mandatory)) >= budget_chars:
             return {
                 "abstain": True,
@@ -245,24 +378,71 @@ class AssessmentEvidence:
                 "assessment_id": self.assessment_id,
             }
         view: dict[str, Any] = dict(mandatory)
-        view["contracts"] = list(self.contracts)
-        view["reconciliation"] = self.reconciliation
-        view["lineage"] = self.lineage
-        view["predictions"] = [item.to_dict() for item in self.predictions]
-        omitted: list[str] = []
-        for section in ("predictions", "contributions", "contracts"):
-            while len(json_dumps(view)) > budget_chars and view.get(section):
-                popped = view[section].pop()
-                omitted.append(
-                    f"{section}:{popped.get('series_id') or popped.get('entity_id') or len(omitted)}"
-                )
-        view["omitted"] = [*self.omitted, *omitted]
-        view["cross_metric"] = list(self.cross_metric)
-        view["evidence_ids"] = list(self.evidence_ids)
-        if len(json_dumps(view)) > budget_chars:
+        view["contracts"] = [
+            _compact_check(check) for check in self.contracts
+        ]
+        view["provenance"] = {
+            "assessment": self.provenance,
+            "dataset": self.dataset,
+            "run_id": self.run_id,
+        }
+        omissions: list[str] = []
+        if level in ("forecast", "hierarchy", "complete"):
+            view["predictions"] = _compress_view(self.provider_predictions())
+        if level in ("hierarchy", "complete"):
+            view["ledger"] = self.ledger
+            view["metric_ledgers"] = dict(self.metric_ledgers)
+            view["contributions"] = [item.to_dict() for item in self.contributions]
+            view["reconciliation"] = self.reconciliation
+            view["lineage"] = self.lineage
+            view["explained_fraction"] = self.explained_fraction
+        if level == "complete":
+            view["cross_metric"] = list(self.cross_metric)
+            view["evidence_ids"] = list(self.evidence_ids)
+        view = _compress_view(view)
+
+        def packed_size() -> int:
+            view["omitted"] = [
+                *self.omitted,
+                *_bounded_omissions(omissions),
+            ]
+            return len(json_dumps(view))
+
+        drop_order = (
+            "cross_metric",
+            "evidence_ids",
+            "lineage",
+            "reconciliation",
+            "contributions",
+            "ledger",
+            "contracts",
+            "predictions",
+        )
+        for section in drop_order:
+            while packed_size() > budget_chars and view.get(section):
+                container = view[section]
+                if not isinstance(container, list):
+                    view.pop(section, None)
+                    omissions.append(section)
+                    break
+                popped = container.pop()
+                if isinstance(popped, dict):
+                    label = (
+                        popped.get("series_id")
+                        or popped.get("entity_id")
+                        or len(omissions)
+                    )
+                else:
+                    label = str(popped)
+                omissions.append(f"{section}:{label}")
+            if section in view and not view[section]:
+                view.pop(section, None)
+            if packed_size() <= budget_chars:
+                break
+        if packed_size() > budget_chars:
             return {
                 "abstain": True,
-                "reason": "evidence exceeds provider budget after compression",
+                "reason": "mandatory evidence exceeds provider budget after compression",
                 "schema_version": self.schema_version,
                 "assessment_id": self.assessment_id,
             }
@@ -285,7 +465,13 @@ class ExplanationCertificate:
     materiality_threshold: float
     evidence_ids: tuple[str, ...]
     approval_ids: tuple[str, ...]
-    clearance_basis: str  # statistical | human_approval
+    clearance_basis: str  # statistical | human_approval | informational
+    evidence_digest: str = ""
+    qualification_digest: str = ""
+    scope_type: str = ""
+    period: int | None = None
+    metric: str = ""
+    level: str = ""
     policy_version: str = EVIDENCE_POLICY_VERSION
     schema_version: int = CERTIFICATE_SCHEMA
 
@@ -307,6 +493,12 @@ class ExplanationCertificate:
             "evidence_ids": list(self.evidence_ids),
             "approval_ids": list(self.approval_ids),
             "clearance_basis": self.clearance_basis,
+            "evidence_digest": self.evidence_digest,
+            "qualification_digest": self.qualification_digest,
+            "scope_type": self.scope_type,
+            "period": self.period,
+            "metric": self.metric,
+            "level": self.level,
             "policy_version": self.policy_version,
         }
 
@@ -327,114 +519,164 @@ class ExplanationCertificate:
             materiality_threshold=float(data.get("materiality_threshold", 0.0)),
             evidence_ids=tuple(data.get("evidence_ids", [])),
             approval_ids=tuple(data.get("approval_ids", [])),
-            clearance_basis=str(data.get("clearance_basis", "statistical")),
-            policy_version=str(data.get("policy_version", EVIDENCE_POLICY_VERSION)),
-            schema_version=int(data.get("schema_version", 1)),
+            clearance_basis=str(data.get("clearance_basis", "")),
+            evidence_digest=str(data.get("evidence_digest", "")),
+            qualification_digest=str(data.get("qualification_digest", "")),
+            scope_type=str(data.get("scope_type", "")),
+            period=data.get("period"),
+            metric=str(data.get("metric", "")),
+            level=str(data.get("level", "")),
+            policy_version=str(data.get("policy_version", "")),
+            schema_version=int(data.get("schema_version", 0)),
         )
 
 
-def _certificate_id(assessment_id: str, scope: str, basis: str) -> str:
+def _certificate_id(
+    assessment_id: str,
+    scope: str,
+    basis: str,
+    finding_ids: tuple[str, ...],
+    evidence_digest: str,
+    qualification_digest: str = "",
+) -> str:
     identity = json_dumps(
-        [CERTIFICATE_SCHEMA, assessment_id, scope, basis], separators=(",", ":")
+        [
+            CERTIFICATE_SCHEMA,
+            assessment_id,
+            scope,
+            basis,
+            list(finding_ids),
+            evidence_digest,
+            qualification_digest,
+        ],
+        separators=(",", ":"),
     )
     return hashlib.sha256(identity.encode()).hexdigest()[:24]
 
 
+def _annual_model(selected_model: str) -> bool:
+    return "fourier" in str(selected_model).lower()
+
+
+def _qualification_reasons(
+    qualification: Any,
+    provenance: str,
+    prediction: PredictionEvidence,
+    evidence_digest_value: str,
+) -> list[str]:
+    reasons: list[str] = []
+    if qualification is None:
+        return ["no pinned qualification artifact"]
+    if getattr(qualification, "status", "") != "QUALIFIED":
+        reasons.append("qualification artifact is unqualified")
+    if getattr(qualification, "provenance", "") != provenance:
+        reasons.append(
+            "qualification provenance does not match the assessment provenance"
+        )
+    digest = str(getattr(qualification, "digest", "") or "")
+    if not digest:
+        reasons.append("qualification artifact has no identity digest")
+    elif evidence_digest_value and digest != evidence_digest_value:
+        reasons.append("qualification identity does not match this evidence")
+    if not qualification.supports(
+        prediction.selected_model,
+        prediction.metric,
+        prediction.level,
+        prediction.horizon,
+    ):
+        reasons.append("model/metric/level/horizon combination is not qualified")
+    required_coverage = float(getattr(qualification, "required_coverage", 1.0))
+    coverage = prediction.interval_coverage
+    if coverage is None:
+        reasons.append("independent held-out forecast coverage is unavailable")
+    elif float(coverage) < required_coverage:
+        reasons.append("held-out forecast coverage is below qualification")
+    max_width_ratio = float(getattr(qualification, "max_width_ratio", 0.0))
+    expected = abs(float(prediction.expected))
+    if max_width_ratio <= 0.0 or not math.isfinite(max_width_ratio):
+        reasons.append("qualification width policy is not registered")
+    elif prediction.interval_width is not None and math.isfinite(
+        float(prediction.interval_width)
+    ):
+        if float(prediction.interval_width) > max_width_ratio * expected:
+            reasons.append("interval width exceeds the qualification limit")
+    elif prediction.interval_width is None:
+        reasons.append("interval width is unavailable")
+    return reasons
+
+
+def _blocking_findings(findings: Any) -> list[Any]:
+    """Applicable failures that can never be cleared by a certificate."""
+    from .policy import BLOCKING_SCOPE_KINDS
+
+    blocking: list[Any] = []
+    for item in findings:
+        outcome = str(getattr(item, "outcome", ""))
+        scope_type = str(getattr(item, "scope_type", ""))
+        required = bool(getattr(item, "required", False))
+        if outcome == "CONTRACT_FAILURE" or scope_type == "contract":
+            blocking.append(item)
+        elif scope_type in BLOCKING_SCOPE_KINDS and (
+            outcome == "FAIL"
+            or (outcome in ("UNAVAILABLE", "SKIPPED") and required)
+        ):
+            blocking.append(item)
+    return blocking
+
+
+def _contradiction_reasons(
+    evidence: AssessmentEvidence, prediction: PredictionEvidence
+) -> list[str]:
+    """Structured contradictions that apply to this prediction's metric."""
+    metric = str(prediction.metric or "")
+    applicable: list[str] = []
+    for entry in evidence.contradictions:
+        text = str(entry)
+        if text in ("over_explained", "offsetting_explanations"):
+            applicable.append(text)
+        elif metric and (
+            text.startswith(f"{metric}_") or text.startswith(f"{metric}:")
+        ):
+            applicable.append(text)
+    return applicable
+
+
 def _dataset_certificate(
     evidence: AssessmentEvidence,
-    config: Any,
-    materiality_threshold: float,
-    required_n: int,
-    integrity_ok: bool,
-    finding_ids: tuple[str, ...],
+    errors: tuple[Any, ...],
 ) -> ExplanationCertificate:
-    """One dataset-scope certificate for a historical-revision clearance."""
-    reasons: list[str] = []
-    bases: list[str] = []
-    ledger = evidence.ledger or {}
-    if not integrity_ok:
-        reasons.append("integrity check failed")
-    if not ledger:
-        reasons.append("no explanation ledger")
-    else:
-        conservation = ledger.get("conservation") or {}
-        difference = abs(float(conservation.get("difference", 0.0)))
-        scale = max(1.0, abs(float(ledger.get("raw_movement", 0.0))))
-        if difference > 1e-6 * scale:
-            reasons.append("ledger does not conserve")
-        overlap_delta = float(ledger.get("overlap_delta", 0.0))
-        supported_overlap = float(
-            sum(
-                float(item.get("value", 0.0))
-                for item in ledger.get("contributions", [])
-                if item.get("scope") == "overlap"
-                and item.get("support") in ("statistical", "approved_event")
-            )
-        )
-        unsupported = overlap_delta - supported_overlap
-        if abs(unsupported) > materiality_threshold:
-            reasons.append(
-                "revision lacks statistical or approved-event support"
-            )
-        else:
-            bases.append("supported_movement")
-        if ledger.get("support_level") == "verified":
-            bases.append("ledger_verified")
-        else:
-            reasons.append("ledger support is not verified")
-    if evidence.contradictions:
-        reasons.append(
-            "contradictory evidence: " + ", ".join(evidence.contradictions)
-        )
-    national = next(
-        (item for item in evidence.predictions if item.series_id == "national"),
-        None,
+    """Assessment-scope record; it never authorizes clearing a finding."""
+    temporal_findings = tuple(
+        str(getattr(item, "finding_id"))
+        for item in errors
+        if getattr(item, "finding_id", None)
     )
-    if (
-        national is None
-        or national.calibration_status != "OK"
-        or national.calibration_n < required_n
-    ):
-        reasons.append("no calibrated national support")
-    else:
-        bases.append("calibrated_national_support")
-    overlap_delta = float(ledger.get("overlap_delta", 0.0)) if ledger else 0.0
-    supported_overlap = (
-        sum(
-            float(item.get("value", 0.0))
-            for item in ledger.get("contributions", [])
-            if item.get("scope") == "overlap"
-            and item.get("support") in ("statistical", "approved_event")
-        )
-        if ledger
-        else 0.0
-    )
-    support = {
-        "ledger_support_level": ledger.get("support_level"),
-        "overlap_delta": overlap_delta,
-        "supported_overlap": supported_overlap,
-        "unsupported_overlap": overlap_delta - supported_overlap,
-        "materiality_threshold": materiality_threshold,
-        "national_calibration_n": national.calibration_n if national else 0,
-    }
+    reasons = ["assessment-scope certificate does not authorize clearance"]
+    if not temporal_findings:
+        reasons.append("no eligible findings covered")
     return ExplanationCertificate(
         certificate_id=_certificate_id(
-            evidence.assessment_id, "dataset", "statistical"
+            evidence.assessment_id, "dataset", "informational", (), evidence.digest
         ),
         assessment_id=evidence.assessment_id,
         scope="dataset",
-        finding_ids=finding_ids,
-        bases=tuple(bases),
-        status="VERIFIED" if not reasons else "REJECTED",
+        finding_ids=temporal_findings,
+        bases=(),
+        status="REJECTED",
         reasons=tuple(reasons),
-        support=support,
-        coverage={"contradictions": len(evidence.contradictions)},
+        support={},
+        coverage={
+            "finding_ids": list(temporal_findings),
+            "contracts": len(evidence.contracts),
+        },
         net_unexplained=evidence.net_unexplained,
         gross_unexplained=evidence.gross_unexplained,
-        materiality_threshold=materiality_threshold,
+        materiality_threshold=evidence.materiality_threshold,
         evidence_ids=evidence.evidence_ids,
         approval_ids=evidence.approval_ids,
-        clearance_basis="statistical",
+        clearance_basis="informational",
+        evidence_digest=evidence.digest,
+        scope_type="dataset",
     )
 
 
@@ -442,68 +684,156 @@ def verify_explanations(
     evidence: AssessmentEvidence,
     config: Any,
     materiality_threshold: float,
-    finding_ids: tuple[str, ...] = (),
+    findings: Any = (),
+    qualification: Any = None,
+    provenance: str | None = None,
 ) -> tuple[ExplanationCertificate, ...]:
-    """Verify one statistical clearance certificate per assessed series.
+    """Verify one statistical clearance certificate per eligible finding.
 
-    Clearance is scoped to a single series and requires historically calibrated
-    support, an interval that contains the observation, no contradictory
-    evidence for that scope and a residual below the frozen materiality
-    threshold. A wide or unqualified interval cannot justify clearance, and the
-    explained fraction alone is never sufficient.
+    Clearance is scoped to a single temporal series and period and requires
+    successful applicable integrity checks, complete mandatory evidence,
+    supported history, a pinned qualification covering the exact
+    model/metric/level/horizon, held-out forecast coverage, a finite interval
+    within the qualification width limit, no contradictory evidence for that
+    scope and a residual below the scoped materiality. The explained fraction
+    alone is never sufficient, and findings on contracts, reconciliation,
+    references, lineage, hierarchy integrity, required evidence or historical
+    revisions cannot receive statistical clearance at all.
     """
-    certificates: list[ExplanationCertificate] = []
+    from .policy import CLEARABLE_CHECKS, SCOPE_TEMPORAL
+
+    provenance = provenance or evidence.provenance
     required_n = minimum_samples(config.temporal_interval_alpha)
-    integrity_ok = not any(
-        item.get("status") == "DATA_CONTRACT_FAILURE" for item in evidence.contracts
+    integrity_ok = bool(evidence.contracts) and not any(
+        _contract_failed(item.get("status")) for item in evidence.contracts
     )
-    certificates.append(
+    finding_list = list(findings)
+    blocking = _blocking_findings(finding_list)
+    certificates: list[ExplanationCertificate] = [
         _dataset_certificate(
             evidence,
-            config,
-            materiality_threshold,
-            required_n,
-            integrity_ok,
-            finding_ids,
+            tuple(
+                item
+                for item in finding_list
+                if getattr(item, "period", None) is not None
+            ),
         )
-    )
-    for prediction in evidence.predictions:
-        scope = prediction.series_id
+    ]
+    for item in finding_list:
+        if getattr(item, "outcome", None) != "FAIL":
+            continue
+        if getattr(item, "check", None) not in CLEARABLE_CHECKS:
+            continue
+        if getattr(item, "scope_type", "") != SCOPE_TEMPORAL:
+            continue
+        if getattr(item, "approval_ids", ()):
+            continue
+        period = getattr(item, "period", None)
+        prediction = next(
+            (
+                entry
+                for entry in evidence.predictions
+                if entry.series_id == item.scope
+                and (period is None or entry.target_week == period)
+                and (not item.metric or entry.metric == item.metric)
+            ),
+            None,
+        )
         reasons: list[str] = []
         bases: list[str] = []
+        if prediction is None:
+            reasons.append("no matching period-specific prediction")
         if not integrity_ok:
             reasons.append("integrity check failed")
-        if prediction.calibration_status != "OK":
-            reasons.append("uncalibrated interval")
-        if prediction.calibration_n < required_n:
+        if not evidence.contracts:
+            reasons.append("mandatory integrity evidence is missing")
+        if blocking:
             reasons.append(
-                f"insufficient calibration: {prediction.calibration_n} < {required_n}"
+                "applicable integrity failures present: "
+                + ", ".join(
+                    sorted(
+                        {
+                            f"{getattr(entry, 'check', '')}:{getattr(entry, 'scope', '')}"
+                            for entry in blocking
+                        }
+                    )
+                )
             )
-        if prediction.interval_lower is None or prediction.interval_upper is None:
-            reasons.append("no interval")
-        elif not (
-            prediction.interval_lower
-            <= prediction.actual
-            <= prediction.interval_upper
-        ):
-            reasons.append("observation outside the calibrated interval")
-        contradictions = [
-            item
-            for item in evidence.contradictions
-            if item == scope or item.endswith(f":{scope}")
-        ]
+        contradictions: list[str] = []
+        if prediction is not None:
+            contradictions = _contradiction_reasons(evidence, prediction)
+            if not all(
+                math.isfinite(float(value))
+                for value in (
+                    prediction.actual,
+                    prediction.expected,
+                    prediction.residual,
+                    prediction.relative_residual,
+                )
+            ):
+                reasons.append("nonfinite prediction evidence")
+            if prediction.support != "model":
+                reasons.append("sparse or parent-share support is informational")
+            if prediction.calibration_status != "OK":
+                reasons.append("uncalibrated interval")
+            if prediction.calibration_n < required_n:
+                reasons.append(
+                    f"insufficient calibration: {prediction.calibration_n} < {required_n}"
+                )
+            if (
+                prediction.interval_lower is None
+                or prediction.interval_upper is None
+                or not (
+                    float("-inf") < prediction.interval_lower <= prediction.interval_upper < float("inf")
+                )
+            ):
+                reasons.append("no finite interval")
+            elif not (
+                prediction.interval_lower
+                <= prediction.actual
+                <= prediction.interval_upper
+            ):
+                reasons.append("observation outside the calibrated interval")
+            minimum_history = (
+                config.temporal_min_annual_history
+                if _annual_model(prediction.selected_model)
+                else min(config.temporal_min_history, 8)
+            )
+            if prediction.history_observed < minimum_history:
+                reasons.append(
+                    f"insufficient observed history: {prediction.history_observed} < {minimum_history}"
+                )
+            reasons.extend(
+                _qualification_reasons(
+                    qualification,
+                    provenance,
+                    prediction,
+                    evidence.qualification_digest,
+                )
+            )
         if contradictions:
             reasons.append("contradictory evidence: " + ", ".join(contradictions))
-        ledger = evidence.ledger or {}
-        conservation = ledger.get("conservation") or {}
-        difference = abs(float(conservation.get("difference", 0.0)))
-        scale = max(1.0, abs(float(ledger.get("raw_movement", 0.0))))
-        if ledger and difference > 1e-6 * scale:
-            reasons.append("ledger does not conserve")
-        if abs(prediction.residual) > materiality_threshold:
-            reasons.append("residual impact exceeds materiality")
-        if not reasons:
+        if prediction is not None:
+            # Zero scoped materiality stays zero: never silently fall back to a
+            # broader dataset threshold.
+            limit = float(getattr(item, "materiality", 0.0))
+            if not math.isfinite(limit) or limit < 0.0:
+                reasons.append("invalid scoped materiality")
+            elif abs(float(prediction.residual)) > limit:
+                reasons.append("residual impact exceeds scoped materiality")
+        if not math.isfinite(float(materiality_threshold)) or materiality_threshold < 0.0:
+            reasons.append("invalid materiality threshold")
+        if not reasons and prediction is not None:
             bases = ["historically_calibrated_interval"]
+            if prediction.interval_coverage is not None:
+                bases.append("held_out_forecast_coverage")
+            if prediction.horizon:
+                bases.append(f"horizon_{prediction.horizon}")
+            ledger = (
+                evidence.metric_ledgers.get(prediction.metric)
+                or evidence.ledger
+                or {}
+            )
             for contribution in ledger.get("contributions", []):
                 if contribution.get("category") != "new_period_expected":
                     continue
@@ -515,40 +845,60 @@ def verify_explanations(
                 break
             if ledger.get("support_level"):
                 bases.append(f"ledger_{ledger['support_level']}")
-            if prediction.relative_residual:
-                bases.append("expected_behaviour")
             if evidence.explained_fraction >= getattr(
                 config, "explained_fraction_threshold", 0.9
             ):
                 bases.append("explained_movement")
         status = "VERIFIED" if not reasons else "REJECTED"
-        support = {
-            "calibration_pool": prediction.calibration_pool,
-            "calibration_n": prediction.calibration_n,
-            "interval_alpha": prediction.interval_alpha,
-            "interval_width": prediction.interval_width,
-            "interval_coverage": prediction.interval_coverage,
-            "forecast_error": prediction.forecast_error,
-            "selected_model": prediction.selected_model,
-            "history_observed": prediction.history_observed,
-            "history_missing": prediction.history_missing,
-        }
+        support_payload: dict[str, Any] = {}
+        if prediction is not None:
+            support_payload = {
+                "calibration_pool": prediction.calibration_pool,
+                "calibration_n": prediction.calibration_n,
+                "interval_alpha": prediction.interval_alpha,
+                "interval_width": prediction.interval_width,
+                "interval_coverage": prediction.interval_coverage,
+                "forecast_error": prediction.forecast_error,
+                "selected_model": prediction.selected_model,
+                "horizon": prediction.horizon,
+                "history_observed": prediction.history_observed,
+                "history_missing": prediction.history_missing,
+                "materiality": float(getattr(item, "materiality", 0.0)),
+            }
+        finding_ids = (
+            (item.finding_id,)
+            if getattr(item, "finding_id", None)
+            else ()
+        )
+        qualification_digest = (
+            str(getattr(qualification, "digest", "") or "")
+            if qualification is not None
+            else ""
+        )
         certificates.append(
             ExplanationCertificate(
                 certificate_id=_certificate_id(
-                    evidence.assessment_id, scope, "statistical"
+                    evidence.assessment_id,
+                    str(getattr(item, "scope", "")),
+                    "statistical",
+                    finding_ids,
+                    evidence.digest,
+                    qualification_digest,
                 ),
                 assessment_id=evidence.assessment_id,
-                scope=scope,
+                scope=str(getattr(item, "scope", "")),
                 finding_ids=finding_ids,
                 bases=tuple(bases),
                 status=status,
                 reasons=tuple(reasons),
-                support=support,
+                support=support_payload,
                 coverage={
+                    "finding_ids": list(finding_ids),
                     "contracts": len(evidence.contracts),
                     "contradictions": len(contradictions),
-                    "history_missing": prediction.history_missing,
+                    "history_missing": (
+                        prediction.history_missing if prediction else 0
+                    ),
                 },
                 net_unexplained=evidence.net_unexplained,
                 gross_unexplained=evidence.gross_unexplained,
@@ -556,6 +906,12 @@ def verify_explanations(
                 evidence_ids=evidence.evidence_ids,
                 approval_ids=evidence.approval_ids,
                 clearance_basis="statistical",
+                evidence_digest=evidence.digest,
+                qualification_digest=qualification_digest,
+                scope_type=getattr(item, "scope_type", ""),
+                period=getattr(item, "period", None),
+                metric=getattr(item, "metric", ""),
+                level=getattr(item, "level", ""),
             )
         )
     return tuple(certificates)
@@ -567,13 +923,25 @@ def build_assessment_evidence(
     *,
     assessment_id: str,
     observation_cutoff: str | None = None,
+    findings: Any = (),
+    target_week: int | None = None,
+    ledger_override: Any | None = None,
+    metric_ledgers: Mapping[str, Any] | None = None,
+    qualification: Any = None,
 ) -> AssessmentEvidence:
-    """Build the complete evidence package from a finished QC result."""
+    """Build the complete evidence package from a finished QC result.
+
+    ``target_week`` builds the period-specific package (predictions and ledger
+    for one appended period); ``ledger_override`` supplies that period's
+    explanation ledger.
+    """
     machine = getattr(result, "machine", {}) or {}
     temporal = getattr(result, "temporal", None)
     predictions: list[PredictionEvidence] = []
     if temporal is not None:
         for item in temporal.series:
+            if target_week is not None and int(item.target_week) != int(target_week):
+                continue
             predictions.append(
                 PredictionEvidence(
                     series_id=item.series_id,
@@ -603,6 +971,27 @@ def build_assessment_evidence(
                     selected_model=item.selected_model,
                     anomaly=item.anomaly,
                     flags=tuple(item.flags),
+                    horizon=int(getattr(item, "horizon", 0) or 0),
+                    support=item.support,
+                    materiality=max(
+                        float(getattr(config, "temporal_materiality_abs", 0.0)),
+                        float(getattr(config, "temporal_min_relative_residual", 0.02))
+                        * abs(float(item.forecast_median)),
+                    ),
+                    training_endpoint_week=int(
+                        getattr(item, "training_endpoint_week", 0) or 0
+                    ),
+                    forecast_origin_week=int(
+                        getattr(item, "forecast_origin_week", 0) or 0
+                    ),
+                    aggregation=str(
+                        getattr(item, "aggregation", "")
+                        or (
+                            "snapshot"
+                            if item.metric in config.snapshot_metrics
+                            else "flow"
+                        )
+                    ),
                 )
             )
     contracts = tuple(
@@ -626,7 +1015,11 @@ def build_assessment_evidence(
         )
         for contributor in (attribution.contributors if attribution else ())
     )
-    ledger = getattr(result, "ledger", None)
+    ledger = (
+        ledger_override
+        if ledger_override is not None
+        else getattr(result, "ledger", None)
+    )
     contradictions: list[str] = []
     if attribution is not None:
         contradictions.extend(attribution.cross_metric_flags)
@@ -634,11 +1027,42 @@ def build_assessment_evidence(
             contradictions.append("over_explained")
         if attribution.offsetting:
             contradictions.append("offsetting_explanations")
+    failed_checks: list[dict[str, Any]] = []
+    missing_required: list[str] = []
+    for item in findings:
+        outcome = str(getattr(item, "outcome", ""))
+        required = bool(getattr(item, "required", False))
+        if outcome not in ("FAIL", "CONTRACT_FAILURE", "UNAVAILABLE", "SKIPPED"):
+            continue
+        if outcome in ("UNAVAILABLE", "SKIPPED") and not required:
+            continue
+        failed_checks.append(
+            {
+                "check": str(getattr(item, "check", "")),
+                "scope": str(getattr(item, "scope", "")),
+                "scope_type": str(getattr(item, "scope_type", "")),
+                "metric": str(getattr(item, "metric", "")),
+                "level": str(getattr(item, "level", "")),
+                "period": getattr(item, "period", None),
+                "outcome": outcome,
+                "impact": float(getattr(item, "impact", 0.0)),
+                "materiality": float(getattr(item, "materiality", 0.0)),
+                "finding_id": str(getattr(item, "finding_id", "")),
+            }
+        )
+        if outcome in ("UNAVAILABLE", "SKIPPED"):
+            missing_required.append(
+                f"{getattr(item, 'check', '')}:{getattr(item, 'scope', '')}"
+            )
     evidence_ids: list[str] = []
     graph = machine.get("evidence_graph") or {}
     for node in graph.get("nodes", []):
         if node.get("evidence_id"):
             evidence_ids.append(str(node["evidence_id"]))
+    for item in findings:
+        finding_id = getattr(item, "finding_id", None)
+        if finding_id:
+            evidence_ids.append(str(finding_id))
     for finding in machine.get("findings", []):
         if finding.get("finding_id"):
             evidence_ids.append(str(finding["finding_id"]))
@@ -664,7 +1088,7 @@ def build_assessment_evidence(
             or (temporal.calendar if temporal is not None else {"declared": False})
         ),
         model_identity={
-            "engine": "0.20.0",
+            "engine": "0.22.0",
             "forecaster": config.forecaster,
             "calibration_pools": [
                 {
@@ -684,6 +1108,10 @@ def build_assessment_evidence(
         lineage=lineage,
         contributions=contributions,
         ledger=ledger.to_dict() if ledger is not None else None,
+        metric_ledgers={
+            str(metric): value.to_dict()
+            for metric, value in (metric_ledgers or {}).items()
+        },
         cross_metric=tuple(attribution.cross_metric_flags) if attribution else (),
         contradictions=tuple(contradictions),
         net_unexplained=float(net_unexplained),
@@ -699,5 +1127,23 @@ def build_assessment_evidence(
                 for item in machine.get("approval_coverage", [])
                 for value in item.get("approval_ids", [])
             )
+        ),
+        provenance=str(machine.get("assessment_provenance", "synthetic")),
+        target_week=(
+            int(target_week)
+            if target_week is not None
+            else (int(temporal.target_week) if temporal is not None else None)
+        ),
+        failed_checks=tuple(failed_checks),
+        missing_required=tuple(dict.fromkeys(missing_required)),
+        qualification_digest=(
+            str(getattr(qualification, "digest", "") or "")
+            if qualification is not None
+            else ""
+        ),
+        qualification_provenance=(
+            str(getattr(qualification, "provenance", "") or "")
+            if qualification is not None
+            else ""
         ),
     )

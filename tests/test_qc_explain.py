@@ -21,9 +21,25 @@ def _report(tmp_path):
     directory = tmp_path / "report"
     directory.mkdir()
     (directory / "report.json").write_text(json.dumps(result.machine, default=str))
-    package = result.evidence_package.to_dict()
-    package["certificates"] = [item.to_dict() for item in result.certificates]
-    (directory / "evidence.json").write_text(json.dumps(package, default=str))
+    periods = []
+    for package in result.evidence_packages:
+        payload = package.to_dict()
+        payload["certificates"] = [
+            certificate.to_dict()
+            for certificate in result.certificates
+            if certificate.evidence_digest == package.digest
+        ]
+        periods.append(payload)
+    (directory / "evidence.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "assessment_id": result.assessment_id,
+                "periods": periods,
+            },
+            default=str,
+        )
+    )
     return directory, result
 
 
@@ -34,8 +50,8 @@ def test_explain_reads_report_directory(tmp_path, capsys):
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["machine"]["run_id"] == result.run_id
-    assert payload["evidence"]["schema_version"] == 1
-    assert payload["evidence"]["certificates"]
+    assert payload["evidence"]["schema_version"] == 2
+    assert payload["evidence"]["periods"]
 
     assert main(["explain", "--report", str(directory)]) == 0
     output = capsys.readouterr().out
@@ -77,7 +93,7 @@ def test_explain_reads_sqlite_journal(tmp_path, capsys):
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["assessment_id"] == "assessment-1"
-    assert payload["evidence"]["certificates"]
+    assert payload["evidence"]["periods"]
 
 
 def test_explain_reports_missing_assessment(tmp_path, capsys):

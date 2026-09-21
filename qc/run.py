@@ -77,8 +77,15 @@ class QCRunResult:
     reasons: list[str] = field(default_factory=list)
     hierarchy: list[HierarchyCheck] = field(default_factory=list)
     ledger: ExplanationLedger | None = None
+    period_ledgers: dict[int, ExplanationLedger] = field(default_factory=dict)
+    metric_ledgers: dict[str, ExplanationLedger] = field(default_factory=dict)
+    period_metric_ledgers: dict[str, ExplanationLedger] = field(
+        default_factory=dict
+    )
     evidence_package: Any | None = None
+    evidence_packages: list[Any] = field(default_factory=list)
     certificates: tuple[Any, ...] = ()
+    assessment_id: str | None = None
     machine: dict[str, Any] = field(default_factory=dict)
 
 
@@ -89,6 +96,32 @@ def _read_dim(
     if reader is None:
         return None
     return reader(version, name)
+
+
+class _TemporalPeriod:
+    """Minimal single-metric/period view for the period explanation ledger."""
+
+    def __init__(self, temporal: Any, target: int, metric: str | None = None):
+        self.target_week = int(target)
+        self.series = [
+            item
+            for item in getattr(temporal, "series", ())
+            if int(item.target_week) == int(target)
+            and (metric is None or getattr(item, "metric", "") == metric)
+        ]
+
+
+def _source_provenance(source: VersionSource) -> str:
+    """Real Delta tables are real-data assessments; fixture sources are not."""
+    from .delta import DeltaSource
+
+    raw: Any = source
+    for _ in range(4):
+        inner = getattr(raw, "source", None) or getattr(raw, "inner", None)
+        if inner is None:
+            break
+        raw = inner
+    return "real" if isinstance(raw, DeltaSource) else "synthetic"
 
 
 def _resolve_common_stage(
@@ -222,11 +255,40 @@ def _machine(
     }
 
 
+def _certificate_periods(
+    result: Any, findings: list[Any]
+) -> Sequence[int | None]:
+    """Periods that need their own evidence package and certificates."""
+    from .policy import CLEARABLE_CHECKS
+
+    targets: Sequence[int | None] = sorted(
+        {
+            int(item.period)
+            for item in findings
+            if item.period is not None
+            and item.check in CLEARABLE_CHECKS
+            and item.outcome == "FAIL"
+        }
+    )
+    if targets:
+        return targets
+    temporal = getattr(result, "temporal", None)
+    if temporal is None:
+        return [None]
+    temporal_targets = getattr(temporal, "targets", None)
+    if temporal_targets:
+        return sorted({int(value) for value in temporal_targets})
+    return [int(temporal.target_week)]
+
+
 def _attach_decisions(
     result: QCRunResult,
     provider: DecisionProvider | None,
     config: DatasetConfig,
     prior_refreshes: Sequence[dict[str, Any]] = (),
+    assessment_id: str | None = None,
+    provenance: str = "synthetic",
+    qualification: Any | None = None,
 ) -> QCRunResult:
     if result.snapshot_manifest is not None:
         result.machine["snapshot_manifest"] = result.snapshot_manifest
@@ -240,47 +302,126 @@ def _attach_decisions(
     result.machine["ledger"] = result.ledger.to_dict() if result.ledger else None
     result.machine["statistical"] = {
         "forecaster": config.forecaster,
-        "selection": "frozen_grid_v1",
+        "selection": "frozen_grid_v2",
         "min_annual_history": config.temporal_min_annual_history,
         "interval_alpha": config.temporal_interval_alpha,
+        "calibration_origins": config.temporal_calibration_origins,
     }
-    from .policy import finalize_policy
-    result.machine["materiality_threshold"] = max(config.materiality_abs,
-        config.materiality_ratio * abs(result.attribution.previous_total)) if result.attribution else config.materiality_abs
-    certificates: tuple[Any, ...] = ()
-    if getattr(config, "statistical_clearance_enabled", True):
-        from .evidence_package import build_assessment_evidence, verify_explanations
+    result.machine["materiality_threshold"] = max(
+        config.materiality_abs,
+        config.materiality_ratio * abs(result.attribution.previous_total),
+    ) if result.attribution else config.materiality_abs
+    result.machine["assessment_provenance"] = provenance
+    result.assessment_id = assessment_id or result.run_id
+
+    from .policy import apply_policy, collect_findings
+    findings = collect_findings(result, config, tuple(prior_refreshes))
+    if getattr(config, "recurrence_enabled", True):
+        # An initial assessment with no eligible predecessor history is a
+        # recorded cold start, not an implicit clean recurrence history.
+        result.machine["recurrence_status"] = (
+            "ASSESSED" if prior_refreshes else "COLD_START"
+        )
+
+    qualification_error = ""
+    qualification_path = str(getattr(config, "qualification_path", "") or "")
+    if qualification is None and qualification_path:
+        # Direct callers may load the artifact here; orchestrated weekly runs
+        # resolve and validate it once, before assessment identity, and pass
+        # the frozen artifact through so a replaced path cannot change replay.
+        from .qualification import load_qualification
         try:
-            package = build_assessment_evidence(
-                result,
-                config,
-                assessment_id=result.run_id,
-                observation_cutoff=result.observed_at,
+            qualification = load_qualification(qualification_path)
+        except Exception as error:  # noqa: BLE001 - clearance stays disabled
+            qualification_error = f"{type(error).__name__}: {error}"
+    if qualification is not None:
+        result.machine["qualification"] = {
+            "status": qualification.status,
+            "provenance": qualification.provenance,
+            "digest": qualification.digest,
+        }
+    elif qualification_error:
+        result.machine["qualification"] = {
+            "status": "UNAVAILABLE",
+            "error": qualification_error,
+        }
+    else:
+        result.machine["qualification"] = {"status": "NOT_PINNED"}
+
+    packages: list[Any] = []
+    certificates: tuple[Any, ...] = ()
+    if getattr(config, "decision_enabled", True) or result.temporal is not None:
+        from .evidence_package import (
+            build_assessment_evidence,
+            verify_explanations,
+        )
+
+        for target in _certificate_periods(result, findings):
+            period_findings = [
+                item
+                for item in findings
+                if item.period is None or target is None or item.period == target
+            ]
+            ledger_override = (
+                result.period_ledgers.get(int(target))
+                if target is not None
+                else None
             )
-            certificates = verify_explanations(
-                package,
-                config,
-                materiality_threshold=result.machine["materiality_threshold"],
-            )
-            result.evidence_package = package
-            result.certificates = certificates
-            result.machine["certificate_availability"] = {
-                "status": "AVAILABLE",
-                "verified": sum(1 for item in certificates if item.status == "VERIFIED"),
-                "rejected": sum(1 for item in certificates if item.status == "REJECTED"),
-            }
-        except Exception as error:  # noqa: BLE001 - keep deterministic results
-            result.machine["certificate_availability"] = {
-                "status": "UNAVAILABLE",
-                "error": f"{type(error).__name__}: {error}",
-            }
-    finalize_policy(
-        result,
-        config.optional_checks,
-        certificates,
-        config=config,
-        prior_refreshes=tuple(prior_refreshes),
-    )
+            metric_ledger_override: dict[str, Any] = {}
+            if target is not None:
+                for metric in config.temporal_metrics() or (
+                    config.primary_metric,
+                ):
+                    built = result.period_metric_ledgers.get(
+                        f"{metric}|{int(target)}"
+                    )
+                    if built is not None:
+                        metric_ledger_override[metric] = built
+            try:
+                package = build_assessment_evidence(
+                    result,
+                    config,
+                    assessment_id=result.assessment_id,
+                    observation_cutoff=result.observed_at,
+                    findings=findings,
+                    target_week=target,
+                    ledger_override=ledger_override,
+                    metric_ledgers=metric_ledger_override,
+                    qualification=qualification,
+                )
+            except Exception as error:  # noqa: BLE001 - keep deterministic results
+                result.machine["certificate_availability"] = {
+                    "status": "UNAVAILABLE",
+                    "error": f"{type(error).__name__}: {error}",
+                }
+                packages = []
+                certificates = ()
+                break
+            packages.append(package)
+            if getattr(config, "statistical_clearance_enabled", True):
+                certificates = certificates + verify_explanations(
+                    package,
+                    config,
+                    materiality_threshold=result.machine["materiality_threshold"],
+                    findings=period_findings,
+                    qualification=qualification,
+                    provenance=provenance,
+                )
+    result.evidence_packages = packages
+    result.evidence_package = packages[0] if packages else None
+    result.certificates = certificates
+    result.machine["evidence_digests"] = [item.digest for item in packages]
+    if "certificate_availability" not in result.machine:
+        result.machine["certificate_availability"] = {
+            "status": "AVAILABLE",
+            "verified": sum(
+                1 for item in certificates if item.status == "VERIFIED"
+            ),
+            "rejected": sum(
+                1 for item in certificates if item.status == "REJECTED"
+            ),
+        }
+    apply_policy(result, findings, certificates, config.optional_checks)
     from dataclasses import asdict
     result.machine["rule_evidence"] = {
         "contracts": {"status": result.contracts.status, "failed": [asdict(c) for c in result.contracts.failed]},
@@ -301,7 +442,13 @@ def _attach_decisions(
     except Exception as error:
         if provider is None:
             raise
-        result.machine["provider_availability"] = {"status": "UNAVAILABLE", "provider": active.name, "error": str(error)}
+        from .systemone import ProviderAbstention
+        abstained = isinstance(error, ProviderAbstention)
+        result.machine["provider_availability"] = {
+            "status": "ABSTAINED" if abstained else "UNAVAILABLE",
+            "provider": active.name,
+            "error": str(error),
+        }
         result.decisions = RuleDecisionProvider(config).decide(result)
     result.machine["provider_recommendation"] = result.decisions.to_dict()
     result.machine["policy_required_review"] = result.machine["requires_investigation"]
@@ -333,6 +480,8 @@ def run_qc(
     expectations: Sequence[Any] = (),
     observed_at: str | None = None,
     prior_refreshes: Sequence[dict[str, Any]] = (),
+    assessment_id: str | None = None,
+    qualification: Any | None = None,
 ) -> QCRunResult:
     config = config or DatasetConfig()
     from .store import observation_time
@@ -340,6 +489,7 @@ def run_qc(
     from .source import CachedSource
     if not isinstance(source, CachedSource):
         source = CachedSource(source, config)
+    provenance = _source_provenance(source)
     from .versions import select_versions
     current_id, previous_id = select_versions(source.list_versions(), current_id, previous_id)
     if hasattr(source, "snapshot_metadata"):
@@ -372,7 +522,15 @@ def run_qc(
         result = QCRunResult(run_id=run_id, dataset=config.name, status="INCOMPLETE", contracts=contracts,
                              version_pair=None, input_findings=input_findings, snapshot_manifest=snapshots, observed_at=observed_at,
                              machine=_machine(run_id, config.name, "INCOMPLETE", contracts, None, [], None, []))
-        return _attach_decisions(result, decision_provider, config, prior_refreshes)
+        return _attach_decisions(
+            result,
+            decision_provider,
+            config,
+            prior_refreshes,
+            assessment_id=assessment_id,
+            provenance=provenance,
+            qualification=qualification,
+        )
     stages_to_check: list[str] = []
     for stage in common_stages:
         if stage in common_stages and stage not in stages_to_check:
@@ -415,7 +573,15 @@ def run_qc(
                 run_id, config.name, contracts.status, contracts, None, [], None, reasons
             ),
         )
-        return _attach_decisions(result, decision_provider, config, prior_refreshes)
+        return _attach_decisions(
+            result,
+            decision_provider,
+            config,
+            prior_refreshes,
+            assessment_id=assessment_id,
+            provenance=provenance,
+            qualification=qualification,
+        )
 
     analysis_stage = _resolve_common_stage(
         source, previous_id, current_id, config.analysis_stages()
@@ -521,19 +687,47 @@ def run_qc(
         hierarchy = hierarchy_checks(current, config)
     except ValueError:
         hierarchy = []
-    try:
-        ledger = build_explanation_ledger(
-            previous,
-            current,
-            pair,
-            config,
-            events=events,
-            temporal=temporal,
-            calendar=calendar,
-            approved_event_ids=tuple(attribution.matched_event_ids),
-        )
-    except ValueError:
-        ledger = None
+    configured_metrics = config.temporal_metrics() or (config.primary_metric,)
+    metric_ledgers: dict[str, ExplanationLedger] = {}
+    for metric in configured_metrics:
+        try:
+            metric_ledgers[metric] = build_explanation_ledger(
+                previous,
+                current,
+                pair,
+                config,
+                events=events,
+                temporal=temporal,
+                calendar=calendar,
+                approved_event_ids=tuple(attribution.matched_event_ids),
+                metric=metric,
+            )
+        except ValueError:
+            continue
+    ledger = metric_ledgers.get(config.primary_metric)
+    period_ledgers: dict[int, ExplanationLedger] = {}
+    period_metric_ledgers: dict[str, ExplanationLedger] = {}
+    if temporal is not None:
+        for target in getattr(temporal, "targets", ()) or (temporal.target_week,):
+            for metric in configured_metrics:
+                try:
+                    built = build_explanation_ledger(
+                        previous,
+                        current,
+                        pair,
+                        config,
+                        events=events,
+                        temporal=_TemporalPeriod(temporal, int(target), metric),
+                        calendar=calendar,
+                        approved_event_ids=tuple(attribution.matched_event_ids),
+                        new_periods=(int(target),),
+                        metric=metric,
+                    )
+                except ValueError:
+                    continue
+                period_metric_ledgers[f"{metric}|{int(target)}"] = built
+                if metric == config.primary_metric:
+                    period_ledgers[int(target)] = built
     reasons = _reasons(
         contracts, events, attribution, config, historical_status, relationships
     )
@@ -579,6 +773,9 @@ def run_qc(
             expectations=expectations,
             hierarchy=hierarchy,
             ledger=ledger,
+            period_ledgers=period_ledgers,
+            metric_ledgers=metric_ledgers,
+            period_metric_ledgers=period_metric_ledgers,
             observed_at=observed_at,
             temporal_required=config.temporal_enabled and config.temporal_required and bool(pair.new_periods),
             input_findings=input_findings,
@@ -605,4 +802,7 @@ def run_qc(
         decision_provider,
         config,
         prior_refreshes,
+        assessment_id=assessment_id,
+        provenance=provenance,
+        qualification=qualification,
     )

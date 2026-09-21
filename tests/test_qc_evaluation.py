@@ -24,6 +24,7 @@ def _case(index: int, *, actionable: bool, review: bool, challenger: bool | None
         verifier_review=review,
         challenger_review=challenger if challenger is not None else review,
         effective_review=review,
+        expected_review=actionable,
     )
 
 
@@ -63,12 +64,16 @@ def test_false_clearance_bound_requires_enough_incidents():
 
 def test_gate_fails_on_false_clearance_and_deterministic_errors():
     cases = [_case(index, actionable=True, review=True) for index in range(12)]
+    cases += [_case(500 + index, actionable=False, review=False) for index in range(4)]
     cases[0] = _case(99, actionable=True, review=False)
     gates = evaluation_gates(cases)
     assert gates["status"] == "FAIL"
     assert gates["gates"]["false_clearance"]["status"] == "FAIL"
+    assert gates["gates"]["deterministic_fixture_errors"]["status"] == "FAIL"
+    assert "case-99" in gates["gates"]["deterministic_fixture_errors"]["errors"]
 
     deterministic = [_case(index, actionable=True, review=True) for index in range(12)]
+    deterministic += [_case(500 + index, actionable=False, review=False) for index in range(4)]
     deterministic[0] = EvaluationCase(
         **{
             **_case(0, actionable=True, review=True).to_dict(),
@@ -77,6 +82,25 @@ def test_gate_fails_on_false_clearance_and_deterministic_errors():
     )
     gates = evaluation_gates(deterministic)
     assert gates["gates"]["deterministic_fixture_errors"]["status"] == "FAIL"
+
+
+def test_gates_are_insufficient_without_controls_or_labels():
+    actionable_only = [
+        _case(index, actionable=True, review=True) for index in range(12)
+    ]
+    gates = evaluation_gates(actionable_only)
+    assert gates["status"] == "INSUFFICIENT_EVIDENCE"
+    assert gates["gates"]["false_positive_rate"]["status"] == "INSUFFICIENT_EVIDENCE"
+
+    unlabelled = [
+        EvaluationCase(
+            **{**_case(index, actionable=True, review=True).to_dict(), "expected_review": None}
+        )
+        for index in range(12)
+    ]
+    gates = evaluation_gates(unlabelled)
+    assert gates["gates"]["deterministic_fixture_errors"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert gates["status"] == "INSUFFICIENT_EVIDENCE"
 
 
 def test_ablation_reports_review_volume_per_level():

@@ -102,6 +102,21 @@ Cross-metric evidence is recorded when the primary metric moves materially
 while units do not (`dollar_change_without_units`), which is characteristic of
 value/coding or warehouse transform errors.
 
+## Assessed measures (evidence engine)
+
+`temporal_required_metrics` and `temporal_optional_metrics` select the measures
+assessed per appended period; empty values derive required measures from
+`required_columns` and optional measures from the remaining `metric_columns`.
+Every present measure gets its own period forecasts, calibration pools,
+findings, explanation ledger, availability records and certificates, keyed by
+metric/period/hierarchy scope. An absent optional measure is reported as
+informational and an absent required measure makes the assessment `INCOMPLETE`.
+Measures listed in `snapshot_metrics` (stock) are compared within a period and
+are never summed across time. Per-period `AssessmentEvidence` records independent
+held-out coverage for every measured combination and a failed-check summary;
+statistical clearance requires the pinned qualification to cover the exact
+model/metric/level/horizon at the assessment's provenance.
+
 An unregistered backfill, truncation, removal or reclassification always
 remains `INVESTIGATE`, even at a 100% explained fraction: structure is
 explained, but confirmation is a human or registry decision.
@@ -192,8 +207,11 @@ the records become the analyst-feedback store for calibration and training.
 
 Latest-week QC compares the new period against a forecast trained on the
 previous version only, so backfilled overlap history cannot inflate the
-baseline. Series are built at the national level and for configured entity
-columns (banner, commodity) from the primary metric.
+baseline. Series are built for every configured temporal measure (present
+measures are assessed, absent optional measures are reported and absent required
+measures yield INCOMPLETE) at the national level and for configured entity
+columns (banner, commodity); snapshot measures are compared within a period and
+never summed across time.
 
 Evidence per series:
 
@@ -207,33 +225,41 @@ Evidence per series:
 | change point | strongest recent mean-shift t-statistic (history evidence, not a target-week flag) |
 
 Model selection, fitting and residual calibration use only observations before
-the assessment target; rolling origins never score an observation with a
-forecast that saw it. Series are dense over the observed week span: missing
-weeks are explicit NaN rows with a `missing` marker instead of being compressed
-into consecutive observations. Errors are standardized per origin and pooled by
+the assessment target and only the selected previous snapshot; rolling origins
+never score an observation with a forecast that saw it. Every appended period is
+assessed separately with its own horizon (`target - previous_max_week`), and
+earlier newly appended weeks never enter training for later targets in the same
+assessment. Series are dense over the observed week span: missing weeks are
+explicit NaN rows with a `missing` marker instead of being compressed into
+consecutive observations. Errors are standardized per origin and pooled by
 metric, aggregation level, model revision and forecast horizon, so a
-different-volume series cannot dominate a shared pool. `forecaster: auto`
-selects on pre-target rolling-origin absolute error over the fixed grid
-(seasonal-naive; ridge trend; ridge trend + annual Fourier order 1-3 + declared
-calendar event indicators, penalties 0.1/1/10), ties break on interval score
-then the simpler model, and the choice is frozen before interval calibration.
-Annual-seasonality candidates require at least 104 completed weeks. `baseline`
-and `chronos` remain available as fixed choices; `chronos` needs the optional
-`[forecast]` extra.
+different-volume series cannot dominate a shared pool; pooled quantiles are
+converted back through the target's own historical scale before becoming
+intervals. The latest `temporal_calibration_origins` (default 12) are reserved
+exclusively for calibration and are never reused for selection. `forecaster:
+auto` selects on the remaining pre-target rolling-origin absolute error over
+the fixed grid (seasonal-naive; ridge trend; ridge trend + annual Fourier order
+1-3 + declared calendar event indicators, penalties 0.1/1/10), ties break on
+interval score then the simpler model, and the choice is frozen before interval
+calibration. Annual-seasonality candidates require at least 104 completed weeks.
+`baseline` and `chronos` remain available as fixed choices; `chronos` needs the
+optional `[forecast]` extra.
 
-Calibrated prediction intervals come from held-out raw errors
-(`temporal_interval_alpha`, default 0.1) and are reported with history length,
-observed/missing weeks, forecast error, coverage and width. A target-week
-anomaly must move materially versus the forecast median
-(`temporal_min_relative_residual`, default 2%) and then either be a forecast
-extreme or seasonal deviation, or carry corroborating robust-z and EWMA flags;
-a lone robust-z on a low-variance series is noise and is reported without
-flagging. Forecast-tail flags on leaf series pass Benjamini-Hochberg control
-(`temporal_fdr_q`) before escalation. Same-direction leaf residuals are
-combined within their parent level before materiality testing, so a coordinated
-small movement can escalate when the individual series cannot. Sparse leaves
-fall back to parent expectation times a historically estimated child share and
-are labelled `parent_share`; the fallback cannot support statistical clearance.
+Calibrated prediction intervals come from pooled standardized errors scaled to
+the target (`temporal_interval_alpha`, default 0.1) and are reported with
+history length, observed/missing weeks, forecast error, per-series held-out
+coverage and width. A target-week anomaly must move materially versus the same
+metric/period/scope expected magnitude with a configured absolute floor
+(`temporal_min_relative_residual`, default 2%; `temporal_materiality_abs`
+default 0) and then either be a forecast extreme or seasonal deviation, or carry
+corroborating robust-z and EWMA flags; a lone robust-z on a low-variance series
+is noise and is reported without flagging. Forecast-tail flags on leaf series
+pass Benjamini-Hochberg control (`temporal_fdr_q`) before escalation.
+Same-direction leaf residuals are combined within their parent level and period
+before materiality testing, so a coordinated small movement can escalate when
+the individual series cannot. Sparse leaves fall back to parent expectation
+times a historically estimated child share and are labelled `parent_share`; the
+fallback cannot support statistical clearance.
 Structural additions from newly appearing entities are subtracted from the
 target week before scoring, at one entity level only (store before product) to
 avoid double counting; registered backfills therefore do not trigger
@@ -290,20 +316,35 @@ status, classification, explained fraction and conservation ratio for each.
 ## Final assessment policy
 
 After contracts, reconciliation, references, temporal checks, recurrence and
-scoped approvals, versioned findings determine one final status. Contract
-failures win; unexplained integrity/anomaly findings yield INVESTIGATE;
+scoped approvals, the engine first collects immutable findings (every appended
+period gets its own temporal finding, forecast and ledger entry), then verifies
+explanations against those findings, and only then computes one final status.
+Contract failures win; unexplained integrity/anomaly findings yield INVESTIGATE;
 unavailable required evidence yields INCOMPLETE; otherwise explained actionable
 findings yield PASS_WITH_EXPLANATION, and all required successful checks yield
 PASS. Each finding carries a disposition (`HARD_FAILURE`, `UNAVAILABLE_EVIDENCE`,
 `UNEXPLAINED_ANOMALY`, `STATISTICALLY_EXPLAINED`, `HUMAN_APPROVED`,
 `INFORMATIONAL`) and its clearance basis. A finding is cleared only by a
-verified `ExplanationCertificate` for its scope or by explicit human approval;
-certificates require integrity, calibrated support, an interval that contains
-the observation, no contradictory evidence and residual impact below the frozen
-materiality threshold. Arithmetic attribution alone never authorizes clearance.
-Findings recurring in at least two of the last three refreshes escalate when
-the cumulative unexplained impact is material. Optional missing checks remain
-visible. Model requests may add review but cannot clear deterministic review.
-Approval coverage lists exact finding IDs, and approval observation timestamps
-must precede the assessment cutoff. Temporal-only anomalies have UNKNOWN cause
-unless independent evidence exists.
+verified `ExplanationCertificate` whose `finding_ids` contain that exact finding
+and whose assessment identity, evidence digest, certificate schema, policy
+version, qualification digest, scope kind, measure, hierarchy level, series and
+period all match this assessment, or by explicit human approval. Missing
+identity/digest/schema/policy/qualification fields are rejected, never treated
+as current, and all applicable contract, reconciliation, reference, lineage,
+hierarchy and required-input failures are evaluated before any clearance. Contract, reconciliation, reference, lineage, hierarchy-integrity,
+required-evidence and historical-revision findings are never statistically
+clearable; only temporal anomalies scoped to one series and period are.
+Certificates additionally require integrity checks to pass, complete mandatory
+evidence, supported observed history (104 weeks for annual explanations),
+calibrated intervals with per-series held-out coverage inside the qualification
+width limit, no contradictory evidence and residual impact below the scoped
+materiality. Arithmetic attribution alone never authorizes clearance.
+Recurrence matches eligible unexplained findings on an explicitly serialized,
+period-independent stable key (check, scope kind, measure, hierarchy level and
+scope) and accumulates signed scoped impacts against a registered cumulative
+budget rather than the whole dataset; multiple periods inside one logical
+refresh count as one occurrence. Optional
+missing checks remain visible. Model requests may add review but cannot clear
+deterministic review. Approval coverage lists exact finding IDs, and approval
+observation timestamps must precede the assessment cutoff. Temporal-only
+anomalies have UNKNOWN cause unless independent evidence exists.

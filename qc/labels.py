@@ -17,7 +17,7 @@ from typing import Any
 
 from .config import DatasetConfig
 from .decisions import FeatureEncoder
-from .evidence_text import evidence_text
+from .evidence_text import EVIDENCE_TEXT_VERSION, evidence_text
 from .fingerprints import manifest_data_fingerprint
 from .jsonutil import dumps as json_dumps
 
@@ -142,6 +142,7 @@ def oracle_labels_for_result(result: Any, oracle: dict) -> LabelRecord:
             "scenario_id": oracle.get("scenario_id"),
             "expected_status": expected_status,
             "expected_class": expected_class,
+            "text_version": EVIDENCE_TEXT_VERSION,
         },
         text=evidence_text(result),
     )
@@ -227,7 +228,10 @@ def records_from_store(
                     feature_version=int(row.get("feature_version") or 1),
                     metadata={"dataset": row["dataset"], "observed_at": row["created"],
                               "incident_group": row.get("incident_group") or payload.get("incident_group", row["dataset"]),
-                              "snapshot_identity": payload.get("snapshot_manifest")},
+                              "snapshot_identity": payload.get("snapshot_manifest"),
+                              "text_version": row["text_version"]
+                              if "text_version" in row.keys()
+                              else None},
                     text=row.get("evidence_text"),
                 )
             )

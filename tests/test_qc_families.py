@@ -41,10 +41,14 @@ EXPECTATIONS = {
         "fraction_min": 0.99,
     },
     "expected_event": {
-        "status": "PASS_WITH_EXPLANATION",
+        # The registered event explains the revision; residual secondary
+        # measure drift is a separate movement and is reviewed.
+        "status": "INVESTIGATE",
         "classification": "NEW_ENTITY_HISTORICAL_BACKFILL",
         "fraction_min": 0.99,
-        "latest_week_anomaly": False,
+        # A coordinated secondary-measure deviation is temporal evidence even
+        # without an individually flagged series or target-week flag.
+        "latest_week_anomaly": True,
     },
     "history_truncation": {
         "status": "INVESTIGATE",

@@ -103,15 +103,86 @@ def test_assessment_evidence_roundtrip_and_provider_view():
     assert "budget" in abstained["reason"]
 
 
+def _qualification(evidence, *, required_coverage=0.0, max_width_ratio=1e9, status="QUALIFIED"):
+    from qc.qualification import QualificationArtifact, QualifiedCombination
+
+    combinations = tuple(
+        QualifiedCombination(
+            model=prediction.selected_model,
+            metric=prediction.metric,
+            level=prediction.level,
+            horizon=prediction.horizon,
+            development_groups=100,
+            test_groups=100,
+            development_coverage=1.0,
+            test_coverage=1.0,
+            development_lower_bound=1.0,
+            test_lower_bound=1.0,
+            width_ratio=0.01,
+            qualified=True,
+        )
+        for prediction in evidence.predictions
+    )
+    return QualificationArtifact(
+        provenance="synthetic",
+        required_coverage=required_coverage,
+        max_width_ratio=max_width_ratio,
+        minimum_groups=1,
+        combinations=combinations,
+        development_digest="dev",
+        test_digest="test",
+        status=status,
+    )
+
+
+def _finding_for(prediction, *, materiality=1e9, outcome="FAIL"):
+    from qc.policy import finding
+
+    return finding(
+        "temporal",
+        prediction.series_id,
+        outcome,
+        scope_type="temporal_series",
+        metric=prediction.metric,
+        level=prediction.level,
+        period=prediction.target_week,
+        impact=abs(prediction.residual),
+        materiality=materiality,
+    )
+
+
 def test_certificates_verify_calibrated_explanation():
     _, evidence = _evidence()
-    certificates = verify_explanations(evidence, CONFIG, materiality_threshold=1e9)
-    national = next(item for item in certificates if item.scope == "national")
-    assert national.status == "VERIFIED"
-    assert national.clearance_basis == "statistical"
-    assert "historically_calibrated_interval" in national.bases
-    assert national.support["calibration_n"] > 0
-    assert national.to_dict()["schema_version"] == 1
+    national = next(
+        item for item in evidence.predictions if item.series_id == "national"
+    )
+    certificates = verify_explanations(
+        evidence,
+        CONFIG,
+        materiality_threshold=1e9,
+        findings=(_finding_for(national),),
+        qualification=_qualification(evidence),
+    )
+    certificate = next(item for item in certificates if item.scope == "national")
+    assert certificate.status == "VERIFIED"
+    assert certificate.clearance_basis == "statistical"
+    assert "historically_calibrated_interval" in certificate.bases
+    assert certificate.support["calibration_n"] > 0
+    assert certificate.finding_ids
+    assert certificate.evidence_digest == evidence.digest
+    assert certificate.to_dict()["schema_version"] == 3
+
+    without_qualification = verify_explanations(
+        evidence,
+        CONFIG,
+        materiality_threshold=1e9,
+        findings=(_finding_for(national),),
+    )
+    rejected = next(
+        item for item in without_qualification if item.scope == "national"
+    )
+    assert rejected.status == "REJECTED"
+    assert any("qualification" in reason for reason in rejected.reasons)
 
 
 def _revision_source(*, dollar_factor: float = 1.0, unit_factor: float = 1.0):
@@ -147,7 +218,7 @@ def _revision_source(*, dollar_factor: float = 1.0, unit_factor: float = 1.0):
     return FrameSource(frames)
 
 
-def test_broad_immaterial_revision_clears_statistically():
+def test_broad_immaterial_revision_is_not_statistically_cleared():
     result = run_qc(_revision_source(dollar_factor=1.0002), "v2", "v1", CONFIG)
     historical = next(
         item
@@ -155,18 +226,14 @@ def test_broad_immaterial_revision_clears_statistically():
         if item["check"] == "historical_revision"
     )
     assert historical["outcome"] == "FAIL"
-    assert historical["disposition"] == "STATISTICALLY_EXPLAINED"
-    assert historical["clearance_basis"] == "statistical"
-    assert result.status == "PASS_WITH_EXPLANATION"
-    assert result.machine["clearance"]
-    assert result.machine["clearance"][0]["basis"] == "statistical"
-    certificate = next(
-        item
-        for item in result.certificates
-        if item.scope == "dataset"
+    assert historical["disposition"] == "UNEXPLAINED_ANOMALY"
+    assert result.status in ("INVESTIGATE", "DATA_CONTRACT_FAILURE")
+    assert not result.machine["clearance"]
+    dataset_certificate = next(
+        item for item in result.certificates if item.scope == "dataset"
     )
-    assert certificate.status == "VERIFIED"
-    assert "supported_movement" in certificate.bases
+    assert dataset_certificate.status == "REJECTED"
+    assert "does not authorize clearance" in dataset_certificate.reasons[0]
     ledger = result.machine["ledger"]
     assert abs(ledger["conservation"]["difference"]) <= 1e-6 * max(
         1.0, abs(ledger["raw_movement"])
@@ -187,13 +254,20 @@ def test_material_price_change_is_not_cleared_without_support():
 
 def test_certificates_reject_unexplained_movement():
     result, evidence = _evidence(target_delta=5000.0)
-    certificates = verify_explanations(
-        evidence, CONFIG, materiality_threshold=result.machine["materiality_threshold"]
+    national = next(
+        item for item in evidence.predictions if item.series_id == "national"
     )
-    national = next(item for item in certificates if item.scope == "national")
-    assert national.status == "REJECTED"
-    assert national.reasons
+    certificates = verify_explanations(
+        evidence,
+        CONFIG,
+        materiality_threshold=result.machine["materiality_threshold"],
+        findings=(_finding_for(national, materiality=1.0),),
+        qualification=_qualification(evidence),
+    )
+    certificate = next(item for item in certificates if item.scope == "national")
+    assert certificate.status == "REJECTED"
+    assert certificate.reasons
     assert any(
         "materiality" in reason or "interval" in reason
-        for reason in national.reasons
+        for reason in certificate.reasons
     )

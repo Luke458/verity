@@ -161,7 +161,7 @@ class DecisionProvider(Protocol):
 # Feature encoder
 # ---------------------------------------------------------------------------
 
-FEATURE_VERSION = 1
+FEATURE_VERSION = 3
 
 
 def feature_version() -> int:
@@ -212,16 +212,22 @@ class FeatureEncoder:
             "material",
             "breadth",
             "reconciliation_failures",
-            "temporal_anomalies",
             "temporal_min_percentile",
             "temporal_max_relative_residual",
             "cross_metric_flags",
+            "evidence_failed_contracts",
+            "evidence_unavailable_required",
+            "evidence_contradictions",
+            "ledger_explained_fraction",
+            "ledger_net_unexplained_relative",
+            "interval_width_relative",
+            "calibration_coverage",
+            "provenance_synthetic",
         ]
         names += [f"event:{value}" for value in EVENT_CLASSES]
         names += [f"divergence:{value}" for value in DIVERGENCE_STAGES]
         names += ["divergence:none"]
         names += [f"temporal_flag:{value}" for value in TEMPORAL_FLAGS]
-        names += [f"status:{value}" for value in STATUS_VALUES]
         return names
 
     @property
@@ -279,9 +285,8 @@ class FeatureEncoder:
 
         temporal = getattr(result, "temporal", None)
         if temporal is not None:
-            values["temporal_anomalies"] = float(
-                sum(1 for item in temporal.series if item.anomaly)
-            )
+            # Derived anomaly verdicts are policy outputs and never enter a
+            # learned feature; detector statistics and flags remain evidence.
             percentiles = [
                 item.calibrated_percentile
                 for item in temporal.series
@@ -302,14 +307,57 @@ class FeatureEncoder:
                     if key in values:
                         values[key] += 1.0
 
-        historical_status = None
         machine = getattr(result, "machine", None)
-        if isinstance(machine, dict) and machine.get("historical_revision"):
-            historical_status = machine["historical_revision"].get("status")
-        elif contracts is not None and contracts.status == "DATA_CONTRACT_FAILURE":
-            historical_status = "DATA_CONTRACT_FAILURE"
-        if historical_status in STATUS_VALUES:
-            values[f"status:{historical_status}"] = 1.0
+        package = getattr(result, "evidence_package", None)
+        if package is not None:
+            package_contracts = list(getattr(package, "contracts", ()) or ())
+            values["evidence_failed_contracts"] = float(
+                sum(
+                    1
+                    for check in package_contracts
+                    if str((check or {}).get("status", "")) != "PASS"
+                )
+            )
+            values["evidence_contradictions"] = float(
+                len(getattr(package, "contradictions", ()) or ())
+            )
+            predictions = list(getattr(package, "predictions", ()) or ())
+            if isinstance(machine, dict):
+                values["evidence_unavailable_required"] = float(
+                    sum(
+                        1
+                        for finding in machine.get("findings", [])
+                        if finding.get("outcome") == "UNAVAILABLE"
+                        and finding.get("required")
+                    )
+                )
+            coverages = [
+                float(item.interval_coverage)
+                for item in predictions
+                if item.interval_coverage is not None
+            ]
+            values["calibration_coverage"] = min(coverages) if coverages else 0.0
+            width_ratios = [
+                float(item.interval_width) / max(abs(float(item.expected)), 1e-9)
+                for item in predictions
+                if item.interval_width is not None
+            ]
+            values["interval_width_relative"] = (
+                max(width_ratios) if width_ratios else 0.0
+            )
+            ledger = getattr(package, "ledger", None) or {}
+            movement = abs(float(ledger.get("raw_movement", 0.0)))
+            values["ledger_net_unexplained_relative"] = (
+                float(getattr(package, "net_unexplained", 0.0)) / movement
+                if movement > 1e-12
+                else 0.0
+            )
+            values["ledger_explained_fraction"] = float(
+                getattr(package, "explained_fraction", 0.0)
+            )
+            values["provenance_synthetic"] = (
+                1.0 if getattr(package, "provenance", "") == "synthetic" else 0.0
+            )
 
         return np.asarray([values[name] for name in self._names], dtype=float)
 
@@ -588,6 +636,16 @@ class TrainedDecisionProvider:
 
     def decide(self, result: Any) -> DecisionSet:
         raw = self.encoder.encode(result)
+        if isinstance(getattr(result, "machine", None), dict):
+            from .evidence_package import evidence_digest
+
+            result.machine["provider_payload_digest"] = evidence_digest(
+                {
+                    "provider": self.name,
+                    "feature_version": self.encoder.feature_version,
+                    "features": [float(value) for value in raw],
+                }
+            )
         features = self._standardize(raw.reshape(1, -1))
         specs = field_index()
         values: dict[str, DecisionValue] = {}

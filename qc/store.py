@@ -14,6 +14,7 @@ with history and confirmation semantics.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Sequence
@@ -30,7 +31,7 @@ from .incidents import cosine_similarity
 from .jsonutil import dumps as json_dumps
 from .relationships import EntityRelationship
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 PROVENANCE_VALUES = (
     "analyst",
     "synthetic",
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS runs (
     features TEXT,
     feature_version INTEGER,
     evidence_text TEXT,
+    text_version INTEGER,
     payload TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS outcomes (
@@ -116,6 +118,11 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes", "y", "confirmed")
+
+
+def _version_order(value: Any) -> tuple[int, object]:
+    text = str(value)
+    return (0, int(text)) if text.isdigit() else (1, text)
 
 
 def import_outcomes(
@@ -222,10 +229,10 @@ class SqliteStore:
         """
         row = self.connection.execute("PRAGMA user_version").fetchone()
         version = int(row[0]) if row is not None else 0
-        if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+        if version not in (0, 1, 2, 3, 4, 5, SCHEMA_VERSION):
             raise ValueError(f"unsupported store schema version {version}")
         existing = self.connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'").fetchone()
-        if version in (1, 2, 3) or (version == 0 and existing is not None):
+        if version in (1, 2, 3, 4, 5) or (version == 0 and existing is not None):
             backup = self.path.with_name(self.path.name + f".v{version}.backup-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}")
             with sqlite3.connect(backup) as target:
                 self.connection.backup(target)
@@ -242,6 +249,9 @@ class SqliteStore:
             }.items():
                 if name not in columns:
                     self.connection.execute(f"ALTER TABLE outcomes ADD COLUMN {name} {definition}")
+            run_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(runs)")}
+            if "text_version" not in run_columns:
+                self.connection.execute("ALTER TABLE runs ADD COLUMN text_version INTEGER")
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _commit(self) -> None:
@@ -279,13 +289,14 @@ class SqliteStore:
         features: Sequence[float] | None = None,
         feature_version: int | None = None,
         evidence_text: str | None = None,
+        text_version: int | None = None,
         created: str | None = None,
     ) -> None:
         try:
             self.connection.execute(
                 "INSERT INTO runs (run_id, dataset, created, status, features, "
-                "feature_version, evidence_text, payload) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "feature_version, evidence_text, text_version, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     dataset,
@@ -294,6 +305,7 @@ class SqliteStore:
                     json_dumps(list(features)) if features is not None else None,
                     feature_version,
                     evidence_text,
+                    text_version,
                     json_dumps(payload, sort_keys=True, default=str),
                 ),
             )
@@ -306,6 +318,8 @@ class SqliteStore:
     def record_result(
         self, result: Any, created: str | None = None
     ) -> str:
+        from .evidence_text import EVIDENCE_TEXT_VERSION
+
         encoder = FeatureEncoder()
         self.record_run(
             run_id=result.run_id,
@@ -315,6 +329,7 @@ class SqliteStore:
             features=encoder.encode(result).tolist(),
             feature_version=encoder.feature_version,
             evidence_text=build_evidence_text(result),
+            text_version=EVIDENCE_TEXT_VERSION,
             created=created,
         )
         return str(result.run_id)
@@ -354,6 +369,97 @@ class SqliteStore:
             "checksums": json.loads(row["checksums"]),
             "result": json.loads(row["result"]),
         }
+
+    def recurrence_inputs(
+        self,
+        dataset: str,
+        *,
+        cutoff: str,
+        window: int = 2,
+        current_version: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Frozen recurrence predecessors strictly before the cutoff.
+
+        Distinct logical refreshes are identified by their version pair; the
+        latest eligible revision of each refresh is selected at the cutoff and
+        retries or alternative attempts of the same refresh are excluded as
+        duplicate evidence.
+        """
+        rows = self.connection.execute(
+            "SELECT run_id, created, payload FROM runs "
+            "WHERE dataset = ? AND created <= ? "
+            "ORDER BY created DESC, run_id DESC",
+            (dataset, observation_time(cutoff)),
+        ).fetchall()
+        latest: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            payload = json.loads(row["payload"])
+            pair = payload.get("version_pair") or {}
+            previous_id = pair.get("previous_id")
+            current_id = pair.get("current_id")
+            key = (str(previous_id), str(current_id))
+            if key in latest:
+                continue
+            if current_version is not None and _version_order(current_id) >= _version_order(current_version):
+                continue
+            latest[key] = {
+                "run_id": row["run_id"],
+                "created": row["created"],
+                "previous_version": previous_id,
+                "current_version": current_id,
+                "previous_max_week": pair.get("previous_max_week"),
+                "current_max_week": pair.get("current_max_week"),
+                "payload_hash": hashlib.sha256(
+                    str(row["payload"]).encode()
+                ).hexdigest(),
+            }
+        ordered = sorted(
+            latest.values(),
+            key=lambda entry: (
+                # Snapshot/business-period metadata orders predecessors; version
+                # string ordering is only a fallback for legacy payloads.
+                int(entry["previous_max_week"] or 0),
+                int(entry["current_max_week"] or 0),
+                _version_order(entry["previous_version"]),
+                _version_order(entry["current_version"]),
+                str(entry["created"]),
+            ),
+        )
+        limit = max(0, int(window) - 1)
+        return ordered[-limit:] if limit else []
+
+    def recurrence_refreshes(
+        self, entries: Sequence[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Load the frozen predecessor payloads and verify their hashes."""
+        refreshes: list[dict[str, Any]] = []
+        for entry in entries:
+            row = self.connection.execute(
+                "SELECT payload FROM runs WHERE run_id = ?", (entry["run_id"],)
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"recurrence predecessor {entry['run_id']!r} is unavailable"
+                )
+            digest = hashlib.sha256(str(row["payload"]).encode()).hexdigest()
+            if digest != entry.get("payload_hash"):
+                raise ValueError(
+                    f"recurrence predecessor {entry['run_id']!r} evidence changed"
+                )
+            payload = json.loads(row["payload"])
+            historical = payload.get("historical_revision") or {}
+            refreshes.append(
+                {
+                    "run_id": payload.get("run_id"),
+                    "status": payload.get("status"),
+                    "findings": payload.get("findings", []),
+                    "ledger": payload.get("ledger"),
+                    "unexplained_delta": historical.get("unexplained_delta", 0.0),
+                    "materiality_threshold": payload.get("materiality_threshold", 0.0),
+                    "payload_hash": digest,
+                }
+            )
+        return refreshes
 
     def recent_refreshes(
         self, dataset: str, limit: int = 2

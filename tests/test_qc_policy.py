@@ -7,6 +7,7 @@ import pytest
 
 from qc.config import DatasetConfig
 from qc.conformal import benjamini_hochberg
+from qc.evidence_package import ExplanationCertificate
 from qc.policy import (
     HARD_FAILURE,
     HUMAN_APPROVED,
@@ -15,6 +16,7 @@ from qc.policy import (
     STATISTICALLY_EXPLAINED,
     UNAVAILABLE_EVIDENCE,
     UNEXPLAINED_ANOMALY,
+    collect_findings,
     disposition_for,
     finalize_policy,
     finding,
@@ -24,6 +26,34 @@ from qc.recurrence import assess_recurrence
 from qc.temporal import SeriesTemporalEvidence, coordinated_groups
 
 CONFIG = DatasetConfig()
+
+
+def _certificate_for(item, *, status="VERIFIED", assessment_id="run-1", **overrides):
+    kwargs = dict(
+        certificate_id=f"cert-{item.scope}",
+        assessment_id=assessment_id,
+        scope=item.scope,
+        finding_ids=(item.finding_id,),
+        bases=("historically_calibrated_interval",),
+        status=status,
+        reasons=() if status == "VERIFIED" else ("rejected",),
+        support={},
+        coverage={"finding_ids": [item.finding_id]},
+        net_unexplained=0.0,
+        gross_unexplained=0.0,
+        materiality_threshold=1.0,
+        evidence_ids=(),
+        approval_ids=(),
+        clearance_basis="statistical",
+        evidence_digest="evidence-1",
+        qualification_digest="qualification-1",
+        scope_type=item.scope_type,
+        period=item.period,
+        metric=item.metric,
+        level=item.level,
+    )
+    kwargs.update(overrides)
+    return ExplanationCertificate(**kwargs)
 
 
 def test_disposition_mapping():
@@ -61,11 +91,15 @@ def test_status_for_distinguishes_statistical_clearance():
 
 def _policy_result(**overrides):
     base = dict(
+        run_id="run-1",
         dataset="ds",
         status="INVESTIGATE",
         contracts=SimpleNamespace(checks=[]),
         input_findings=[],
-        machine={"historical_revision": {"status": "INVESTIGATE"}},
+        machine={
+            "historical_revision": {"status": "INVESTIGATE"},
+            "evidence_digests": ["evidence-1"],
+        },
         attribution=SimpleNamespace(
             matched_event_ids=[],
             approval_coverage=[],
@@ -84,37 +118,45 @@ def _policy_result(**overrides):
     return SimpleNamespace(**base)
 
 
-def _certificate(scope: str, status: str = "VERIFIED"):
-    return SimpleNamespace(
-        certificate_id=f"cert-{scope}",
-        scope=scope,
-        status=status,
-        reasons=() if status == "VERIFIED" else ("rejected",),
-    )
-
-
-def test_certificate_clears_only_its_scope():
+def test_dataset_certificate_cannot_clear_a_historical_revision():
     result = _policy_result()
-    finalize_policy(result, (), (_certificate("dataset"),))
+    findings = collect_findings(result, CONFIG)
     historical = next(
+        item for item in findings if item.check == "historical_revision"
+    )
+    certificate = _certificate_for(
+        historical,
+        scope="dataset",
+        scope_type="dataset",
+        period=None,
+    )
+    finalize_policy(result, findings=findings, certificates=(certificate,))
+    stored = next(
         item for item in result.machine["findings"] if item["check"] == "historical_revision"
     )
-    assert historical["disposition"] == STATISTICALLY_EXPLAINED
-    assert historical["clearance_basis"] == "statistical"
-    assert historical["certificate_id"] == "cert-dataset"
-    assert result.status == "PASS_WITH_EXPLANATION"
-    assert result.machine["clearance_bases"][historical["finding_id"]] == "statistical"
-    assert result.machine["schema_version"] == 3
-    assert result.machine["clearance"][0]["basis"] == "statistical"
+    assert stored["disposition"] == UNEXPLAINED_ANOMALY
+    assert result.status == "INVESTIGATE"
+    assert not result.machine["clearance"]
 
 
 def test_rejected_certificate_does_not_clear():
     result = _policy_result()
-    finalize_policy(result, (), (_certificate("dataset", status="REJECTED"),))
+    findings = collect_findings(result, CONFIG)
     historical = next(
+        item for item in findings if item.check == "historical_revision"
+    )
+    certificate = _certificate_for(
+        historical,
+        status="REJECTED",
+        scope="dataset",
+        scope_type="dataset",
+        period=None,
+    )
+    finalize_policy(result, findings=findings, certificates=(certificate,))
+    stored = next(
         item for item in result.machine["findings"] if item["check"] == "historical_revision"
     )
-    assert historical["disposition"] == UNEXPLAINED_ANOMALY
+    assert stored["disposition"] == UNEXPLAINED_ANOMALY
     assert result.status == "INVESTIGATE"
 
 
@@ -138,6 +180,8 @@ def test_temporal_certificate_clears_matching_series_only():
         change_point_score=0.0,
         anomaly=True,
         flags=["forecast_lower"],
+        metric="dollar",
+        level="banner_id",
     )
     result = _policy_result(
         temporal=SimpleNamespace(
@@ -147,12 +191,59 @@ def test_temporal_certificate_clears_matching_series_only():
         ),
         temporal_required=True,
     )
-    finalize_policy(result, (), (_certificate("banner_id:B1"),))
-    temporal = next(
+    findings = collect_findings(result, CONFIG)
+    temporal = next(item for item in findings if item.check == "temporal")
+    assert temporal.period == 10
+    certificate = _certificate_for(temporal)
+    finalize_policy(result, findings=findings, certificates=(certificate,))
+    stored = next(
         item for item in result.machine["findings"] if item["check"] == "temporal"
     )
-    assert temporal["scope"] == "banner_id:B1"
-    assert temporal["disposition"] == STATISTICALLY_EXPLAINED
+    assert stored["scope"] == "banner_id:B1"
+    assert stored["disposition"] == STATISTICALLY_EXPLAINED
+    assert result.machine["schema_version"] == 5
+    assert result.machine["clearance"][0]["period"] == 10
+    assert result.machine["clearance_bases"][stored["finding_id"]] == "statistical"
+
+
+def test_foreign_assessment_certificate_is_ignored():
+    evidence = SeriesTemporalEvidence(
+        series_id="national",
+        target_week=10,
+        actual=100.0,
+        adjusted_actual=100.0,
+        adjustment=0.0,
+        forecast_median=100.0,
+        forecast_quantiles={},
+        residual=0.0,
+        relative_residual=0.0,
+        nominal_percentile=0.5,
+        calibrated_percentile=0.5,
+        standardized_residual=0.0,
+        robust_z=0.0,
+        seasonal_z=0.0,
+        ewma_z=0.0,
+        change_point_score=0.0,
+        anomaly=True,
+        flags=["forecast_lower"],
+        metric="dollar",
+        level="national",
+    )
+    result = _policy_result(
+        temporal=SimpleNamespace(
+            series=[evidence], unavailable_series=[], coordinated=[]
+        ),
+        temporal_required=True,
+    )
+    findings = collect_findings(result, CONFIG)
+    temporal = next(item for item in findings if item.check == "temporal")
+    certificate = _certificate_for(temporal, assessment_id="other-run")
+    finalize_policy(result, findings=findings, certificates=(certificate,))
+    stored = next(
+        item for item in result.machine["findings"] if item["check"] == "temporal"
+    )
+    assert stored["disposition"] == UNEXPLAINED_ANOMALY
+    assert not result.machine["clearance"]
 
 
 def test_benjamini_hochberg_never_claims_discovery_on_empty_input():
@@ -166,43 +257,91 @@ def test_benjamini_hochberg_never_claims_discovery_on_empty_input():
         benjamini_hochberg([1.5])
 
 
-def test_recurrence_requires_repetition_and_material_cumulative_impact():
-    current = [
-        {
-            "finding_id": "abc",
-            "check": "temporal",
-            "scope": "banner_id:B1",
-            "outcome": "FAIL",
-            "disposition": UNEXPLAINED_ANOMALY,
-            "approval_ids": [],
-            "clearance_basis": "",
-        }
-    ]
-    prior = [
-        {
-            "findings": [{"finding_id": "abc"}],
-            "ledger": {"net_unexplained": 60.0},
-            "materiality_threshold": 50.0,
-        }
-    ]
-    config = replace(CONFIG, recurrence_window=3, recurrence_minimum=2)
-    escalated = assess_recurrence(
-        current, prior, config, current_impact=60.0, current_threshold=50.0
+def _recurrence_finding(finding_id, impact, materiality=50.0):
+    from qc.policy import finding, stable_key_for
+
+    item = finding(
+        "temporal",
+        "banner_id:B1",
+        "FAIL",
+        scope_type="temporal_series",
+        metric="dollar",
+        level="banner_id",
+        period=10,
+        impact=impact,
+        materiality=materiality,
     )
+    payload = {
+        "finding_id": finding_id,
+        "stable_key": stable_key_for(
+            "temporal", "temporal_series", "dollar", "banner_id", "banner_id:B1"
+        ),
+        "check": "temporal",
+        "scope": "banner_id:B1",
+        "scope_type": "temporal_series",
+        "metric": "dollar",
+        "level": "banner_id",
+        "outcome": "FAIL",
+        "disposition": UNEXPLAINED_ANOMALY,
+        "approval_ids": [],
+        "clearance_basis": "",
+        "impact": impact,
+        "materiality": materiality,
+    }
+    assert item.stable_key == payload["stable_key"]
+    return payload
+
+
+def test_recurrence_requires_repetition_and_material_cumulative_impact():
+    current = [_recurrence_finding("abc", 60.0)]
+    prior = [{"findings": [_recurrence_finding("def", 60.0)]}]
+    config = replace(CONFIG, recurrence_window=3, recurrence_minimum=2)
+    escalated = assess_recurrence(current, prior, config)
     assert len(escalated) == 1
     assert escalated[0].repeated
     assert escalated[0].material
     assert escalated[0].occurrences == 2
+    assert escalated[0].cumulative_impact == pytest.approx(120.0)
 
+    small_prior = [{"findings": [_recurrence_finding("def", 5.0)]}]
     small = assess_recurrence(
-        current, prior, config, current_impact=5.0, current_threshold=50.0
+        [_recurrence_finding("abc", 5.0)], small_prior, config
     )
     assert not small[0].material
 
-    single = assess_recurrence(
-        current, [], config, current_impact=60.0, current_threshold=50.0
-    )
+    single = assess_recurrence(current, [], config)
     assert single == []
+
+    zero_budget = assess_recurrence(
+        current,
+        prior,
+        replace(config, recurrence_budget_ratio=0.0),
+    )
+    assert not zero_budget[0].material
+
+    # Two periods in one logical refresh count once, with combined impact.
+    repeated = assess_recurrence(
+        [_recurrence_finding("abc", 30.0), _recurrence_finding("abd", 30.0)],
+        prior,
+        config,
+    )
+    assert repeated[0].occurrences == 2
+    assert repeated[0].cumulative_impact == pytest.approx(120.0)
+
+    cleared_prior = [{"findings": [
+        {**_recurrence_finding("def", 60.0), "disposition": "STATISTICALLY_EXPLAINED"}
+    ]}]
+    assert assess_recurrence(current, cleared_prior, config) == []
+
+    # Signed impacts that net to zero still escalate on gross persistence.
+    alternating = assess_recurrence(
+        [_recurrence_finding("abc", 40.0)],
+        [{"findings": [_recurrence_finding("def", -40.0)]}],
+        config,
+    )
+    assert alternating[0].cumulative_impact == pytest.approx(0.0)
+    assert alternating[0].cumulative_gross_impact == pytest.approx(80.0)
+    assert alternating[0].material
 
 
 def test_coordinated_groups_combine_same_direction_residuals():

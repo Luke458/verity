@@ -39,7 +39,19 @@ a bounded RCA loop and prequential point-in-time forecasting. `qc weekly` is
 the scheduler entry point for a refresh with content-addressed assessment
 identity, separate attempts, a SQLite journal and recoverable report publication.
 Versioned findings determine final status; model recommendations cannot clear
-deterministic failures. An optional pinned Laya CPU service is a challenger.
+deterministic failures. Every configured measure and appended period is assessed
+separately, and a temporal finding is cleared only by an explanation certificate
+bound to its exact finding coverage, scope, measure, level, period, assessment
+identity, evidence digest, certificate schema, policy version and qualification
+digest — and only when every applicable contract, reconciliation, reference,
+lineage, hierarchy and required-input check has passed and a pinned
+qualification artifact covers the exact model/metric/level/horizon and the
+assessment provenance. The qualification status and digest are frozen into the
+assessment identity before the cache lookup, so replacing or revoking an
+artifact changes identity. Statistical clearance is therefore disabled by
+default for real data until a real qualification is pinned; synthetic
+qualification cannot authorize it. An optional pinned Laya
+CPU service is a challenger.
 
 See the [weekly runbook](docs/weekly-run.md), [evaluation workflow](docs/evaluation.md),
 [Laya setup](docs/laya.md), and [acceptance/limitations register](docs/reliability-limitations.md).
@@ -150,9 +162,18 @@ uv pip install --python .venv/bin/python -e ".[test]"
 .venv/bin/qc explain --report reports/weekly/<dataset>/<assessment-id> --json
 .venv/bin/qc explain --store data/qc.db --dataset retail --json
 
-# Frozen evidence benchmark: materiality selection, gates and ablation
+# Frozen evidence benchmark: materiality selection, gates and ablation.
+# Pins an evidence-qualification artifact next to the report; weekly runs only
+# clear a temporal finding when that artifact covers the exact
+# model/metric/level/horizon and the assessment provenance.
 .venv/bin/qc evidence-bench --suite data/suites/demo \
   --thresholds 0.0005,0.001,0.002 --out reports/bench/evidence.json
+
+# Reproducible 320-week CPU benchmarks (single machine, not capacity claims)
+.venv/bin/python -m optional.scale_benchmark --profile one-million \
+  --out reports/benchmarks/scale-1m.json
+.venv/bin/python -m optional.scale_benchmark --profile five-million \
+  --out reports/benchmarks/scale-5m.json
 
 # Weekly entry point for a scheduler (idempotent; exit 2 = INVESTIGATE)
 .venv/bin/qc weekly --uri ./lake/fact --store data/qc.db \
@@ -191,15 +212,15 @@ status and known weaknesses of each row.
 | 11 | TSPulse research adapter + revision-series suitability benchmark | research; pre-registered scenario-holdout gate |
 | D | Typed decisions, labels, training, incident memory, agent handoff | implemented; real-label accuracy pending |
 | C+ | Hierarchical reconciliation, entity relationships, Markdown reports, Delta source | implemented; reconciliation and relationships hardened |
-| Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; statistical and gate fixes landed (M3) |
-| Evidence engine | Declared calendar, frozen CPU model selection, hierarchy and ledger evidence, verified certificate clearance, `qc explain` / `qc evidence-bench` | implemented; synthetic qualification only |
-| Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance, locking and atomicity enforced (M4) |
+| Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; group confidence bounds, independent fixture labels and provider-rerun ablations (M8) |
+| Evidence engine | Declared calendar, disjoint selection/calibration, hierarchy and ledger evidence, bound certificate clearance, `qc explain` / `qc evidence-bench` | implemented; per-period findings and pinned qualification required for clearance; synthetic qualification cannot clear real data |
+| Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance, locking and atomicity enforced (M4); schema 6 backs up before migration and preserves feature/text versions |
 | Substrates | Frozen-encoder text probe (ModernBERT-class) | research; eligibility requires a pinned real evaluation and operational checks |
 | Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; paired selection and provenance enforced; real-label selection pending |
 | Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
 | Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research; tags from simulated cause |
 | Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |
-| Weekly run | `qc weekly` orchestrator, immutable assessment identity, recoverable journal, review exit codes | implemented; SQLite transactions plus atomic report publication |
+| Weekly run | `qc weekly` orchestrator, frozen recurrence inputs and qualification state in assessment identity, recoverable journal, review exit codes | implemented; SQLite schema 6 plus atomic report publication |
 | Integration | Jev/djev-compatible remote decision provider + fallback | implemented; protocol validation enforced (M4) |
 
 See [docs/engine.md](docs/engine.md) for engine semantics and status codes,

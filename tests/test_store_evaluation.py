@@ -12,6 +12,8 @@ from qc.decisions import (
     RuleDecisionProvider,
     default_fields,
 )
+from qc.evidence_text import EVIDENCE_TEXT_VERSION
+from qc.policy import MACHINE_SCHEMA_VERSION
 from qc.run import run_qc
 from qc.store_cohort import evaluate_frozen_cohort, production_eligibility
 from tests.test_reliability import CONFIG, HandSource
@@ -132,6 +134,9 @@ def test_frozen_training_keeps_test_untouched_and_records_fit_groups():
                 "split": split,
                 "observed_at": f"2026-01-0{index + 1}T00:00:00+00:00",
                 "features": FeatureEncoder(CONFIG).encode(result).tolist(),
+                "feature_version": FeatureEncoder(CONFIG).feature_version,
+                "evidence_version": MACHINE_SCHEMA_VERSION,
+                "text_version": EVIDENCE_TEXT_VERSION,
                 "text": "unit fixture",
                 "labels": {
                     "root_cause": "UNKNOWN",

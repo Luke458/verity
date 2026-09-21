@@ -107,8 +107,14 @@ def test_expected_post_christmas_decline_is_explained_without_review():
     assert not result.temporal.anomaly
     assert result.status in ("PASS", "PASS_WITH_EXPLANATION")
     assert result.machine["requires_investigation"] is False
-    verified = [item for item in result.certificates if item.status == "VERIFIED"]
-    assert any(item.scope == "dataset" for item in verified)
+    dataset_certificate = next(
+        item for item in result.certificates if item.scope == "dataset"
+    )
+    assert dataset_certificate.status == "REJECTED"
+    assert not any(
+        item["clearance_basis"] == "statistical"
+        for item in result.machine["findings"]
+    )
 
 
 def test_decline_outside_seasonal_expectations_requires_review():

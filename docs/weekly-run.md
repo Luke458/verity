@@ -48,37 +48,73 @@ Contract failures take precedence, then unexplained failures, then incomplete
 required checks. Missing optional checks remain visible. Findings carry a
 disposition: `HARD_FAILURE`, `UNAVAILABLE_EVIDENCE`, `UNEXPLAINED_ANOMALY`,
 `STATISTICALLY_EXPLAINED`, `HUMAN_APPROVED` or `INFORMATIONAL`. A verified
-explanation certificate can clear its own finding with clearance basis
-`statistical`; a human approval clears with `human_approval`. Models cannot
-clear policy-required review; raw model recommendations remain separately
-recorded. `--allow-investigate` is deprecated and does not override these exit
-codes.
+explanation certificate can clear only the exact finding IDs it lists, and only
+when its assessment identity, evidence digest, certificate schema, policy
+version and pinned qualification digest all match the current assessment. A
+human approval clears with `human_approval`. Contract, reconciliation,
+reference, lineage, hierarchy-integrity, required-evidence and historical
+revision findings can never receive statistical clearance. Models cannot clear
+policy-required review; raw model recommendations remain separately recorded.
+`--allow-investigate` is deprecated and does not override these exit codes.
+Certificates are bound to the exact finding coverage, scope kind, measure,
+hierarchy level, series, period, assessment identity, evidence digest,
+certificate schema, policy version and qualification digest; a blank, stale,
+wrong-scope or unsupported certificate is ignored rather than treated as
+current.
+
+Automatic clearance also requires a pinned qualification artifact: run
+`qc evidence-bench --suite ... --out reports/bench/evidence.json` (which writes
+`reports/bench/evidence-qualification.json`) and set `qualification_path` in the
+dataset config. Without it every certificate is rejected with
+`no pinned qualification artifact`. Qualification is resolved and validated
+before the assessment identity is calculated, and its status, provenance,
+digest and availability state are frozen into that identity: replacing,
+revoking or losing the artifact at the same path produces a new assessment
+instead of reusing a cached one, while retries keep their original frozen
+inputs. Qualification schema 2 requires source assessments, incident groups,
+cutoffs, disjoint development/test splits, model identity, calendar/config
+hashes, independent held-out coverage lower bounds, registered gates and
+analyst-labelled evidence for real provenance. A synthetic qualification can
+only clear synthetic assessments; real Delta data needs a real qualification.
+
+`qc explain` shows an assessment's findings, per-period ledger and certificates;
+`qc evidence-bench` selects materiality on a development scenario split, gates
+the frozen choice on untouched test scenarios and reruns the provider across
+independently constructed evidence views.
 
 ## Identity, retries and recovery
 
 SQLite is authoritative (default `reports/weekly/assessments.sqlite`). The
 assessment identity hashes the complete selected snapshot content/metadata,
 configuration, engine code, reference and approval inputs, observation cutoff,
-and provider artifact identity. Changing an input creates another assessment.
-Each execution receives a separate attempt ID. `--force` creates another
-attempt for the same immutable assessment; it does not overwrite its outcome.
+provider artifact identity, the resolved qualification artifact and a frozen
+recurrence-input manifest: distinct logical predecessor refreshes strictly
+before the cutoff, latest eligible revision per refresh and their evidence
+hashes. Changing an eligible
+predecessor, or a future refresh appearing after the cutoff, cannot silently
+reuse a cached result. Each execution receives a separate attempt ID. `--force`
+creates another attempt for the same immutable assessment; it does not overwrite
+its outcome.
 
 The journal transitions through STARTED, COMMITTED and PUBLISHED. Result,
-calibration, report and the complete evidence package (`evidence.json`,
-including certificates) commit together in SQLite. Reports are written
-to a temporary directory and published by atomic rename. These are two durable
-steps, **not** a filesystem/database transaction. A retry verifies identity and
-checksums, completes publication or regenerates damaged artifacts from journal
-content without duplicating logical outcomes/calibration. Damaged directories
-are preserved. Cache reuse is a separate flag and retains the original QC
-status and exit code; directory existence alone is never evidence of success.
+calibration, report and the complete per-period evidence package
+(`evidence.json`, schema 3, including per-measure ledgers and certificates)
+commit together in SQLite.
+Reports are written to a temporary directory and published by atomic rename.
+These are two durable steps, **not** a filesystem/database transaction. A retry
+verifies identity and checksums, completes publication or regenerates damaged
+artifacts from journal content without duplicating logical outcomes/calibration.
+Damaged directories are preserved. Cache reuse is a separate flag and retains
+the original QC status and exit code; directory existence alone is never
+evidence of success.
 
-Opening an older store takes a backup and migrates transactionally to schema 4.
+Opening an older store takes a backup and migrates transactionally to schema 6.
 Legacy runs, labels and provenance are retained; insufficient legacy identity
 metadata prevents cache reuse. Keep the backup until recovery has been checked.
 The legacy JSONL calibration option is not appended by weekly processing;
-weekly calibration revisions live in SQLite. Historical selection filters them
-by observation cutoff before calculating the prequential pool.
+weekly calibration revisions live in SQLite and are recorded at the assessment's
+observation cutoff. Historical selection filters them by that cutoff before
+calculating the prequential pool.
 
 `deployment/weekly.sh` maps `QC_URI`, `QC_STORE`, `QC_REFERENCE_VERSION` and other
 environment variables to CLI arguments. Schedule it after refresh commit and
@@ -124,9 +160,8 @@ calendar_events:
 ```
 
 Rules are `easter` or a fixed `MM-DD`; lead/lag extend the window to adjacent
-weeks and 53-week retail years are handled through the ISO calendar. `qc explain`
-shows an assessment's findings, ledger and certificates; `qc evidence-bench`
-runs the frozen threshold/ablation workflow. Snapshot measures cannot be the primary time-aggregated
+weeks and 53-week retail years are handled through the ISO calendar. Snapshot
+measures cannot be the primary time-aggregated
 metric; stock summaries use the latest overlap period. Missing cells remain
 missing evidence. The compatibility default `absent_entity_policy: zero` permits
 zero only for absent entities; choose `missing` to require evidence instead.

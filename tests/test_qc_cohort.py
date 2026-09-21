@@ -44,7 +44,7 @@ def test_small_cohort_end_to_end(tmp_path):
     assert len(result.code_sha256) == 64
     assert result.plan_sha256
     assert result.production_eligible is False
-    assert len(result.gate_results) == 3
+    assert len(result.gate_results) == 5
     assert result.gates_passed is False  # two faults and no controls cannot qualify
     assert any("Synthetic" in limitation for limitation in result.limitations)
 

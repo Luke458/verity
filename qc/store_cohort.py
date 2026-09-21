@@ -53,6 +53,16 @@ def freeze_store_cohort(path: str, cutoff: str, out: str | None = None) -> dict:
                 "evidence_hash": digest(payload),
                 "evidence": payload,
                 "features": json.loads(row["features"]) if row["features"] else None,
+                "feature_version": row["feature_version"],
+                "evidence_version": payload.get("schema_version"),
+                "text_version": (
+                    row["text_version"]
+                    if "text_version" in row.keys()
+                    else None
+                ),
+                "text_hash": digest(row["evidence_text"])
+                if row["evidence_text"]
+                else None,
                 "text": row["evidence_text"],
                 "labels": {
                     key: row[key]
@@ -136,7 +146,9 @@ def freeze_store_cohort(path: str, cutoff: str, out: str | None = None) -> dict:
 
 def training_records_from_cohort(manifest: dict):
     from .decisions import FEATURE_VERSION
+    from .evidence_text import EVIDENCE_TEXT_VERSION
     from .labels import LabelRecord
+    from .policy import MACHINE_SCHEMA_VERSION
 
     if manifest.get("status") != "FROZEN" or digest(
         {k: v for k, v in manifest.items() if k != "manifest_hash"}
@@ -144,6 +156,23 @@ def training_records_from_cohort(manifest: dict):
         raise ValueError("training requires a valid frozen cohort")
     records = []
     for case in manifest["cases"]:
+        # Frozen cases keep the versions they were recorded with; incompatible
+        # evidence is rejected instead of being relabelled as current.
+        if case.get("feature_version") != FEATURE_VERSION:
+            raise ValueError(
+                "INCOMPATIBLE_EVIDENCE: frozen feature version "
+                f"{case.get('feature_version')!r} != {FEATURE_VERSION}"
+            )
+        if case.get("evidence_version") != MACHINE_SCHEMA_VERSION:
+            raise ValueError(
+                "INCOMPATIBLE_EVIDENCE: frozen evidence version "
+                f"{case.get('evidence_version')!r} != {MACHINE_SCHEMA_VERSION}"
+            )
+        if case.get("text_version") != EVIDENCE_TEXT_VERSION:
+            raise ValueError(
+                "INCOMPATIBLE_EVIDENCE: frozen text version "
+                f"{case.get('text_version')!r} != {EVIDENCE_TEXT_VERSION}"
+            )
         labels = dict(case["labels"])
         labels["likely_cause"] = labels.pop("root_cause")
         if (

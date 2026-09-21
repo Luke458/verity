@@ -76,23 +76,43 @@ qc evidence-bench --suite data/suites/demo \
   --thresholds 0.0005,0.001,0.002 --out reports/bench/evidence.json
 ```
 
-`run_evidence_bench` runs one frozen configuration per materiality candidate
-over pre-registered scenarios and scores three decision layers separately:
+`run_evidence_bench` runs every materiality candidate over development
+scenarios only, selects on development evidence, then runs exactly one final
+configuration over untouched test scenarios and scores three decision layers
+separately:
 raw challenger recommendations, deterministic verifier decisions and effective
 operational decisions. A policy override is never counted as a correct model
-prediction. Qualification keeps the detection/false-positive confidence-bound
-gates and adds the 95% upper confidence bound on false clearance of actionable
-incidents; with too few independent incidents the bound reports
-`INSUFFICIENT_EVIDENCE` rather than passing. Selection chooses the candidate
-that minimizes review volume while clearing no actionable incident and passing
-the bound.
+prediction. Scenarios are split by a stable pre-registered hash into
+development (materiality selection) and untouched test (gate evaluation).
+Detection and false-positive gates use Wilson confidence bounds over
+independent incident groups, and the 95% upper confidence bound on false
+clearance of actionable incidents counts a group as failed when any actionable
+member is falsely cleared. Missing controls, required classes or enough
+independent groups report `INSUFFICIENT_EVIDENCE` rather than passing. The
+deterministic-fixture gate compares effective review decisions against
+independent oracle labels, never agreement between two implementation outputs.
 
-The evidence ablation compares review volume and false clearance under four
-evidence levels: `summary` (historical revision and contracts), `forecast`
-(adds temporal screening), `hierarchy` (adds hierarchy checks and unsupported
-ledger movement) and `complete` (the full policy with certificates). This shows
-which evidence layer changes the operational decision rather than claiming one
-aggregate model score.
+The evidence ablation reruns the actual deterministic provider adapter
+(`RuleDecisionProvider`) on independently constructed package views across
+every assessed measure and period: `summary` (mandatory identity and integrity
+results), `forecast` (adds predictions and intervals), `hierarchy` (adds the
+scoped ledger and contributions) and `complete` (adds cross-metric evidence).
+The bespoke rule is reported separately under the explicit `rule_baseline`
+label. Case membership, actionable labels, provider configuration and
+measurement conditions stay fixed, so the comparison shows which evidence layer
+changes the operational decision.
+
+The benchmark also emits a schema-2 qualification artifact selected on
+development coverage and validated on untouched test groups, with source
+identities, disjoint splits, independent coverage lower bounds and the shared
+detection/false-positive/false-clearance gates. A failed selection or gate
+remains visible as `NO_SAFE_CANDIDATE`/`UNQUALIFIED`; there is no fallback
+candidate that merely appears selected. `qc evidence-bench --out` pins it with
+a digest sidecar; weekly runs only clear a temporal finding when
+`qualification_path` points at that pinned artifact, its provenance matches the
+assessment and its digest is frozen into the assessment identity. Synthetic
+qualification cannot authorize real-data clearance; real qualification
+additionally requires linked analyst-labelled evidence.
 
 ## What remains
 

@@ -1363,15 +1363,19 @@ def _cmd_explain(args: argparse.Namespace) -> int:
             )
     evidence = payload.get("evidence")
     if evidence:
-        for certificate in evidence.get("certificates", []):
-            print(
-                f"  certificate {certificate.get('scope')}: {certificate.get('status')}"
-                + (
-                    " reasons=" + ", ".join(certificate.get("reasons", []))
-                    if certificate.get("reasons")
-                    else ""
+        periods = evidence.get("periods") or (
+            [evidence] if evidence.get("schema_version", 0) <= 1 else []
+        )
+        for period in periods:
+            for certificate in period.get("certificates", []):
+                print(
+                    f"  certificate {certificate.get('scope')}: {certificate.get('status')}"
+                    + (
+                        " reasons=" + ", ".join(certificate.get("reasons", []))
+                        if certificate.get("reasons")
+                        else ""
+                    )
                 )
-            )
     return 0
 
 
@@ -1394,11 +1398,22 @@ def _cmd_evidence_bench(args: argparse.Namespace) -> int:
         maximum_false_positive_rate=args.max_false_positive_rate,
         scenario_ids=scenario_ids,
     )
+    qualification_path = None
     if args.out:
         from pathlib import Path
 
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(_json_dumps(result.to_dict(), indent=2, default=_json_default))
+        if result.qualification:
+            from .qualification import QualificationArtifact, pin_qualification
+
+            qualification_path = Path(args.out).with_name(
+                Path(args.out).stem + "-qualification.json"
+            )
+            pin_qualification(
+                QualificationArtifact.from_dict(result.qualification),
+                qualification_path,
+            )
     if args.json:
         print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
     else:
@@ -1406,8 +1421,11 @@ def _cmd_evidence_bench(args: argparse.Namespace) -> int:
         print(
             f"evidence-bench suite={result.suite} "
             f"selected={selection['materiality_ratio'] if selection else 'none'} "
-            f"gates={result.gates['status']}"
+            f"gates={result.gates['status']} "
+            f"qualification={result.qualification.get('status', 'UNAVAILABLE')}"
         )
+        if qualification_path is not None:
+            print(f"  qualification pinned at {qualification_path}")
         for item in result.selection.get("candidates", []):
             print(
                 f"  ratio={item['materiality_ratio']} safe={item['safe']} "

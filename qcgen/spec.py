@@ -44,11 +44,14 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "new_store_backfill": FamilySpec(
         "new_store_backfill", "source", "fault", "INVESTIGATE", "backfill", "source"
     ),
+    # The registered event explains the historical revision, but every
+    # configured measure is now assessed: residual secondary-measure
+    # coordinated drift on this onboarding therefore requires review.
     "expected_event": FamilySpec(
         "expected_event",
         "source",
         "expected_event",
-        "PASS_WITH_EXPLANATION",
+        "INVESTIGATE",
         "backfill",
         "source",
         registry_required=True,

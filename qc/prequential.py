@@ -528,9 +528,15 @@ def records_from_result(
     run_id = str(getattr(result, "run_id", ""))
     records: list[CalibrationRecord] = []
     for item in temporal.series:
+        # Multiple measures share scope identifiers; calibration identity is
+        # metric-qualified so records never collide across measures.
         records.append(
             CalibrationRecord(
-                series_id=item.series_id,
+                series_id=(
+                    f"{item.metric}:{item.series_id}"
+                    if getattr(item, "metric", "")
+                    else item.series_id
+                ),
                 target_week=int(item.target_week),
                 available_on=(
                     int(item.target_week) if available_on is None else available_on

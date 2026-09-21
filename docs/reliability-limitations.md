@@ -5,10 +5,10 @@ coverage does not establish production accuracy or eliminate every defect.
 
 | Release | Implemented evidence |
 |---|---|
-| Correctness | Versioned findings/status policy; both-snapshot contracts; explicit grain/calendar; per-key reference, lineage and reconstruction controls; historical input guards. `tests/test_reliability.py`, `tests/test_negative_controls.py`, contract/reference/replay tests. |
-| Persistence | SQLite schema 4 with backup migration, immutable identities, separate attempts and calibration revisions, checksum recovery and atomic report publication. Fault injection covers all five journal/publication seams in `tests/test_reliability.py`. |
-| Evaluation | Frozen store cohorts and outcome revisions; chronological incident/snapshot groups; disjoint train/calibration/development/test; confidence-bound gates, calibration diagnostics and pinned selection; explicit synthetic ineligibility. `qc/store_cohort.py`, training/cohort tests and the local walkthrough below. |
-| Evidence decisions | Declared business calendar, target-isolated rolling-origin selection, metric/level/horizon/revision residual pools, hierarchy checks, sparse parent-share support, quantified ledger with conservation, certificate-only statistical clearance and recurrence escalation. `tests/test_qc_calendar.py`, `tests/test_qc_hierarchy.py`, `tests/test_qc_ledger.py`, `tests/test_qc_policy.py`, `tests/test_qc_acceptance.py`; `qc evidence-bench` repeats the frozen threshold/ablation workflow. |
+| Correctness | Versioned findings/status policy; both-snapshot contracts; explicit grain/calendar; per-key reference, lineage and reconstruction controls; historical input guards; every appended period assessed with its own finding, forecast, ledger and certificate; stable recurrence keys with scoped impact attribution. `tests/test_reliability.py`, `tests/test_negative_controls.py`, `tests/test_qc_remediation_acceptance.py`, contract/reference/replay tests. |
+| Persistence | SQLite schema 6 with backup migration that preserves feature/evidence/text versions (incompatible evidence is rejected, never relabelled), immutable identities that freeze recurrence predecessors, their evidence hashes and the resolved qualification artifact/status, separate attempts and calibration revisions, checksum recovery and atomic report publication. Fault injection covers all five journal/publication seams in `tests/test_reliability.py`. |
+| Evaluation | Frozen store cohorts and outcome revisions; chronological incident/snapshot groups; disjoint train/calibration/development/test; one shared gate implementation for synthetic benchmarks, store cohorts, qualification and production eligibility with group confidence bounds and the 1% false-clearance bound; development-only selection followed by one final test configuration; actual provider-adapter ablations with a separately labelled rule baseline and pinned selection; explicit synthetic ineligibility. `qc/store_cohort.py`, training/cohort tests, `tests/test_qc_second_remediation.py` and the local walkthrough below. |
+| Evidence decisions | Declared business calendar, disjoint selection/calibration partitions, target-scale intervals from pooled standardized residuals, metric/level/horizon/revision residual pools, hierarchy checks, sparse parent-share support, per-measure quantified ledgers with conservation, strict certificate-only statistical clearance (identity, evidence digest, finding coverage, schema, policy, qualification digest and exact scope/metric/level/period) with all applicable integrity failures evaluated first, schema-2 qualification with independent groups and registered gates, and recurrence escalation on a serialized stable key with a registered cumulative budget. `tests/test_qc_calendar.py`, `tests/test_qc_hierarchy.py`, `tests/test_qc_ledger.py`, `tests/test_qc_policy.py`, `tests/test_qc_acceptance.py`, `tests/test_qc_remediation_acceptance.py`, `tests/test_qc_second_remediation.py`; `qc evidence-bench` repeats the frozen threshold/ablation workflow and pins the qualification artifact. |
 | Optional Laya | Pinned isolated CPU runtime; typed HTTP boundary, token budgeting, hard worker timeout and deterministic fallback. `tests/test_laya_adapter.py`, `optional/laya_smoke.py`, `optional/laya_compare.py`. |
 
 ## Reproduce local integration evidence
@@ -18,7 +18,10 @@ coverage does not establish production accuracy or eliminate every defect.
 .venv/bin/ruff check qc qcgen tests optional
 .venv/bin/mypy
 .venv/bin/python -m optional.shadow_walkthrough
-.venv/bin/python -m optional.scale_benchmark --stores 500 > reports/scale-benchmark.json
+.venv/bin/python -m optional.scale_benchmark --profile one-million \
+  --out reports/benchmarks/scale-1m.json
+.venv/bin/python -m optional.scale_benchmark --profile five-million \
+  --out reports/benchmarks/scale-5m.json
 ```
 
 The [feedback walkthrough](../reports/onboarding-feedback.json) creates local
@@ -27,10 +30,15 @@ synthetic feedback, then freezes a store cohort. It must finish with
 INSUFFICIENT_EVIDENCE: synthetic feedback is deliberately excluded from real
 analyst evaluation. No labels are relabelled as analyst evidence to pass a gate.
 
-The [scale measurement](../reports/scale-benchmark.json) reports current/previous
-rows, wall time, process peak RSS and snapshot read counts. It is a local CPU
-Parquet measurement with temporal checks disabled, not a distributed benchmark
-or a capacity promise. Cached snapshots are read once per version/stage;
+The 320-week scale measurements are [one million](../reports/benchmarks/scale-1m.json)
+(8.2 s, ~1.07 GiB peak RSS) and [five million](../reports/benchmarks/scale-5m.json)
+(53.3 s, ~4.58 GiB peak RSS) rows with the corrected multi-metric pipeline.
+Each records requested/actual rows, wall time, process peak RSS, snapshot read
+counts, assessed/absent metrics, periods, hierarchy counts, certificate counts,
+status and a `complete` flag; incomplete or failed runs list explicit
+limitations instead of qualifying. They are single-machine
+local CPU Parquet measurements, not distributed benchmarks, capacity promises
+or production data. Cached snapshots are read once per version/stage;
 projection is supported where the source provides column reads.
 
 ## Remaining limitations
@@ -43,9 +51,33 @@ projection is supported where the source provides column reads.
   classes and controls, and untouched test confirmation. Sparse cohorts cannot
   pass. Governance of labels, approval authority, thresholds and operational
   sign-off remains an operator responsibility.
+- Automatic statistical clearance is disabled unless a pinned qualification
+  artifact covers the exact model/metric/level/horizon and the assessment
+  provenance. Synthetic qualification cannot clear real Delta assessments, so
+  real data remains review-only until a real qualification is pinned with
+  analyst-labelled evidence.
+- The 1M/5M-row measurements are single-machine, single-process and serial;
+  RSS above ~5 GiB for the 5M fixture means concurrent production workloads
+  and larger snapshots need capacity testing before deployment.
+- Every configured measure present in a refresh is now assessed per period with
+  its own findings, ledger and certificates; absent optional measures are
+  reported and absent required measures make the assessment incomplete. On the
+  current synthetic fixtures only `dollar` and `units` are populated, so the
+  1M/5M benchmarks and generated scenarios exercise those two measures; real
+  availability of `scripts`/`stock` and snapshot aggregation semantics still
+  need production validation. Secondary-measure movements that the previous
+  primary-only engine passed (for example a 99% units drop with unchanged
+  dollars) now require review, which intentionally raises review volume on
+  multi-measure refreshes.
+- The evidence ablation reruns the deterministic rule provider adapter, because
+  remote/learned providers are not affordable per ablation repetition on the
+  synthetic benchmark. The bespoke rule is reported separately as
+  `rule_baseline`; provider-specific ablation on real labels remains pending.
 - Legacy JSONL prequential APIs retain numeric availability periods for backward
   compatibility. Use the SQLite weekly observation-time journal for historical
   weekly assessment; business-week-only legacy artifacts are not equivalent.
+  Across-load prequential pools still mix scopes and are drift diagnostics, not
+  per-series interval calibration.
 - Point-in-time safety depends on truthful source commit/manifest times and
   explicitly supplied cross-table mappings. Parquet manifests are caller
   assertions, not an authenticated external audit log.

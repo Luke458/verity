@@ -76,6 +76,7 @@ from .onboard import (
     profile_table,
     propose_config,
 )
+from .policy import apply_policy, collect_findings, finalize_policy
 from .prequential import (
     CalibrationPool,
     CalibrationRecord,
@@ -87,6 +88,12 @@ from .prequential import (
     forecast_across_loads,
     prequential_sequence,
     records_from_result,
+)
+from .qualification import (
+    QualificationArtifact,
+    build_qualification,
+    load_qualification,
+    pin_qualification,
 )
 from .rca import RCAResult, RCAStep, investigate
 from .reconciliation import (
@@ -115,9 +122,11 @@ from .synthetic_analyst import (
 )
 from .systemone import (
     FallbackDecisionProvider,
+    ProviderAbstention,
     SystemOneDecisionProvider,
     answers_to_decisions,
     build_evidence_state,
+    build_provider_state,
     decision_to_systemone_answers,
 )
 from .temporal import (
@@ -216,8 +225,10 @@ __all__ = [
     "PrequentialRunResult",
     "PrequentialSeriesEvidence",
     "PrequentialStore",
+    "ProviderAbstention",
     "ProviderScore",
     "QCRunResult",
+    "QualificationArtifact",
     "RCAResult",
     "RCAStep",
     "RatioExpectation",
@@ -245,6 +256,7 @@ __all__ = [
     "answers_to_decisions",
     "append_run_calibration",
     "apply_expectations",
+    "apply_policy",
     "assess_versions",
     "backtest_forecaster",
     "build_evidence_graph",
@@ -252,12 +264,15 @@ __all__ = [
     "build_incident_record",
     "build_investigation_brief",
     "build_oracle_labels",
+    "build_provider_state",
+    "build_qualification",
     "build_revision_cube",
     "build_revision_series",
     "build_temporal_series",
     "classify_entity_changes",
     "classify_run",
     "code_sha256",
+    "collect_findings",
     "conformal_interval",
     "config_from_proposal",
     "compare_reference",
@@ -272,6 +287,7 @@ __all__ = [
     "eval_cases_from_suite",
     "explain_revision",
     "fingerprint_deltas",
+    "finalize_policy",
     "forecast_across_loads",
     "get_forecaster",
     "import_outcomes",
@@ -279,10 +295,12 @@ __all__ = [
     "leave_one_out_coverage",
     "load_dataset_config",
     "load_decision_provider",
+    "load_qualification",
     "load_expectations",
     "load_registry",
     "monitor_drift",
     "parse_investigation_result",
+    "pin_qualification",
     "profile_table",
     "propose_config",
     "propose_expected_events",

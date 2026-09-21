@@ -254,7 +254,11 @@ def test_run_reports_missing_history_explicitly():
         previous, current, "V1", "V2", "warehouse", "warehouse", CONFIG
     )
     result = run_temporal_qc(previous, current, pair, CONFIG)
-    national = next(item for item in result.series if item.series_id == "national")
+    national = next(
+        item
+        for item in result.series
+        if item.series_id == "national" and item.metric == "dollar"
+    )
     assert national.history_missing == 3
     assert {10, 11, 12} <= set(national.missing_weeks)
     assert national.history_observed == len(values)
@@ -325,7 +329,11 @@ def test_auto_selection_freezes_ridge_and_calibrates_intervals():
         calendar_events=(("christmas", "12-25", 1, 1), ("easter", "easter", 1, 1)),
     )
     result = run_temporal_qc(previous, current, pair, config)
-    national = next(item for item in result.series if item.series_id == "national")
+    national = next(
+        item
+        for item in result.series
+        if item.series_id == "national" and item.metric == "dollar"
+    )
 
     assert national.selected_model.startswith("ridge")
     assert national.calibration_status == "OK"
@@ -338,7 +346,7 @@ def test_auto_selection_freezes_ridge_and_calibrates_intervals():
     assert national.history_weeks == 121
     assert national.history_observed == 120
 
-    selection = result.calibration["selection"]["national"]
+    selection = result.calibration["selection"]["dollar|national"]
     assert selection["frozen"] is True
     assert selection["mode"] == "auto"
     assert len([c for c in selection["candidates"] if c["eligible"]]) >= 2
@@ -372,7 +380,11 @@ def test_sparse_leaf_uses_labelled_parent_share_fallback():
     )
     result = run_temporal_qc(previous, current, pair, CONFIG)
 
-    sparse = next(item for item in result.series if item.series_id == "banner_id:b2")
+    sparse = next(
+        item
+        for item in result.series
+        if item.series_id == "banner_id:b2" and item.metric == "dollar"
+    )
     assert sparse.support == "parent_share"
     assert sparse.calibration_status == "PARENT_SHARE_FALLBACK"
     assert sparse.calibration_n == 0
@@ -380,7 +392,13 @@ def test_sparse_leaf_uses_labelled_parent_share_fallback():
     assert sparse.parent_series == "national"
     assert sparse.share == pytest.approx(500.0 / 1500.0)
     assert "banner_id:b2" not in result.unavailable_series
-    parent_share = result.calibration["parent_share"]
+    parent_share = [
+        item
+        for item in result.calibration["parent_share"]
+        if item["series_id"] == "banner_id:b2"
+        and item["parent_series"] == "national"
+        and item.get("metric") == "dollar"
+    ]
     assert len(parent_share) == 1
     assert parent_share[0]["series_id"] == "banner_id:b2"
     assert parent_share[0]["parent_series"] == "national"

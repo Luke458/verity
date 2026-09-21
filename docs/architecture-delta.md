@@ -64,16 +64,22 @@ means an implemented path, not production validation.
 
 ## Reliability release (schema versions)
 
-Machine reports use schema 3, findings schema 2, the evidence package schema 1
-and SQLite schema 4. Migrations back up and preserve legacy runs/outcomes;
-legacy identity is never silently reused, and readers tolerate schema-2
-artifacts because no missing historical evidence is invented. `qc.policy`
-computes final status after contracts, references, temporal checks,
-recurrence and scoped approvals, and can clear a specific finding only through
-a verified explanation certificate. `qc.assessment` and `qc.weekly` journal
-immutable assessment content (including `evidence.json`) before atomic
-filesystem publication. `qc.store_cohort` freezes analyst revisions and
-chronological incident groups for separate training, calibration, development
-and test sets. `qc.laya` is a lightweight HTTP adapter; heavy model
+Machine reports use schema 5, findings schema 4, the evidence package and
+explanation certificates schema 3, qualification schema 2, recurrence payload
+schema 3 (input manifest 2), evaluation schema 3 and SQLite schema 6.
+Migrations back up and preserve legacy runs/outcomes; legacy identity is
+never silently reused, and readers tolerate older artifacts because no missing
+historical evidence is invented. Every configured temporal measure is assessed
+per appended period; snapshot measures are compared within a period, never
+summed across time, and per-metric ledgers accompany the evidence package. `qc.policy` collects immutable findings first
+(including per-period temporal findings and recurrence escalations), verifies
+certificates against the exact finding IDs, assessment identity, evidence
+digest, certificate schema, policy version and pinned qualification, and only
+then computes final status once. `qc.assessment` and `qc.weekly` journal
+immutable assessment content (including the per-period `evidence.json`) before
+atomic filesystem publication; recurrence predecessors are frozen into the
+identity before the cache lookup. `qc.store_cohort` freezes analyst revisions
+and chronological incident groups for separate training, calibration,
+development and test sets. `qc.laya` is a lightweight HTTP adapter; heavy model
 dependencies stay in a separate optional service. Rules remain the default, and
 every current synthetic artifact is ineligible.

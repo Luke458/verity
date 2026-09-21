@@ -120,6 +120,7 @@ def run_weekly(
     from .delta import DeltaSource
     from .expectations import load_expectations
     from .prequential import records_from_result
+    from .recurrence import RECURRENCE_INPUT_SCHEMA
     from .reference import ReferenceSpec
     from .reporting import render_markdown
     from .run import run_qc
@@ -145,7 +146,47 @@ def run_weekly(
                     reference_stage=reference_stage, min_samples=min_samples,
                     calendar=calendar_identity(config),
                     evidence_policy=EVIDENCE_POLICY_VERSION,
-                    finding_schema=2, machine_schema=3)
+                    finding_schema=4, machine_schema=5)
+    # Resolve and validate the qualification artifact once, before assessment
+    # identity: its content digest, policy, provenance and availability state
+    # are frozen into the identity so replacing, revoking or losing the
+    # artifact produces a new assessment instead of reusing a stale one.
+    qualification = None
+    qualification_state: dict[str, Any] = {
+        "status": "NOT_PINNED",
+        "provenance": "",
+        "digest": "",
+        "error": "",
+    }
+    qualification_path = str(getattr(config, "qualification_path", "") or "")
+    if qualification_path:
+        from .qualification import load_qualification
+        try:
+            qualification = load_qualification(qualification_path)
+            if (
+                qualification.created
+                and qualification.created > assessment_cutoff
+            ):
+                # An artifact published after the observation cutoff is not
+                # available to this historical assessment.
+                qualification = None
+                raise ValueError(
+                    "qualification was published after the observation cutoff"
+                )
+            qualification_state = {
+                "status": qualification.status,
+                "provenance": qualification.provenance,
+                "digest": qualification.digest,
+                "error": "",
+            }
+        except Exception as error:  # noqa: BLE001 - clearance stays disabled
+            qualification_state = {
+                "status": "UNAVAILABLE",
+                "provenance": "",
+                "digest": "",
+                "error": f"{type(error).__name__}: {error}",
+            }
+    identity["qualification"] = qualification_state
     expectations = load_expectations(expectations_path) if expectations_path else []
     identity["expectations"] = [item.to_dict() for item in expectations]
     reference_frame, reference_spec = None, None
@@ -178,11 +219,6 @@ def run_weekly(
                                 "state_limit": getattr(decision_provider, "state_limit", None)}
     else:
         identity["provider"] = "rule"
-    assessment_id = digest(identity)
-    run_id = f"{config.name}:{assessment_id}"
-    attempt_id = str(uuid4())
-    observed_at = datetime.now(UTC).isoformat()
-    report_dir = Path(out_root) / config.name / assessment_id
     out = Path(out_root)
     out.mkdir(parents=True, exist_ok=True)
     lock_handle = (out / f".{config.name}.lock").open("w")
@@ -195,6 +231,26 @@ def run_weekly(
     try:
         store = SqliteStore(store_path or out / "assessments.sqlite")
         connection = store.connection
+        # Freeze the recurrence inputs strictly before the assessment cutoff
+        # and include their digest in the assessment identity: a cached
+        # assessment can never be reused once eligible predecessors change,
+        # and future-dated refreshes cannot affect historical replay.
+        recurrence_entries = store.recurrence_inputs(
+            config.name,
+            cutoff=assessment_cutoff,
+            window=config.recurrence_window,
+            current_version=current,
+        )
+        identity["recurrence_inputs"] = {
+            "schema_version": RECURRENCE_INPUT_SCHEMA,
+            "cutoff": assessment_cutoff,
+            "entries": recurrence_entries,
+        }
+        assessment_id = digest(identity)
+        run_id = f"{config.name}:{assessment_id}"
+        attempt_id = str(uuid4())
+        observed_at = datetime.now(UTC).isoformat()
+        report_dir = Path(out_root) / config.name / assessment_id
         connection.execute("INSERT INTO attempts VALUES (?, ?, ?, ?, NULL)",
                            (attempt_id, assessment_id, observed_at, "STARTED"))
         connection.commit()
@@ -217,13 +273,12 @@ def run_weekly(
             cached.report_dir = str(report_dir)
             cached.artifacts = {name: str(report_dir / Path(path).name) for name, path in cached.artifacts.items()}
             return cached
-        prior_refreshes = store.recent_refreshes(
-            config.name, limit=max(0, config.recurrence_window - 1)
-        )
+        prior_refreshes = store.recurrence_refreshes(recurrence_entries)
         result = run_qc(source, current, previous, config, run_id=run_id,
                         decision_provider=decision_provider, reference_frame=reference_frame,
                         reference_spec=reference_spec, expectations=expectations,
-                        observed_at=assessment_cutoff, prior_refreshes=prior_refreshes)
+                        observed_at=assessment_cutoff, prior_refreshes=prior_refreshes,
+                        assessment_id=assessment_id, qualification=qualification)
         result.machine["snapshot_manifest"] = identity
         result.machine["observed_at"] = observed_at
         records = records_from_result(result, scope=config.name)
@@ -239,12 +294,28 @@ def run_weekly(
             drift_report["observation_cutoff"] = assessment_cutoff
         artifacts = {"report.md": render_markdown(result),
                      "report.json": json_dumps(result.machine, indent=2, sort_keys=True, default=str)}
-        if result.evidence_package is not None:
-            package = result.evidence_package.to_dict()
-            package["certificates"] = [
-                certificate.to_dict() for certificate in result.certificates
-            ]
-            artifacts["evidence.json"] = json_dumps(package, indent=2, sort_keys=True, default=str)
+        if result.evidence_packages:
+            from .evidence_package import EVIDENCE_PACKAGE_SCHEMA
+            periods = []
+            for package in result.evidence_packages:
+                payload = package.to_dict()
+                payload["certificates"] = [
+                    certificate.to_dict()
+                    for certificate in result.certificates
+                    if certificate.evidence_digest == package.digest
+                    and certificate.assessment_id == package.assessment_id
+                ]
+                periods.append(payload)
+            artifacts["evidence.json"] = json_dumps(
+                {
+                    "schema_version": EVIDENCE_PACKAGE_SCHEMA,
+                    "assessment_id": result.assessment_id or run_id,
+                    "periods": periods,
+                },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
         if result.decisions is not None and result.decisions.requires_investigation:
             from .agent import build_investigation_brief
             artifacts["brief.json"] = json_dumps(build_investigation_brief(result, result.decisions, []).to_dict(), default=str)
@@ -267,7 +338,7 @@ def run_weekly(
                  json_dumps(artifacts), json_dumps(checksums), json_dumps(manifest.to_dict())))
             for record in records:
                 connection.execute("INSERT INTO calibration_revisions VALUES (?, ?, ?, ?, ?)",
-                    (assessment_id, record.series_id, record.target_week, observed_at, json_dumps(record.to_dict())))
+                    (assessment_id, record.series_id, record.target_week, assessment_cutoff, json_dumps(record.to_dict())))
             connection.execute("UPDATE attempts SET state = 'COMMITTED' WHERE attempt_id = ?", (attempt_id,))
         _checkpoint("after_commit")
         _checkpoint("before_publish")

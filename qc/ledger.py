@@ -14,6 +14,7 @@ policy may act on them.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -205,11 +206,13 @@ def _overlap_aggregates(
     group_keys = [*keys, week]
 
     def aggregate(frame: pd.DataFrame) -> pd.DataFrame:
-        measures = [
-            column
-            for column in (metric, quantity_metric)
-            if column and column in frame.columns
-        ]
+        measures = list(
+            dict.fromkeys(
+                column
+                for column in (metric, quantity_metric)
+                if column and column in frame.columns
+            )
+        )
         return frame.groupby(group_keys, dropna=False)[measures].sum().reset_index()
 
     previous_agg = aggregate(previous)
@@ -275,10 +278,18 @@ def build_explanation_ledger(
     temporal: Any | None = None,
     calendar: Any | None = None,
     approved_event_ids: tuple[str, ...] = (),
+    new_periods: Sequence[int] | None = None,
+    metric: str | None = None,
 ) -> ExplanationLedger:
-    """Decompose the movement between two versions into one allocation each."""
+    """Decompose the movement between two versions into one allocation each.
+
+    ``new_periods`` restricts the new-period movement to an explicit period set
+    (one call per appended period) while overlap contributions still describe
+    the whole revision pair. ``metric`` selects the assessed measure; the
+    resulting ledger is keyed by that measure.
+    """
     week = config.week_column
-    metric = config.primary_metric
+    metric = metric or config.primary_metric
     keys = _entity_keys(config)
     missing = [
         key
@@ -289,7 +300,9 @@ def build_explanation_ledger(
         raise ValueError(f"ledger grain missing: {sorted(set(missing))}")
     events = list(events or ())
     overlap_weeks = set(pair.overlap_weeks)
-    new_periods = set(pair.new_periods)
+    periods = set(
+        pair.new_periods if new_periods is None else (int(value) for value in new_periods)
+    )
 
     previous_overlap = previous.loc[previous[week].isin(overlap_weeks)]
     current_overlap = current.loc[current[week].isin(overlap_weeks)]
@@ -527,7 +540,7 @@ def build_explanation_ledger(
             )
         )
 
-    current_new = current.loc[current[week].isin(new_periods)]
+    current_new = current.loc[current[week].isin(periods)]
     new_period_movement = float(current_new[metric].sum()) if len(current_new) else 0.0
     new_period_expected = 0.0
     new_period_entry = 0.0
@@ -595,7 +608,7 @@ def build_explanation_ledger(
             "entered_entities": int(len(entered[keys].drop_duplicates())),
             "exited_entities": int(len(exited[keys].drop_duplicates())),
             "overlap_weeks": len(overlap_weeks),
-            "new_period_weeks": len(new_periods),
+            "new_period_weeks": len(periods),
         },
         support_level=(
             "verified"

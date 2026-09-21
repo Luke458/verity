@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pytest
 
+from qc.decisions import FEATURE_VERSION
 from qc.evidence_text import EVIDENCE_TEXT_VERSION, evidence_text
 from qc.labels import LabelRecord
 from qc.run import run_qc
@@ -93,7 +94,8 @@ def _records() -> list[LabelRecord]:
                         ),
                     },
                     features=[0.0, 0.0, 0.0],
-                    feature_version=1,
+                    feature_version=FEATURE_VERSION,
+                    metadata={"text_version": EVIDENCE_TEXT_VERSION},
                     text=text,
                 )
             )

@@ -20,18 +20,26 @@ def test_evidence_bench_runs_frozen_thresholds(tmp_path):
 
     assert result.plan_sha256
     assert result.thresholds == [0.001]
-    assert len(result.cases) == 3
     assert result.ablation["levels"] == [
         "summary",
         "forecast",
         "hierarchy",
         "complete",
     ]
-    assert result.gates["status"] in ("PASS", "FAIL")
+    # A suite too small to establish the registered gates must stay visibly
+    # unselected and unqualified rather than falling back to a candidate.
+    assert result.report["selection_status"] == "NO_SAFE_CANDIDATE"
+    assert result.selection["selected"] is None
+    assert result.gates["status"] == "INSUFFICIENT_EVIDENCE"
     bound = result.gates["gates"]["false_clearance"]["bound"]
-    assert bound["status"] in ("EVALUATED", "INSUFFICIENT_EVIDENCE")
-    assert result.ablation["results"]["complete"]["cases"] == 3
-    assert result.to_dict()["schema_version"] == 1
+    assert bound["status"] == "INSUFFICIENT_EVIDENCE"
+    assert result.ablation["mode"] == "provider_rerun"
+    assert result.ablation["baseline"]["label"] == "rule_baseline"
+    assert result.plan_manifest["oracle_labels"]
+    assert result.qualification["provenance"] == "synthetic"
+    assert result.qualification["status"] == "UNQUALIFIED"
+    assert result.to_dict()["schema_version"] == 3
+    assert result.report["qualification_status"] == "UNQUALIFIED"
 
 
 def test_evidence_bench_cli_writes_report(tmp_path, capsys):

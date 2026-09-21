@@ -32,7 +32,49 @@ from .decisions import (
 )
 from .jsonutil import dumps as json_dumps
 
-STATE_LIMIT = 8000
+STATE_LIMIT = 32768
+
+
+class ProviderAbstention(RuntimeError):
+    """Mandatory evidence cannot fit the provider budget; the provider abstains."""
+
+
+def build_provider_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
+    """Provider input routed through the recorded evidence package.
+
+    The package view excludes final status, finding dispositions, certificate
+    verdicts, effective decisions and outcome labels; it retains integrity
+    results, calendar, forecast uncertainty, the per-measure ledgers and
+    provenance. Legacy payloads that carry the final status are never used for
+    an operational provider request: an artifact without canonical evidence
+    abstains instead.
+    """
+    packages = list(getattr(result, "evidence_packages", ()) or ())
+    package = getattr(result, "evidence_package", None)
+    if not packages and package is not None:
+        packages = [package]
+    if not packages:
+        raise ProviderAbstention(
+            "canonical evidence package is unavailable; legacy "
+            "status-bearing state is not a provider input"
+        )
+    parts: list[str] = []
+    per_package = max(256, max_chars // max(1, len(packages)))
+    for index, entry in enumerate(packages):
+        # Operational provider requests never silently fall back to a thinner
+        # evidence level: a view that cannot carry its mandatory evidence
+        # abstains instead of dropping failed checks.
+        view = entry.provider_view(
+            per_package, level="complete" if index == 0 else "forecast"
+        )
+        if view.get("abstain"):
+            raise ProviderAbstention(
+                str(view.get("reason", "evidence exceeds provider budget"))
+            )
+        parts.append(json_dumps(view, default=str, sort_keys=True))
+    if len("\n".join(parts)) > max_chars:
+        raise ProviderAbstention("evidence exceeds provider budget")
+    return "\n".join(parts)
 
 
 def build_evidence_state(result: Any, max_chars: int = STATE_LIMIT) -> str:
@@ -439,9 +481,13 @@ class SystemOneDecisionProvider:
     def decide(self, result: Any) -> DecisionSet:
         payload = {
             "model": self.model,
-            "state": build_evidence_state(result, self.state_limit),
+            "state": build_provider_state(result, self.state_limit),
             "questions": _questions(self.fields),
         }
+        if isinstance(getattr(result, "machine", None), dict):
+            from .evidence_package import evidence_digest
+
+            result.machine["provider_payload_digest"] = evidence_digest(payload)
         response = self._post(payload)
         answers = response.get("answers")
         if not isinstance(answers, dict):
