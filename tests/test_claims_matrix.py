@@ -1,6 +1,6 @@
-"""Every README milestone must appear in the claims matrix.
+"""Every README capability must appear in the claims matrix.
 
-The claims matrix exists so no milestone is described as validated without
+The claims matrix exists so no capability is described as validated without
 recorded evidence. This test keeps the README and docs/claims.md in sync.
 """
 
@@ -14,28 +14,26 @@ README = ROOT / "README.md"
 CLAIMS = ROOT / "docs" / "claims.md"
 
 
-def _readme_milestones() -> list[str]:
+def _readme_capabilities() -> list[str]:
     text = README.read_text()
-    section = text.split("## Milestones", 1)[1]
+    section = text.split("## Capabilities", 1)[1].split("\n## ", 1)[0]
     rows = re.findall(r"^\|\s*([^|]+?)\s*\|", section, flags=re.MULTILINE)
     return [
         row
         for row in rows
-        if row != "Milestone" and set(row) - {"-", ":"}
+        if row != "Capability" and set(row) - {"-", ":"}
     ]
 
 
-def test_readme_milestones_are_in_claims_matrix() -> None:
+def test_readme_capabilities_are_in_claims_matrix() -> None:
     claims = CLAIMS.read_text()
-    missing = [
-        milestone
-        for milestone in _readme_milestones()
-        if f"| {milestone} " not in claims
-    ]
-    assert not missing, f"milestones missing from docs/claims.md: {missing}"
+    capabilities = _readme_capabilities()
+    assert capabilities, "README lost its capabilities table"
+    missing = [name for name in capabilities if f"| {name} " not in claims]
+    assert not missing, f"capabilities missing from docs/claims.md: {missing}"
 
 
 def test_claims_matrix_has_statuses() -> None:
     claims = CLAIMS.read_text()
-    for status in ("validated-real", "validated-synthetic", "plumbing-only", "research"):
+    for status in ("validated-synthetic", "plumbing-only", "research"):
         assert status in claims, f"claims matrix lost the {status} status"

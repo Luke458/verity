@@ -1,186 +1,76 @@
-# Evaluation, calibration and evidence queries
+# Evaluation
 
-This document covers the evaluation rigor layer: frozen cohorts with
-pre-registered gates, finite-sample conformal intervals, prequential
-(across-load) calibration, and the bounded evidence-query tool used by the
-investigation agent.
+Everything here is measured on the synthetic generator (`qcgen`) against its
+own oracle, through the full engine, on the final status. Nothing is measured
+on real refreshes.
 
-## Frozen cohorts
+## What counts as what
 
-```sh
-qc cohort --plan config/cohort.json --out reports/cohort/v1
-qc cohort --heldout-seed 7101 --heldout-seed 7102 --dev-seed 1101 --out reports/cohort/v1
-```
+| Kind | Families | Scored as |
+|---|---|---|
+| fault | missing stores/products, entity merge, backfill, truncation, remap, coding, warehouse transform, recalculation, schema failure, null/duplicate storm | detection: final status is not PASS / PASS_WITH_EXPLANATION |
+| movement | `market_movement` (a genuine 12-30% single-commodity drop) | detection: it must surface as a latest-week anomaly |
+| expected_event | registered backfill | explained: PASS_WITH_EXPLANATION when the registry is supplied |
+| control | `clean` (no injection at all) | false positive when the final status is not PASS |
 
-A `CohortPlan` declares development seeds, held-out seeds (disjoint, enforced),
-families, controls and gates *before* running. Every case is built with the
-fault oracle and scored by the full engine. The result records:
+Before the review remediation the only control was `market_movement`, whose
+spec expects INVESTIGATE, so no false-positive rate had ever been measured on
+a clean refresh.
 
-- held-out metrics: detection rate, historical false-positive rate, contract
-  failure rate, mean reconstruction score, lineage first-divergence accuracy
-  (controls are excluded from detection);
-- development metrics for reference, never used for gates;
-- per-gate actual vs threshold with pass/fail;
-- `code_sha256` over the engine sources and `plan_sha256` over the plan, so a
-  result can be tied to an exact revision and plan;
-- `cases.jsonl`, one record per case.
-
-`production_eligible` is always `False` for synthetic cohorts. The harness
-exists so a real-label cohort can be run and judged honestly: changing the plan
-after seeing results invalidates the evaluation, and generator bias is not
-measured by disjoint seeds alone.
-
-## Conformal intervals
-
-`qc.conformal.conformal_interval` implements the finite-sample interval using
-the `ceil((n + 1) * (1 - alpha))`-th smallest absolute residual. With too few
-residuals the result is `INSUFFICIENT_CALIBRATION`, never a widened interval.
-`leave_one_out_coverage` reports honest small-sample coverage: in-sample
-coverage is trivially at least `1 - alpha` once the interval exists, so
-leave-one-out is the meaningful check.
-
-## Prequential (across-load) calibration
+## Registered cohort gate
 
 ```sh
-qc shadow --suite-dir data/suites/demo --prequential-store data/calibration.jsonl
-qc prequential --store data/calibration.jsonl --as-of 104 --target-week 105 --z 2.4
+qc cohort --plan config/cohort.json --out reports/cohort/v1          # exit 3 = gate failed
+qc cohort --plan config/cohort.json --config my.yaml --out ...       # evaluate another config
 ```
 
-`CalibrationPool` only admits residuals where `available_on < as_of` and
-`target_week < target_week`; all calibration revisions are retained; historical queries choose the latest
-revision available at their cutoff for each scope/series/target. The selected
-pool is bounded. This legacy API uses numeric periods; weekly SQLite records
-also carry separate observation timestamps. `percentile` and `interval` return `None` /
-`INSUFFICIENT_CALIBRATION` below `min_samples`. Shadow runs append one record
-per temporal series using the standardized residual that was computed before
-the target was scored.
+`config/cohort.json` lists its families, controls, seeds and gates explicitly
+and is pinned by `config/cohort.json.sha256`; editing the plan after seeing
+results fails the hash check. Dev seeds (1101, 1102) and held-out seeds (7101,
+7102, 7103) are disjoint, the `small` profile (104 weeks) is used, and gates are
+evaluated on the held-out split only:
 
-## Bounded evidence queries
+| Gate | Rule |
+|---|---|
+| `min_detection_rate` | 95% Wilson lower bound over held-out fault/movement cases >= 0.9 |
+| `max_false_positive_rate` | 95% Wilson upper bound over held-out clean controls <= 0.1 |
+| `min_lineage_first_divergence_accuracy` | first divergent stage equals the injection stage >= 0.9 |
+
+Controls are sized separately (`scenarios_per_control: 20`, so 60 held-out
+clean refreshes): the FPR bound cannot reach 0.1 with fewer than ~35 controls.
+The 1% false-clearance bound and oracle disagreements are reported, not gated.
+Each result records the plan hash, the engine code hash, whether the tree was
+dirty, and the evaluated configuration; a result is evidence only for exactly
+that configuration. The current numbers are in [claims.md](claims.md).
+
+## Shadow over a suite
 
 ```sh
-qc evidence --scenario-dir data/suites/demo/scenario-0000 --query lifecycle_changes
-qc evidence --scenario-dir ... --query contributors --limit 5 --json
+qcgen generate --suite demo --scenarios 13 --profile small --stages all
+qc shadow --suite-dir data/suites/demo --out reports/shadow/demo
 ```
 
-`query_evidence` is an allowlisted, read-only view over a completed run:
-`lifecycle_changes`, `historical_residuals`, `temporal_anomalies`,
-`first_divergence`, `contract_failures`, `contributors`, `relationships`.
-Unknown names raise. Every result reports `total_rows` and `truncated`, so a
-consumer can tell when it is seeing a limited answer. The investigation brief
-includes `tool_calls` pairing the likely cause with the first queries to run.
+`qc shadow` is blind by default: the engine gets no expected-event registry and
+never reads the oracle, which lives in a vault outside the scenario data.
+`--with-registry` supplies the generator-declared events and is plumbing, not
+detection. The summary reports detection and false-positive rates (both on the
+final status), the historical-layer false-positive rate, latest-week detection
+and control rates, expected-event pass rate, lineage first-divergence accuracy
+and mean reconstruction score.
 
-## Evidence benchmark, thresholds and ablation
+## Choosing thresholds
 
-```sh
-qc evidence-bench --suite data/suites/demo \
-  --thresholds 0.0005,0.001,0.002 --out reports/bench/evidence.json
-```
+Detector parameters are chosen on scenarios disjoint from the cohort plan and
+recorded where they are set. `temporal_fdr_q = 0.01` was chosen on 40 clean +
+45 fault `small` refreshes (seeds 3000-3039): 2/40 clean false alarms versus
+3/40 at q = 0.05, with 45/45 detections either way. Any new detector must be
+evaluated with `qc cohort --config` before it is enabled; a component-level
+benchmark is not evidence for the system.
 
-`run_evidence_bench` runs every materiality candidate over development
-scenarios only, selects on development evidence, then runs exactly one final
-configuration over untouched test scenarios and scores three decision layers
-separately:
-raw challenger recommendations, deterministic verifier decisions and effective
-operational decisions. A policy override is never counted as a correct model
-prediction. Scenarios are split by a stable pre-registered hash into
-development (materiality selection) and untouched test (gate evaluation).
-Detection and false-positive gates use Wilson confidence bounds over
-independent incident groups, and the 95% upper confidence bound on false
-clearance of actionable incidents counts a group as failed when any actionable
-member is falsely cleared. Missing controls, required classes or enough
-independent groups report `INSUFFICIENT_EVIDENCE` rather than passing. The
-deterministic-fixture gate compares effective review decisions against
-independent oracle labels, never agreement between two implementation outputs.
+## Limits
 
-The evidence ablation reruns the actual deterministic provider adapter
-(`RuleDecisionProvider`) on independently constructed package views across
-every assessed measure and period: `summary` (mandatory identity and integrity
-results), `forecast` (adds predictions and intervals), `hierarchy` (adds the
-scoped ledger and contributions) and `complete` (adds cross-metric evidence).
-The bespoke rule is reported separately under the explicit `rule_baseline`
-label. Case membership, actionable labels, provider configuration and
-measurement conditions stay fixed, so the comparison shows which evidence layer
-changes the operational decision.
-
-The benchmark also emits a schema-2 qualification artifact selected on
-development coverage and validated on untouched test groups, with source
-identities, disjoint splits, independent coverage lower bounds and the shared
-detection/false-positive/false-clearance gates. A failed selection or gate
-remains visible as `NO_SAFE_CANDIDATE`/`UNQUALIFIED`; there is no fallback
-candidate that merely appears selected. `qc evidence-bench --out` pins it with
-a digest sidecar; weekly runs only clear a temporal finding when
-`qualification_path` points at that pinned artifact, its provenance matches the
-assessment and its digest is frozen into the assessment identity. Synthetic
-qualification cannot authorize real-data clearance; real qualification
-additionally requires linked analyst-labelled evidence.
-
-## What remains
-
-The harness is ready; the data is not. The next step is to run a cohort over
-real refresh pairs with analyst outcomes, register the plan and gates, and then
-retrain and recalibrate. Once confirmed outcomes exist, `qc champion` decides
-which substrate runs in production; see [docs/champion.md](champion.md). Until
-that happens, all semantic and threshold claims remain plumbing-validated only.
-
-## Store-backed evaluation
-
-Synthetic mode remains the default. Persist real shadow runs with `qc weekly`
-before importing outcomes. Import dry runs use the same validation as writes.
-Confirmed real analyst outcomes need explicit provenance, analyst identity,
-review label and incident grouping. Never relabel synthetic outcomes as analyst.
-
-```sh
-qc cohort --source store --store data/qc.db \
-  --cutoff 2026-09-01T00:00:00Z --out reports/real-cohort
-qc train --cohort reports/real-cohort/store-cohort.json --out reports/artifacts/challenger
-qc cohort --source store --store data/qc.db \
-  --cutoff 2026-09-01T00:00:00Z --out reports/real-cohort \
-  --provider reports/artifacts/challenger --split development
-qc cohort --source store --store data/qc.db \
-  --cutoff 2026-09-01T00:00:00Z --out reports/real-cohort \
-  --provider reports/artifacts/challenger --split test \
-  --selection reports/real-cohort/development-evaluation.json
-```
-
-The immutable manifest pins snapshot/run identities, evidence, features, text,
-latest outcome revisions available at the observation cutoff, provenance and
-split assignments. Repeated current snapshots and related incidents stay
-together. Real refresh splits are chronological; interleaved groups or fewer
-than four independent groups yield INSUFFICIENT_EVIDENCE, never row splitting.
-Unknown incident grouping conservatively keeps a dataset together.
-
-Feature heads, text probes and HTTP/Laya challengers consume recorded evidence.
-Trainers use separate train, calibration, development and test groups. Select
-one challenger on development data; final test requires its hash-verified,
-passing development selection. Evaluation reports detection/review separately
-from cause and severity, per-class results, UNKNOWN/abstention counts, Brier
-score, log loss, reliability bins/ECE, latency, RSS and review volume. Gates
-require a detection 95% lower bound >=0.90 and FPR upper bound <=0.10, complete
-classes/controls and incident-grouped paired noninferiority. Confidence
-intervals count independent incidents, not repeated snapshot rows. Missing evidence
-cannot pass. PASS_WITH_EXPLANATION is not actionable detection.
-
-`production_eligibility` centralizes a pinned real analyst test evaluation plus
-contracts, historical isolation, migration, crash recovery, read-only operation
-and provider-boundary checks. Trainers and all synthetic artifacts remain
-ineligible. Pilot outputs separately report label prerequisites, engineering
-readiness, evaluation completion and eligibility. Freeze data before model
-selection and keep final test labels away from development operators; local
-artifacts provide reproducibility, not access-control enforcement.
-
-Rules can also be evaluated with `--provider rule` using their recorded rule
-evidence. A remote provider used in durable/evaluation work must declare its
-immutable model artifact, rather than identify itself only by a mutable URL:
-
-```json
-{"schema_version":1,"url":"http://127.0.0.1:8011/v1/systemone","model":"retail-v1","artifact":{"revision":"immutable-revision","weights_sha256":"<64 hex characters>"}}
-```
-
-Pass this file as `--provider systemone-config:remote.json`. The provider
-operator is responsible for serving the declared revision; unlike the local
-Laya wrapper, a remote service cannot be verified by hashing its local weights.
-
-Training from `--cohort` preserves its exact split assignments and defers test
-metrics until selection. Learned challengers must carry the same cohort hash
-and disjoint fit-group provenance; arbitrary pre-trained artifacts cannot
-silently enter a real final-test evaluation.
+- The generator shares the engine authors' assumptions; generator bias is not
+  measured, and synthetic detection rates are not real-world rates.
+- Power depends on history length and noise: on the 30-week `tiny` profile a
+  12-30% single-commodity movement is only 1.2-3 standard deviations of share
+  noise and is missed about 40% of the time.

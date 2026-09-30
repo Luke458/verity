@@ -1,12 +1,8 @@
-# QC engine (Milestones A-D)
+# QC engine
 
-Implements section 73 phases 1-10, 12-15 and 18 of `docs/architecture.md`: data
-contracts, version resolution, the revision cube, entity lifecycle,
-attribution, counterfactual reconstruction, reconciliation, lineage, the
-expected-event registry workflow, a shadow-mode harness, latest-week temporal
-intelligence, the evidence graph, typed semantic decisions, incident memory and
-the investigation-agent handoff. Chronos is an optional adapter; see
-`docs/semantic-layer.md` for the decision and agent layers.
+What each layer decides, in order. Every check that can escalate emits a
+versioned finding, and the final status is computed once from those findings
+(see [Final assessment policy](#final-assessment-policy)).
 
 ## Pipeline
 
@@ -32,10 +28,10 @@ attribution (contributors, explained delta, unexplained residual)
 counterfactual + reconciliation + lineage evidence
         |
         v
-temporal intelligence (forecast + robust statistics, new periods only)
+temporal QC (forecast + share-of-parent tests, new periods only)
         |
         v
-evidence graph + status + machine-readable output (section 77)
+findings -> one final status -> rule cause labels -> machine output
 ```
 
 ## Contracts
@@ -60,7 +56,7 @@ For each metric and grain the cube records `previous_value`, `current_value`,
 `absolute_delta`, `relative_delta` and a `period` label: `overlap` for weeks
 present in both versions, `new` for weeks after the previous maximum. Revision
 QC compares overlap weeks only; new periods have no previous value and are
-handled by latest-week QC (Milestone C). Counts use distinct entity counts, not
+handled by latest-week QC. Counts use distinct entity counts, not
 sums.
 
 ## Entity lifecycle
@@ -102,20 +98,17 @@ Cross-metric evidence is recorded when the primary metric moves materially
 while units do not (`dollar_change_without_units`), which is characteristic of
 value/coding or warehouse transform errors.
 
-## Assessed measures (evidence engine)
+## Assessed measures
 
 `temporal_required_metrics` and `temporal_optional_metrics` select the measures
 assessed per appended period; empty values derive required measures from
 `required_columns` and optional measures from the remaining `metric_columns`.
 Every present measure gets its own period forecasts, calibration pools,
-findings, explanation ledger, availability records and certificates, keyed by
-metric/period/hierarchy scope. An absent optional measure is reported as
-informational and an absent required measure makes the assessment `INCOMPLETE`.
-Measures listed in `snapshot_metrics` (stock) are compared within a period and
-are never summed across time. Per-period `AssessmentEvidence` records independent
-held-out coverage for every measured combination and a failed-check summary;
-statistical clearance requires the pinned qualification to cover the exact
-model/metric/level/horizon at the assessment's provenance.
+findings and availability records, keyed by metric/period/hierarchy scope. An
+absent optional measure is reported as informational and an absent required
+measure makes the assessment `INCOMPLETE`. Measures listed in
+`snapshot_metrics` (stock) are compared within a period and are never summed
+across time.
 
 An unregistered backfill, truncation, removal or reclassification always
 remains `INVESTIGATE`, even at a 100% explained fraction: structure is
@@ -140,9 +133,10 @@ within `reconciliation_tolerance`, per-report-group count consistency for
 a detail column containing values such as `TOTAL` or `ALL` fails
 `hierarchy_markers:*` because aggregates mixed into detail rows double count.
 Failures set `RECONCILIATION_FAILURE` on the reconciliation section. Robust
-dollar-per-unit outliers (median/MAD with `price_outlier_k`) are reported as
-evidence, not as failures; they are a cheap signal for value-only changes such
-as coding errors.
+dollar-per-unit outliers (median/MAD with `price_outlier_k`) in the appended
+periods, measured against the weeks before them, are findings that a scoped,
+approved ratio expectation can explain; historical weeks are never re-flagged
+on later refreshes.
 
 ## Entity relationships
 
@@ -150,11 +144,9 @@ as coding errors.
 (`replaced_by`) between entities that disappear and newly appearing entities
 whose overlap-week series correlate above
 `relationship_correlation_threshold` with a volume ratio inside
-`relationship_ratio_bounds`. Candidates are never confirmed automatically.
-`RelationshipStore` persists confirmed relationships (`superseded_by`,
-`remapped_to`, `merged_into`, `split_into`, `alias_of`, `replaced_by`) and
-looks them up per entity. Candidates appear in the machine output, the report
-and the evidence graph.
+`relationship_ratio_bounds`, with Benjamini-Hochberg control over the tested
+pairs. Candidates are never confirmed automatically; they appear in the machine
+output and the report and label the run `ENTITY_MERGE`.
 
 ## Reports and local Delta assessment
 
@@ -184,11 +176,9 @@ structural fingerprints for later comparison.
 
 ## Expected-event registry
 
-`load_registry` / `save_registry` read and write the architecture section 11
-entry shape. `propose_expected_events` drafts entries from observed historical
+`load_registry` / `save_registry` read and write registry entries. `propose_expected_events` drafts entries from observed historical
 backfills; drafts are marked `confirmed: false` and must be confirmed before
-they are trusted. `qc run --registry path` uses a registry file instead of a
-scenario manifest.
+they are trusted. `qc run --registry path` uses a registry file; blind runs use none.
 
 ## Shadow mode
 
@@ -201,10 +191,9 @@ summary JSON, and (for synthetic suites) scores outcomes against the oracle:
 detection rate and false-positive rate (both on the final status; faults and
 genuine movements vs. clean controls), historical false-positive rate, latest-week detection and
 control rates, expected-event pass rate, lineage first-divergence accuracy and
-mean reconstruction score. On real data the oracle fields are simply absent and
-the records become the analyst-feedback store for calibration and training.
+mean reconstruction score.
 
-## Temporal intelligence (Milestone C)
+## Temporal QC
 
 Latest-week QC compares the new period against a forecast trained on the
 previous version only, so backfilled overlap history cannot inflate the
@@ -244,8 +233,8 @@ the fixed grid (seasonal-naive; ridge trend; ridge trend + annual Fourier order
 1-3 + declared calendar event indicators, penalties 0.1/1/10), ties break on
 interval score then the simpler model, and the choice is frozen before interval
 calibration. Annual-seasonality candidates require at least 104 completed weeks.
-`baseline` and `chronos` remain available as fixed choices; `chronos` needs the
-optional `[forecast]` extra.
+`baseline` (seasonal-naive with residual-scale quantiles) is the fixed choice
+and the default.
 
 Calibrated prediction intervals come from pooled standardized errors scaled to
 the target (`temporal_interval_alpha`, default 0.1) and are reported with
@@ -267,8 +256,7 @@ market movement: a market-wide swing moves the national series, not every
 leaf. Robust, seasonal and EWMA z-scores and change points ignore trend,
 seasonality and multiplicity, so they are reported as evidence and never decide.
 Sparse leaves fall back to parent expectation
-times a historically estimated child share and are labelled `parent_share`; the
-fallback cannot support statistical clearance.
+times a historically estimated child share and are labelled `parent_share`.
 Structural additions from newly appearing entities are subtracted from the
 target week before scoring, at one entity level only (store before product) to
 avoid double counting; registered backfills therefore do not trigger
@@ -279,15 +267,6 @@ every check that can escalate (including the opt-in distribution drift check)
 emits findings, so there is no second status path to bypass.
 `historical_revision.status` preserves the revision-only verdict, so the two
 paths remain separable.
-
-## Evidence graph
-
-All deterministic and temporal observations are assembled into a canonical
-graph (`qc/evidence.py`): nodes carry a stable id, type, scope, source layer
-(`deterministic` / `temporal`), value, payload and optional confidence; edges
-link events to the version pair and attribution. The machine output exposes it
-under `evidence_graph`, which is the boundary the semantic layer will consume
-in Milestone D.
 
 ## CLI
 
@@ -315,46 +294,33 @@ status, classification, explained fraction and conservation ratio for each.
 - Thresholds are defaults, not validated operating points; real data requires
   calibration of `materiality_ratio`, `lineage_materiality_ratio`,
   `broad_recalculation_breadth` and the temporal z/percentile thresholds.
-- Seasonal comparisons need multiple years of history; short local profiles
-  rely mainly on the forecast percentile and robust z.
-- TSPulse remains a research adapter and is not a dependency.
-- Lineage reads every captured stage; on Databricks these summaries should be
-  precomputed once per version rather than recomputed per run.
-- Incident memory and the decision layer are implemented in Milestones D; real
-  semantic accuracy requires analyst labels (docs/semantic-layer.md).
+- Seasonal comparisons need multiple years of history; short histories widen
+  forecast intervals and reduce power (the 30-week `tiny` profile cannot
+  reliably detect a 12-30% single-commodity movement; the 104-week `small`
+  profile can).
+- Lineage reads every captured stage once per version.
 
 ## Final assessment policy
 
 After contracts, reconciliation, references, temporal checks, recurrence and
-scoped approvals, the engine first collects immutable findings (every appended
-period gets its own temporal finding, forecast and ledger entry), then verifies
-explanations against those findings, and only then computes one final status.
-Contract failures win; unexplained integrity/anomaly findings yield INVESTIGATE;
-unavailable required evidence yields INCOMPLETE; otherwise explained actionable
-findings yield PASS_WITH_EXPLANATION, and all required successful checks yield
-PASS. Each finding carries a disposition (`HARD_FAILURE`, `UNAVAILABLE_EVIDENCE`,
-`UNEXPLAINED_ANOMALY`, `STATISTICALLY_EXPLAINED`, `HUMAN_APPROVED`,
-`INFORMATIONAL`) and its clearance basis. A finding is cleared only by a
-verified `ExplanationCertificate` whose `finding_ids` contain that exact finding
-and whose assessment identity, evidence digest, certificate schema, policy
-version, qualification digest, scope kind, measure, hierarchy level, series and
-period all match this assessment, or by explicit human approval. Missing
-identity/digest/schema/policy/qualification fields are rejected, never treated
-as current, and all applicable contract, reconciliation, reference, lineage,
-hierarchy and required-input failures are evaluated before any clearance. Contract, reconciliation, reference, lineage, hierarchy-integrity,
-required-evidence and historical-revision findings are never statistically
-clearable; only temporal anomalies scoped to one series and period are.
-Certificates additionally require integrity checks to pass, complete mandatory
-evidence, supported observed history (104 weeks for annual explanations),
-calibrated intervals with per-series held-out coverage inside the qualification
-width limit, no contradictory evidence and residual impact below the scoped
-materiality. Arithmetic attribution alone never authorizes clearance.
-Recurrence matches eligible unexplained findings on an explicitly serialized,
-period-independent stable key (check, scope kind, measure, hierarchy level and
-scope) and accumulates signed scoped impacts against a registered cumulative
-budget rather than the whole dataset; multiple periods inside one logical
-refresh count as one occurrence. Optional
-missing checks remain visible. Model requests may add review but cannot clear
-deterministic review. Approval coverage lists exact finding IDs, and approval
-observation timestamps must precede the assessment cutoff. Temporal-only
-anomalies have UNKNOWN cause unless independent evidence exists.
+scoped approvals, the engine collects immutable findings (every appended period
+gets its own temporal findings) and computes one final status. Contract
+failures win; unexplained failures yield INVESTIGATE; unavailable required
+evidence yields INCOMPLETE; otherwise findings explained by an approved
+expected event or ratio expectation yield PASS_WITH_EXPLANATION, and all
+required successful checks yield PASS. Each finding carries a disposition
+(`HARD_FAILURE`, `UNAVAILABLE_EVIDENCE`, `UNEXPLAINED_ANOMALY`,
+`HUMAN_APPROVED`, `INFORMATIONAL`). Nothing is cleared automatically: only a
+registered, approved event or expectation observed before the assessment
+cutoff can explain a failure, and it covers the exact finding IDs it lists.
+
+Recurrence matches unexplained findings on a serialized, period-independent
+stable key (check, scope kind, measure, hierarchy level and scope) and
+accumulates signed scoped impacts against a registered cumulative budget;
+multiple periods inside one logical refresh count as one occurrence. Optional
+missing checks remain visible.
+
+`RuleDecisionProvider` then labels the likely cause, origin and severity. Its
+`requires_investigation` is the policy verdict, so a label can neither clear
+nor escalate a run. Temporal-only anomalies have UNKNOWN cause unless
+independent evidence exists.

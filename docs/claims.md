@@ -1,88 +1,73 @@
 # Claims matrix
 
-Every capability claim in the README or docs must appear here with the evidence
-that supports it. CI fails if a README milestone is missing from this table
-(`tests/test_claims_matrix.py`).
-
-Statuses:
+Every capability in the README appears here with the evidence behind it
+(`tests/test_claims_matrix.py` enforces this). All evidence is synthetic: the
+project does not depend on, and makes no claim about, real refreshes or
+analyst judgement.
 
 | Status | Meaning |
 |---|---|
-| `validated-real` | Measured on real production data with analyst-confirmed outcomes and a frozen held-out cohort. |
-| `validated-synthetic` | Measured against the generator's own oracle on held-out seeds. The oracle shares the generator's assumptions, so this validates plumbing and deterministic semantics, not real-world accuracy. |
-| `plumbing-only` | Exercised end to end on synthetic data, but the check or metric is known to be weak, vacuous, or statistically unsound until the referenced remediation lands. |
-| `research` | Exploratory; no production claim. Promotion requires a pre-registered evaluation with real labels. |
+| `validated-synthetic` | Measured through the full engine against the generator's oracle on held-out seeds, or pinned by exact unit/negative-control tests. Validates the engine against its own model of retail faults, not real-world accuracy. |
+| `plumbing-only` | Implemented and tested for correctness of mechanics; no detection or quality metric is claimed. |
+| `research` | Exploratory; not wired into the status. |
 
-| Milestone | Status | Evidence / caveat |
+## Registered system result
+
+`qc cohort --plan config/cohort.json` (small profile, held-out seeds
+7101-7103, full engine, final status), engine code `46de38631c7a`:
+
+| Measure | Result | Gate |
 |---|---|---|
-| A0 Synthetic world, fault oracle, suite harness | `validated-synthetic` | `tests/test_dgp.py`, `tests/test_faults.py`, `tests/test_scenarios.py`; family expectations come from one spec table (`qcgen/spec.py`). |
-| A Data contracts | `validated-synthetic` | Negative controls cover required columns, dtypes, week progression, nulls, duplicates. |
-| A Version pair / revision cube | `plumbing-only` | Declared per-stage grain, strict period contracts and predecessor-relative selection; adversarial fixtures in `tests/test_reliability.py`. |
-| A Lifecycle / attribution | `validated-synthetic` | Multi-class events, signed ledger with over-explanation/offsetting flags, and product-level reclassification conservation (M2). |
-| B Reconciliation | `validated-synthetic` | Per-key/per-week mass balance, aggregate-marker scans, explicit SKIPPED/NOT_EVALUATED; negative controls prove failures (M2). |
-| B Counterfactual | `validated-synthetic` | Reconstructed from frames; wrong-entity controls score low; no score when nothing is reconstructable (M2). |
-| B Lineage first divergence | `validated-synthetic` | Both-version fingerprints per stage, unmapped stages report UNKNOWN (M2). |
-| B Expected events / shadow mode | `plumbing-only` | Blind oracle separation landed: ground truth lives in a vault outside the scenario data, engine modules cannot import `qcgen` (scoring harnesses such as `shadow`, `cohort` and `cli` are allowlisted), and `qc shadow` is blind by default (`--with-registry` is plumbing). PASS_WITH_EXPLANATION is excluded from actionable detection; explicit scoped approvals record covered finding IDs. `--labels-out` is provenance `oracle` and now refuses to write unless every scenario has an oracle payload: an absent vault previously produced `UNKNOWN`/`PASS` placeholders still tagged `oracle`, which could train a provider on noise while reporting ground-truth provenance (`tests/test_qc_shadow.py`). `false_positive_rate` is now computed on the final status of clean controls; it previously used the historical sub-status and reported 0.0 while every control alarmed. |
-| C Temporal intelligence / forecast calibration | `validated-synthetic` | Synthetic-only; every configured measure and appended period is assessed with period-specific findings, training always ends at the previous snapshot, the latest origins are reserved exclusively for calibration, pooled standardized errors are converted back through the target's own scale, residual pools separate metric/level/horizon/revision, snapshot measures are compared within a period and never summed across time, and absent measures are reported (required absence makes the assessment incomplete). `tests/test_qc_temporal.py`, `tests/test_qc_calendar.py`, `tests/test_qc_remediation_acceptance.py`, `tests/test_qc_second_remediation.py`; real accuracy is still unmeasured. Decision rule (review remediation): leaves are tested on their share of the national parent, every series of a refresh is one BH family at `temporal_fdr_q` (default 0.01), and robust/seasonal/EWMA z and change points are evidence only. The prior rule paged on 10/10 clean refreshes, mostly via a same-sign residual sum (`coordinated_residual`, removed) and uncorrected heuristic z-scores. Measured on 40 clean small-profile refreshes (seeds 3000-3039): 2 false alarms at q=0.01 with 45/45 temporal-dependent faults detected. |
-| Evidence engine | `plumbing-only` | Declared business calendar, disjoint selection/calibration, hierarchy coverage checks, sparse parent-share support, per-metric quantified explanation ledgers with conservation, per-period `AssessmentEvidence`/`ExplanationCertificate` schema 3 and certificate-only statistical clearance bound to exact finding IDs, assessment identity, evidence digest, policy version and a pinned qualification artifact. Certificate binding is strict (missing identity/digest/schema/policy/qualification or a wrong scope/metric/level/period is ignored), and all applicable contract, reconciliation, reference, lineage, hierarchy and required-input failures are evaluated before clearance. Qualification is schema 2 with incident groups, splits, source identities, independent held-out coverage lower bounds, registered gates and analyst-label linkage for real provenance; it is frozen into assessment identity before the cache lookup. `tests/test_qc_calendar.py`, `tests/test_qc_hierarchy.py`, `tests/test_qc_ledger.py`, `tests/test_qc_policy.py`, `tests/test_qc_acceptance.py`, `tests/test_qc_remediation_acceptance.py`, `tests/test_qc_second_remediation.py`. Real-data clearance stays disabled until a real qualification is pinned. **Statistical clearance is unreachable in practice**: a temporal finding fails only when its movement is material, and a certificate requires the same movement to be at or below that materiality; with a maximally permissive qualification 0/46 pipeline-produced temporal findings verified. The certificates are tested only on hand-built findings with materiality 1e9. Pending a decision to delete or redefine it. |
-| 11 TSPulse adapter + benchmark | `research` | Pre-registered scenario-holdout gate (`config/tspulse-gate.json`); synthetic benchmark gates cannot confer production eligibility. Leave-one-series-out accuracy is reported as informational only. |
-| Substrates Question decomposition | `research` | Pre-registered gate `config/decomposition-gate.json`: decomposing each field into 22 narrow binary questions (one-vs-rest for nominal fields, threshold decomposition for the ordinal severity field) versus the flat multi-class head, with identical encoder, splits and optimizer budget. **Gate failed, reported as failed and not retro-fitted.** On 112 synthetic oracle records both arms agreed on every one of 22 test cases across all four fields (paired macro-F1 delta exactly 0.0, interval exactly [0, 0]); the probability distributions did differ (cause ECE 0.0491 -> 0.0412, severity Brier 0.1543 -> 0.1479) but the decisions did not. Two gate-design flaws are owned in the report: requiring improvement on fields where both arms score 1.00 is unsatisfiable by construction, and a 20-scenario smoke run revealed results before the registered run. `optional/decomposition_benchmark.py`, `tests/test_qc_decomposition.py`, `reports/benchmarks/decomposition.json`. |
-| Substrates Calibration challengers | `research` | `qc/calibration.py`: per-class free-sign Platt scaling, per-class isotonic (PAVA) and reliability-diagram bins beside the existing shared temperature, selected by NLL on the calibration split. Measured on a deliberately wrong-direction head: Platt recovers at accuracy 1.000 with every fitted slope negative; temperature stays at 0.000 at any temperature 0.05-50 (a positive scalar preserves every argmax); isotonic collapses to the flat class prior and predicts a single class. The pre-registered assumption that isotonic would recover alongside Platt is **wrong** and is corrected in `docs/next-phase-plan.md` 2.4: only a *shared* monotone transform preserves argmax (per-class maps can reorder across classes), but the monotone fit on anti-correlated labels flattens to the mean and repairs nothing. Isotonic does reduce ECE on an overconfident head, so it stays as a shape repair. `tests/test_qc_calibration.py`. A fitted calibrator is not a calibration certificate. |
-| D Typed decisions / labels / training | `plumbing-only` | Trained on synthetic oracle labels; real-label accuracy pending. Evaluation reports per field accuracy with Wilson intervals, multiclass Brier, top-label ECE, macro-F1, Matthews correlation, G-mean, per-class precision/recall/F1, confusion matrix and a cost-weighted score (`MISS_COST`/`FALSE_ALARM_COST`/`WRONG_CAUSE_COST` asymmetry pinned in `tests/test_qc_training.py`); champion scoring shares the surface through `label_metrics`. A truth label outside a head's vocabulary is charged the flat `MISS_COST`, never a free pass. The cost constants are a declared stand-in for measured business costs and must be replaced before any threshold that gates an action is tuned against them. |
-| D Incident memory / agent handoff | `validated-synthetic` | Confirmed-only retrieval, no-shell agent execution, env allowlist, output caps, strict response validation (M4); real-agent accuracy unmeasured. |
-| C+ Relationships / reports / Delta source | `validated-synthetic` | Benjamini-Hochberg correction, active-week requirement, stable entity-set hashing (M2); reports/Delta still plumbing. |
-| Evaluation cohorts / conformal / prequential | `validated-synthetic` | Conformal p-values, finite guards, scope partitioning, paired champion tests, complete gate sets and plan-hash pinning (M3). Synthetic benchmarks, store cohorts, qualification and production eligibility share one gate implementation: grouped confidence bounds and the 1% false-clearance upper bound everywhere, with insufficient groups staying insufficient. Evidence-bench selects the materiality candidate on development scenarios only, runs exactly one final configuration on untouched test scenarios, keeps a failed selection/qualification visible (never a fallback candidate) and reruns the actual provider adapter per evidence level with the bespoke rule baseline reported separately. Real-label cohort still pending. The cohort gate now runs the full engine against a real negative control (`clean`, expected PASS); the previous only control was `market_movement`, a genuine movement expected to alarm, so no FPR had ever been measured on clean data. Registered plan `config/cohort.json` (small profile, held-out seeds 7101-7103, code `a98f90140965`): detection 72/72 (Wilson lower 0.949), clean false positives 0/60 (Wilson upper 0.060), lineage 1.000, **PASS**. The zero-tolerance oracle-agreement and 1% false-clearance checks are reported, not gated: both were unsatisfiable at any plan size run here. |
-| Operations store / drift monitoring | `validated-synthetic` | WAL/busy-timeout, schema versioning (6) with backup before migration, provenance CHECK with no analyst default, historical outcome revisions, feature/text versions preserved through migration (incompatible evidence is rejected, never relabelled), preserved relationships, SQLite assessment/attempt journal, frozen recurrence-input manifests, checksum recovery and locking; real load still pending. |
-| Substrates ModernBERT-class text probe | `research` | Trainers always record `production_eligible=false`; central eligibility requires a pinned real test artifact and operational checks; real-label semantic benchmark still pending. |
-| Champion provider bake-off | `validated-synthetic` | Complete gates, homogeneous cohorts, fail-closed identity, provenance without overrides, paired selection (M3); real-label selection pending. |
-| Feedback simulation (synthetic analyst) | `research` | Feedback-loop plumbing; provenance `synthetic`, tags come from the simulated cause (M5). |
-| Verity spine (replay/expectations/reference/RCA) | `plumbing-only` | Observation cutoffs, explicit version maps, approved-at filtering, revision-preserving calibration and per-grain controls have regression coverage; real data pending. |
-| Onboarding | `plumbing-only` | **Run against a real table, not a fixture** (A1, `reports/onboarding-feedback.json`): UCI Online Retail, 541,909 raw transactions, 2010-12-01..2011-12-09, shaped to 139,078 rows at week x country x StockCode, 53 contiguous weeks, 0 nulls, two real Delta versions at a real week boundary. `qc onboard` -> contracts **PASS**; `qc weekly` -> terminal state **INVESTIGATE**, exit 2. The `MISSING_STORES` decision is consistent with a verified property of the raw source (the final week spans 5 distinct dates against a median of 6, because the file was cut off mid-week). Two blocking defects were found in the *ingestion* path, not the engine: Delta `append`-after-`overwrite` unions snapshots (caught correctly by the contract layer as duplicate_fraction 0.4964), and `dt.isocalendar().week` silently collides ISO weeks across a year boundary, which the engine structurally cannot detect. Still `plumbing-only`: there is no analyst-confirmed cohort, so no `validated-real` row is created and no detection, precision or calibration number is claimed. |
-| Weekly run orchestrator | `validated-synthetic` | flock, complete-input assessment identity that freezes distinct recurrence predecessors and their evidence hashes, and the resolved qualification artifact (status, provenance, digest, availability) before the cache lookup, so replacement/revocation/loss changes identity and retries reuse frozen inputs; separate attempts, SQLite schema 6 migration and crash-seam tests; reports publish by atomic rename without claiming a cross-resource transaction. |
-| Integration Jev/systemone remote provider | `validated-synthetic` | Providers consume the recorded evidence package (every assessed measure/period, failed checks compressed to references, missing required inputs, forecast uncertainty, per-metric ledgers, provenance; never final status, findings, certificates or decisions), omissions are recorded after packing, mandatory evidence is never dropped, and operational requests abstain rather than falling back to a thinner evidence level. Payload digests recorded, probability validation, response byte caps and fallback keeping local fields. |
-| Notification | `plumbing-only` | `qc/notify.py` renders a bounded, content-digested payload from a `WeeklyResult` and fans out to webhook/file/stdout sinks. Delivery is fail-soft by construction and cannot alter the assessment status, exit code or published report; payloads are deterministic, byte-bounded by dropping (never truncating) optional sections with the dropped names reported in `omitted`, and suppressed for clean statuses and for cached retries so a re-run cannot re-page. Webhook credentials are read from the environment variable named in the sink spec, never from argv. Exercised end to end against a local two-version Delta table; no sink has been pointed at a production endpoint and no delivery-latency or delivery-success rate is claimed. |
-| Distribution drift | `research` | **Fails the system-level gate; keep disabled.** Until the review remediation, enabling `distribution_drift_enabled` changed nothing: `run_qc` set a status that `apply_policy` discarded, and the earlier "pre-registered PASS" (`optional/drift_benchmark.py`, detection 1.000, control alarm 0.077, n=13) called the scoring function directly, never the engine. Drift now emits findings. Through the full engine on the registered cohort plan (`qc cohort --plan config/cohort.json --config drift.yaml`, code `a98f90140965`): detection 72/72 but **25/60 clean refreshes alarm** (FPR upper bound 0.543 vs 0.1 gate) - each of ~16 scopes is thresholded at the 95th percentile of its own ~8 reference weeks with no multiplicity control. Off by default. |
+| Detection over 12 fault/movement families | 72/72 (Wilson lower 0.949) | >= 0.9, **PASS** |
+| False positives on clean refreshes | 0/60 (Wilson upper 0.060) | <= 0.1, **PASS** |
+| Lineage first-divergence accuracy | 1.000 | >= 0.9, **PASS** |
 
-| Real-table refresh replay | `research` | **27 consecutive real weekly refreshes** replayed from the UCI table (versions 0..27, each a genuine full-history refresh at a real week boundary). **Finding: the alarm rate on real data was 100%** — 25/27 `INVESTIGATE`, all `MISSING_STORES`/`MISSING_PRODUCTS`. Root cause measured, not guessed: real transactional data is sparse (19,658 historic store-product pairs, but only 2,200-3,800 present in any week, i.e. **80-89% absent, mean 85.1%**), and the missing-entity rule fired on any entity that traded last week and not this week, with no entity-specific reliability baseline. The median dropped entity had traded in only 2 of the last 8 weeks. Added `entity_presence_threshold` / `entity_presence_window` (default 0.0, preserving prior behaviour exactly): LATEST_WEEK_MISSING events at week 30 fall 456 -> 236 (0.6) -> 69 (1.0). **Even at 1.0 the alarm rate does not reach zero**, so a per-entity threshold is necessary but not sufficient for sparse sources; a scope-level coverage check against each scope's own history is the required next step. No detection or false-positive rate is claimed. |
+Before the review remediation the same plan could not measure a false-positive
+rate (its only control was a genuine movement), and clean refreshes alarmed on
+10/10 runs.
 
-| Scope coverage baseline | `research` | `qc/coverage.py` compares each scope's appended-period coverage against **that scope's own** trailing coverage distribution (lower-tail quantile), because absolute expected-entity counts are meaningless across scopes that differ by orders of magnitude. Coverage is one-sided: only a fall is a regression. Pre-registered gate `config/coverage-gate.json` run as registered via `optional/coverage_benchmark.py` over 41 real periods: control alarm rate **0.010** (18 of 1757 scope flags fired while still inside the scope's own observed range; gate required <= 0.10) and injected-drop detection **1.000** (24/24 at 30/50/70% of the period's entity pairs removed; gate required >= 1.0). **Verdict PASS.** Two honest limits: "genuine" in that accounting means only *below the scope's 8-period observed minimum*, not *actually wrong*, so the 1% is a floor and not a false-positive rate; and the absolute flag volume is high (~43 scope flags per period), because a lower-tail quantile over 8 reference periods is a weak estimator. The check is **not wired into the escalation path** and must not be until that flag volume is addressed. |
+## Capabilities
 
-| Aggregate coverage gating | `research` | **Wiring removed.** The flag only filtered the `reasons` list; the historical status still escalated on any missing entity, so enabling it could not change a status. Superseded by materiality-weighted missing-entity escalation in `lifecycle.missing_entity_impact` (absences escalate only when the missing entities of one type were expected to carry more than `materiality_ratio` of the period). `qc/coverage.py` remains as an unwired research module. |
+| Capability | Status | Evidence / caveat |
+|---|---|---|
+| Synthetic world and fault oracle | `validated-synthetic` | `tests/test_dgp.py`, `tests/test_faults.py`, `tests/test_scenarios.py`; family expectations come from one table (`qcgen/spec.py`) mirrored in `docs/synthetic-data.md` (`tests/test_docs_sync.py`). Includes a `clean` negative control. |
+| Data contracts | `validated-synthetic` | Negative controls for required columns, dtypes, week progression, nulls and duplicates; both snapshots and every stage are checked. |
+| Version pair and revision cube | `plumbing-only` | Declared grain, strict period contracts and predecessor-relative selection; metadata-only Delta commits are skipped. `tests/test_reliability.py`, `tests/test_qc_delta.py`. |
+| Lifecycle and attribution | `validated-synthetic` | Multi-class events, signed attribution, reclassification conservation. Missing entities escalate only when material (`lifecycle.missing_entity_impact`); negative control in `tests/test_negative_controls.py`. |
+| Counterfactual reconstruction | `validated-synthetic` | Reconstructed from frames; no score when nothing is reconstructable. |
+| Reconciliation | `validated-synthetic` | Per-key mass balance, count consistency, aggregate markers; price-ratio outliers only in appended periods. |
+| Lineage first divergence | `validated-synthetic` | 1.000 on the registered cohort. |
+| Expected events, ratio expectations, reference controls | `plumbing-only` | Scoped approvals must precede the observation cutoff and cover exact finding IDs; `expected_event` reaches PASS_WITH_EXPLANATION with its registry. |
+| Temporal QC | `validated-synthetic` | Share-of-parent tests for leaves, forecast p-values for national series, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out case. `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`. |
+| Findings and final status | `validated-synthetic` | One status path (`policy.apply_policy`); nothing is cleared automatically. |
+| Recurrence | `plumbing-only` | Stable keys survive serialization and storage; frozen, hash-checked predecessors. `tests/test_qc_second_remediation.py`. |
+| Rule cause labels | `plumbing-only` | Label cause, origin and severity; cannot change status or review. Label accuracy is not measured. |
+| Weekly orchestrator and journal | `validated-synthetic` | Content-addressed identity, locking, fault injection at all five journal/publication seams (`tests/test_reliability.py`), atomic publication. |
+| Notification | `plumbing-only` | Suppressed statuses and cached retries reach no sink; accumulating size bound; https-only webhooks without redirects. `tests/test_qc_notify.py`. |
+| Delta source and onboarding | `plumbing-only` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. |
+| Cohort evaluation | `validated-synthetic` | Registered, hash-pinned plan with independently sized clean controls; exits 3 on gate failure. |
 
 ## Not claimed
 
-- Production eligibility from pilot label readiness or provenance alone. Central eligibility requires a pinned real analyst test evaluation, confidence-bound gates and operational checks.
+- Any detection rate, false-positive rate or alarm volume on real refreshes.
+  Real data typically has more entity churn, messier seasonality and faults the
+  generator does not model.
+- Accuracy of the rule-based cause labels.
+- Delivery guarantees for notifications (no retry queue).
+- Capacity beyond a single machine. `optional/scale_benchmark.py` last measured
+  8.2 s / 1.07 GiB peak RSS for 1M rows and 53.3 s / 4.58 GiB for 5M rows (320
+  weeks, serial in-memory pandas) before the review remediation; it has not
+  been re-measured since.
+- Spark or Databricks execution.
 
-- Azure Databricks or Spark execution. The supported backend is local
-  versioned snapshots (Parquet scenarios, delta-rs `DeltaSource`).
-- Any real-world detection, precision, or calibration number.
-- Production eligibility of any learned artifact. `production_eligible` remains
-  false until a real analyst-labelled frozen cohort exists.
-- Any delivery guarantee, delivery latency or alert-completeness claim for the
-  notification sink. A sink that fails is recorded and reported on stderr; it
-  does not fail the run and it does not queue or retry. Anything that must not
-  be lost belongs in the SQLite journal, not in a notification.
-- Any real-data detection rate, false-positive rate or alarm volume for the
-  distribution-drift check. The pre-registered gate passed on synthetic data
-  with an *injected* redistribution whose magnitude the benchmark itself
-  chooses; a real redistribution is subtler, and the measured ~2% floor is a
-  property of this corpus, not a production sensitivity.
-- Zero false positives at entity-scope granularity. The gate's control arm is
-  measured at *scenario* level (0.077, one firing on `recalculation`); on a
-  single control scenario 2 of 16 evaluable entity scopes still fire, both
-  marginally (overshoot 1.03x and 1.22x the derived threshold). A marginal
-  overshoot is noise, not a detection, and no scope-level false-positive rate
-  is claimed.
+## Known limitations
 
-## Reliability evidence additions
-
-- Independent hand-authored contracts, doubled totals, offsetting references,
-  historical selection, model veto prevention, migration and publication recovery:
-  `tests/test_reliability.py` and `tests/test_negative_controls.py`.
-- Store cohort freezing and four-way group splits: `qc/store_cohort.py`,
-  `qc/training.py`, cohort/training tests. No real analyst cohort exists yet.
-- Optional Laya: [pinned CPU integration](laya.md), protocol/budget/timeout/fallback
-  tests and reproducible smoke/comparison artifacts; research only.
-- [Local feedback flow and measured operating envelope](reliability-limitations.md).
-  Delta integration is required in core CI; heavyweight model integration is a
-  separate manual pinned job.
+- Detector power depends on history length and noise: on the 30-week `tiny`
+  profile a 12-30% single-commodity movement is missed about 40% of the time.
+- Temporal thresholds (`temporal_fdr_q`, `temporal_min_relative_residual`) and
+  `materiality_ratio` were chosen on synthetic data; any new dataset should be
+  evaluated with `qc cohort --config` or a comparable held-out set first.
+- Point-in-time safety depends on truthful commit times and explicitly supplied
+  cross-table version mappings; Parquet manifests are caller assertions.
+- Crash tests inject exceptions at persistence seams; they do not simulate disk
+  loss or power failure.

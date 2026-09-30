@@ -1,9 +1,8 @@
-# Onboarding a real table
+# Onboarding a table
 
-The first real refresh pair should be a checklist, not a debugging session.
-`qc onboard` profiles a Delta table, proposes a configuration, and reports
-blockers. `qc store import` loads analyst outcomes from CSV or Delta so the
-feedback loop starts without manual entry.
+Pointing the engine at a new table should be a checklist, not a debugging
+session. `qc onboard` profiles a Delta table, proposes a configuration and
+reports blockers.
 
 ## Profile and propose
 
@@ -66,36 +65,16 @@ Mapping rules:
   column never appears - a wrong column is never scored;
 - mappings are validated: canonical and production names must each be unique.
 
-## Import analyst outcomes
+## Runbook
 
-```sh
-qc store import --store data/qc.db --csv outcomes.csv
-qc store import --store data/qc.db --delta abfss://.../feedback --dry-run
-```
-
-Required columns: `run_id`, `root_cause`. Optional: `likely_origin` (or
-`origin`), `severity`, `resolution`, `summary`, `analyst`, `confirmed`,
-`requires_investigation`, `symptom_tags` (comma separated), `created`,
-`provenance` and `incident_group`. Real evaluation requires explicit analyst
-provenance and identity; synthetic outcomes remain synthetic.
-Unknown `run_id`s are reported as errors and never created; `--dry-run`
-validates without writing. Once outcomes are confirmed, `records_from_store`
-feeds `qc champion` directly.
-
-## Runbook for day one
-
-1. `qc onboard --uri ... --out config/datasets/retail.yaml`, fix blockers,
+1. `qc onboard --uri ... --out config/datasets/retail.yaml`, fix blockers and
    review the proposal.
-2. `qc delta-info --uri ...` to confirm version history.
-3. `qc delta-run --uri ... --previous N --current N+1 --config ...` for a
-   first real assessment (contracts, revision, lineage, temporal, decisions).
-4. `qc report --scenario-dir ...` is synthetic-only; for Delta use
-   `delta-run --json` and capture the machine output.
-5. Use `qc weekly --store data/qc.db` to persist the shadow assessment before collecting
-   confirmed outcomes with `qc store import`.
-6. Freeze `qc cohort --source store --store data/qc.db --cutoff <UTC timestamp>
-   --out reports/real-cohort`, then follow the separate development/test steps
-   in [evaluation](evaluation.md). Sparse evidence must remain insufficient.
+2. `qc delta-info --uri ...` to confirm the version history.
+3. `qc delta-run --uri ... --previous N --current N+1 --config ... --json` for
+   a first assessment.
+4. Schedule `qc weekly` (see [weekly-run.md](weekly-run.md)).
+5. Before trusting a threshold, evaluate the configuration on synthetic data
+   with `qc cohort --plan config/cohort.json --config ...`.
 
 Limitations: onboarding reads a sample, so rare null/duplicate patterns can
 hide beyond 50k rows; raise `--sample-rows` or use `--count`. Version pairs are

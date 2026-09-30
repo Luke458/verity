@@ -57,15 +57,9 @@ interleaves controls after every third fault, so a run with `--scenarios 5` on
 the default config covers a mixed plan and a larger run covers every family.
 
 The product-level and merge families close coverage gaps rather than add
-volume: `missing_products` exercises the `MISSING_PRODUCTS` semantic class, and
+volume: `missing_products` exercises the `MISSING_PRODUCTS` cause label, and
 `entity_merge` removes one store while a new store absorbs its history, which
 produces a `replaced_by` relationship candidate and the `ENTITY_MERGE` cause.
-Both existed in the decision layer before but had no oracle scenarios.
-
-Analyst behaviour is simulated separately (drafts, mistakes, corrections,
-latency, investigation disagreement) with explicit `synthetic` provenance, so
-the feedback loop can run end to end without being mistaken for real labels;
-see [docs/synthetic-analyst.md](synthetic-analyst.md).
 
 ## Manifest
 
@@ -93,18 +87,10 @@ that each fault satisfies its family invariant (sign, conservation,
 units/dollar consistency, dropped column, duplicated units). It does not run
 the QC engine; it is the generator's self-test.
 
-## Using synthetic labels correctly
+## Using the oracle correctly
 
-Use synthetic ground truth to assert the deterministic engine's status,
-attribution, residual and first-divergence outputs exactly. Do **not** report
-semantic-model accuracy on synthetic labels as evidence of quality: the
-decision model is only as realistic as the simulator, and no simulator encodes
-the ambiguity of real analyst judgement. Semantic metrics require real
-confirmed outcomes.
-
-## Delta port
-
-`SnapshotStore` writes Parquet today so A0 runs anywhere. When Databricks is
-available, add a Delta-backed store with the same interface (versioned tables
-in Unity Catalog) and keep the Parquet backend for tests. The manifest and
-fingerprint format are storage-independent.
+Use the oracle to assert the engine's status, attribution, residual and
+first-divergence outputs and to measure detection and false-positive rates
+(see [evaluation.md](evaluation.md)). The generator shares the engine
+authors' assumptions, so these rates validate the engine against its own model
+of retail faults, not against real refreshes.

@@ -1,7 +1,7 @@
-# Weekly analyst shadow
+# Weekly run
 
 `qc weekly` reads local Delta snapshots or a versioned Parquet manifest. It
-never changes source tables or blocks publication. Rules are the default.
+never changes source tables or blocks publication.
 
 ```sh
 qc weekly --uri ./lake/fact --previous 11 --current 12 \
@@ -30,96 +30,91 @@ For Parquet, pass a JSON manifest as `--uri`:
 Paths must stay inside the manifest directory. Include explicit `dimensions`
 mappings when required. Observation time is separate from the `week` column.
 
-## Status and review
+## Status and exit codes
 
 Findings have schema versions, stable IDs, scopes, evidence references and a
-required flag. Final status is calculated after all controls and approvals:
+required flag. The final status is computed once from them after all checks and
+approvals:
 
 | Exit | Meaning |
 |---|---|
-| 0 | PASS or fully approved PASS_WITH_EXPLANATION |
-| 2 | Investigation required, including additional provider review requests |
+| 0 | PASS, or PASS_WITH_EXPLANATION (every failure covered by an approval) |
+| 2 | INVESTIGATE |
 | 3 | DATA_CONTRACT_FAILURE |
 | 4 | INCOMPLETE: required evidence unavailable |
 | 1 | Execution failure |
 | 75 | Lock contention; retry later |
 
 Contract failures take precedence, then unexplained failures, then incomplete
-required checks. Missing optional checks remain visible. Findings carry a
-disposition: `HARD_FAILURE`, `UNAVAILABLE_EVIDENCE`, `UNEXPLAINED_ANOMALY`,
-`STATISTICALLY_EXPLAINED`, `HUMAN_APPROVED` or `INFORMATIONAL`. A verified
-explanation certificate can clear only the exact finding IDs it lists, and only
-when its assessment identity, evidence digest, certificate schema, policy
-version and pinned qualification digest all match the current assessment. A
-human approval clears with `human_approval`. Contract, reconciliation,
-reference, lineage, hierarchy-integrity, required-evidence and historical
-revision findings can never receive statistical clearance. Models cannot clear
-policy-required review; raw model recommendations remain separately recorded.
-`--allow-investigate` is deprecated and does not override these exit codes.
-Certificates are bound to the exact finding coverage, scope kind, measure,
-hierarchy level, series, period, assessment identity, evidence digest,
-certificate schema, policy version and qualification digest; a blank, stale,
-wrong-scope or unsupported certificate is ignored rather than treated as
-current.
+required checks. Findings carry a disposition: `HARD_FAILURE`,
+`UNAVAILABLE_EVIDENCE`, `UNEXPLAINED_ANOMALY`, `HUMAN_APPROVED` or
+`INFORMATIONAL`. Only a registered, approved expected event or ratio
+expectation observed before the assessment cutoff can explain a failure, and
+only the exact finding IDs it covers. The rule-based cause label in the result
+cannot change the status or the exit code.
 
-Automatic clearance also requires a pinned qualification artifact: run
-`qc evidence-bench --suite ... --out reports/bench/evidence.json` (which writes
-`reports/bench/evidence-qualification.json`) and set `qualification_path` in the
-dataset config. Without it every certificate is rejected with
-`no pinned qualification artifact`. Qualification is resolved and validated
-before the assessment identity is calculated, and its status, provenance,
-digest and availability state are frozen into that identity: replacing,
-revoking or losing the artifact at the same path produces a new assessment
-instead of reusing a cached one, while retries keep their original frozen
-inputs. Qualification schema 2 requires source assessments, incident groups,
-cutoffs, disjoint development/test splits, model identity, calendar/config
-hashes, independent held-out coverage lower bounds, registered gates and
-analyst-labelled evidence for real provenance. A synthetic qualification can
-only clear synthetic assessments; real Delta data needs a real qualification.
+`qc explain --report <dir>` or `qc explain --store data/qc.db --dataset <name>`
+prints an assessment's status and its non-passing findings with dispositions.
 
-`qc explain` shows an assessment's findings, per-period ledger and certificates;
-`qc evidence-bench` selects materiality on a development scenario split, gates
-the frozen choice on untouched test scenarios and reruns the provider across
-independently constructed evidence views.
+## Journal, identity and recovery
 
-## Identity, retries and recovery
+SQLite is authoritative (default `reports/weekly/assessments.sqlite`; set
+`--store` to keep it elsewhere). It holds three tables:
 
-SQLite is authoritative (default `reports/weekly/assessments.sqlite`). The
-assessment identity hashes the complete selected snapshot content/metadata,
-configuration, engine code, reference and approval inputs, observation cutoff,
-provider artifact identity, the resolved qualification artifact and a frozen
-recurrence-input manifest: distinct logical predecessor refreshes strictly
-before the cutoff, latest eligible revision per refresh and their evidence
-hashes. Changing an eligible
-predecessor, or a future refresh appearing after the cutoff, cannot silently
-reuse a cached result. Each execution receives a separate attempt ID. `--force`
-creates another attempt for the same immutable assessment; it does not overwrite
-its outcome.
+| Table | Semantics |
+|---|---|
+| `runs` | immutable machine payload per assessed refresh; the frozen input to recurrence |
+| `assessments` | content-addressed assessment identity, status, artifacts and checksums |
+| `attempts` | one row per invocation with its state (STARTED, COMMITTED, PUBLISHED) and any error |
 
-The journal transitions through STARTED, COMMITTED and PUBLISHED. Result,
-calibration, report and the complete per-period evidence package
-(`evidence.json`, schema 3, including per-measure ledgers and certificates)
-commit together in SQLite.
-Reports are written to a temporary directory and published by atomic rename.
-These are two durable steps, **not** a filesystem/database transaction. A retry
-verifies identity and checksums, completes publication or regenerates damaged
-artifacts from journal content without duplicating logical outcomes/calibration.
-Damaged directories are preserved. Cache reuse is a separate flag and retains
-the original QC status and exit code; directory existence alone is never
-evidence of success.
+The assessment identity hashes the selected snapshot content and metadata,
+configuration, engine code, reference and approval inputs, the observation
+cutoff and a frozen recurrence-input manifest (distinct predecessor refreshes
+strictly before the cutoff and their payload hashes). Changing an eligible
+predecessor, or a refresh appearing after the cutoff, cannot silently reuse a
+cached result. Each execution gets its own attempt ID; `--force` creates another
+attempt for the same immutable assessment without overwriting its outcome.
 
-Opening an older store takes a backup and migrates transactionally to schema 6.
-Legacy runs, labels and provenance are retained; insufficient legacy identity
-metadata prevents cache reuse. Keep the backup until recovery has been checked.
-The legacy JSONL calibration option is not appended by weekly processing;
-weekly calibration revisions live in SQLite and are recorded at the assessment's
-observation cutoff. Historical selection filters them by that cutoff before
-calculating the prequential pool.
+Result and report artifacts commit together in SQLite; reports are then written
+to a temporary directory and published by atomic rename. These are two durable
+steps, **not** one transaction: a retry verifies identity and checksums and
+completes publication or regenerates damaged artifacts from the journal, without
+duplicating the recorded run. A cached retry keeps the original status and exit
+code and never re-notifies. Opening a store from an older schema backs it up
+first; retired tables from earlier schemas are left in place and never read.
 
-`deployment/weekly.sh` maps `QC_URI`, `QC_STORE`, `QC_REFERENCE_VERSION` and other
-environment variables to CLI arguments. Schedule it after refresh commit and
-route exit codes to your existing review process. No notifications, automatic
-promotion, Spark/Databricks deployment or GPU serving are included.
+Metadata-only Delta commits (OPTIMIZE, VACUUM, property and constraint changes)
+are not refreshes and are skipped when choosing versions. The default pair is
+the latest refresh and its predecessor; if several refreshes land between runs,
+assess the intermediate pairs explicitly with `--current/--previous`.
+
+## Notifications
+
+```sh
+cat > sinks.json <<'JSON'
+{"sinks": [
+  {"kind": "webhook", "target": "https://hooks.example.com/qc", "token_env": "QC_WEBHOOK_TOKEN"},
+  {"kind": "file", "target": "reports/notify/weekly.jsonl"}
+]}
+JSON
+qc weekly --uri ./lake/fact --store data/qc.db --notify sinks.json
+```
+
+A payload is sent only for actionable statuses (`--notify-status`, default
+INVESTIGATE, DATA_CONTRACT_FAILURE, CONTRACT_FAILURE, INCOMPLETE) and never for a
+cached retry. It is deterministic, carries a content digest and is bounded by
+`--notify-max-bytes`: optional sections are dropped whole (named in `omitted`),
+never truncated. Webhooks must be `https://` (plain `http://` only to loopback),
+never follow redirects, and read their bearer token from the named environment
+variable. Delivery is fail-soft: a failed sink is reported on stderr and cannot
+change the status, exit code or report. There is no retry queue.
+
+## Scheduling
+
+`deployment/weekly.sh` maps `QC_URI`, `QC_STORE`, `QC_CONFIG`, `QC_NOTIFY`,
+`QC_EXPECTATIONS` and the `QC_REFERENCE_*` variables to CLI arguments and reads
+storage credentials from `QC_STORAGE_OPTIONS`. Schedule it after the refresh
+commits and route exit codes to your review process.
 
 ## Declared grain and calendars
 
