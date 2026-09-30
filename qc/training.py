@@ -122,7 +122,7 @@ def split_records_four(records, validation_fraction=.3, test_fraction=.2, seed=0
             if seen & group_ids:
                 raise ValueError("frozen incident groups overlap")
             seen.update(group_ids)
-        for left, right in zip(buckets, buckets[1:]):
+        for left, right in zip(buckets, buckets[1:], strict=False):
             if max(r.metadata["observed_at"] for r in left) >= min(r.metadata["observed_at"] for r in right):
                 raise ValueError("frozen splits overlap chronologically")
         return buckets
@@ -156,7 +156,7 @@ def split_records_four(records, validation_fraction=.3, test_fraction=.2, seed=0
     buckets = (keys[:cuts[0]], keys[cuts[0]:cuts[1]], keys[cuts[1]:cuts[2]], keys[cuts[2]:])
     result = tuple([record for key in bucket for record in groups[key]] for bucket in buckets)
     if analyst:
-        for left, right in zip(result, result[1:]):
+        for left, right in zip(result, result[1:], strict=False):
             if max(r.metadata["observed_at"] for r in left) >= min(r.metadata["observed_at"] for r in right):
                 raise ValueError("INSUFFICIENT_EVIDENCE: incident groups overlap chronologically")
     return result
@@ -403,7 +403,7 @@ def _ece(probabilities: np.ndarray, targets: np.ndarray, bins: int = 10) -> floa
     edges = np.linspace(0.0, 1.0, bins + 1)
     total = len(targets)
     ece = 0.0
-    for low, high in zip(edges[:-1], edges[1:]):
+    for low, high in zip(edges[:-1], edges[1:], strict=False):
         mask = (confidences > low) & (confidences <= high)
         count = int(mask.sum())
         if count == 0:

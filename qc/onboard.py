@@ -204,7 +204,7 @@ def profile_table(
                 unique = sorted(int(value) for value in weeks.unique())
                 contiguous = all(
                     right - left == 1
-                    for left, right in zip(unique, unique[1:])
+                    for left, right in zip(unique, unique[1:], strict=False)
                 )
                 if not contiguous:
                     findings.append(

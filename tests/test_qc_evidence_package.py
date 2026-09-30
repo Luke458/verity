@@ -23,6 +23,9 @@ CONFIG = DatasetConfig(
 
 
 class FrameSource:
+    # Fixture data is synthetic; undeclared sources are treated as real.
+    provenance = "synthetic"
+
     def __init__(self, frames):
         self.frames = frames
 

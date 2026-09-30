@@ -503,3 +503,26 @@ def test_missing_all_required_stages_is_incomplete():
     result = run_qc(EmptyStages(), "v2", "v1", CONFIG)
     assert result.status == "INCOMPLETE"
     assert result.machine["requires_investigation"]
+
+
+def test_source_provenance_fails_closed(tmp_path):
+    # Regression: only DeltaSource counted as real, so a production Parquet
+    # manifest was labelled synthetic and could accept synthetic artifacts.
+    import json
+
+    from qc.run import _source_provenance
+    from qc.source import CachedSource, ParquetManifestSource, mapped
+    from qcgen.sources import ScenarioSource
+
+    frame = pd.DataFrame({"week": [1], "store_id": ["S1"], "dollar": [1.0]})
+    frame.to_parquet(tmp_path / "fact.parquet")
+    (tmp_path / "manifest.json").write_text(json.dumps({
+        "schema_version": 1, "source_id": "prod.fact",
+        "snapshots": [{"version": "1", "observed_at": "2026-01-01T00:00:00+00:00",
+                       "stages": {"warehouse": "fact.parquet"}}],
+    }))
+    manifest = CachedSource(mapped(ParquetManifestSource(tmp_path / "manifest.json"), None), CONFIG)
+    assert _source_provenance(manifest) == "real"
+    assert _source_provenance(HandSource()) == "real"
+    scenario = CachedSource(mapped(ScenarioSource(tmp_path), None), CONFIG)
+    assert _source_provenance(scenario) == "synthetic"

@@ -117,16 +117,23 @@ class _TemporalPeriod:
 
 
 def _source_provenance(source: VersionSource) -> str:
-    """Real Delta tables are real-data assessments; fixture sources are not."""
-    from .delta import DeltaSource
+    """Fail closed: every source is real unless it declares itself synthetic.
 
+    Only a source that sets ``provenance = "synthetic"`` (the generator's
+    ``ScenarioSource`` does) is treated as synthetic. A Parquet manifest, an
+    in-memory frame or any new adapter is real data by default, so synthetic
+    artifacts can never authorize anything on it.
+    """
     raw: Any = source
-    for _ in range(4):
+    for _ in range(8):
+        declared = getattr(type(raw), "provenance", None)
+        if declared is not None:
+            return "synthetic" if declared == "synthetic" else "real"
         inner = getattr(raw, "source", None) or getattr(raw, "inner", None)
         if inner is None:
             break
         raw = inner
-    return "real" if isinstance(raw, DeltaSource) else "synthetic"
+    return "real"
 
 
 def _resolve_common_stage(

@@ -21,6 +21,23 @@ from typing import Any
 
 import pandas as pd
 
+# Commits that rewrite files or metadata without changing the table's logical
+# rows. They are never refreshes: comparing a refresh with its own OPTIMIZE
+# would assess identical data, and VACUUM can make the version unreadable.
+METADATA_ONLY_OPERATIONS = frozenset(
+    {
+        "OPTIMIZE",
+        "VACUUM START",
+        "VACUUM END",
+        "SET TBLPROPERTIES",
+        "UNSET TBLPROPERTIES",
+        "ADD CONSTRAINT",
+        "DROP CONSTRAINT",
+        "UPGRADE PROTOCOL",
+        "FSCK",
+    }
+)
+
 DELTA_MISSING_MESSAGE = (
     "deltalake is required for Delta sources; install the [delta] extra"
 )
@@ -82,6 +99,9 @@ class DeltaSource:
     _histories: dict[str, list[int]] = field(
         default_factory=dict, init=False, repr=False
     )
+    _metadata_only: dict[str, set[int]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def _table_uri(self, stage_name: str) -> str:
         if self.stage_tables:
@@ -106,15 +126,30 @@ class DeltaSource:
         uri = self._table_uri(stage_name)
         if uri not in self._histories:
             table = _delta_table(uri, self.storage_options, None)
+            metadata_only: set[int] = set()
             try:
+                history = table.history()
                 versions = sorted(
-                    int(entry.get("version", -1)) for entry in table.history()
+                    int(entry.get("version", -1)) for entry in history
                 )
                 versions = [version for version in versions if version >= 0]
+                metadata_only = {
+                    int(entry.get("version", -1))
+                    for entry in history
+                    if str(entry.get("operation", "")).upper()
+                    in METADATA_ONLY_OPERATIONS
+                }
             except Exception:  # noqa: BLE001  # pragma: no cover
                 versions = [int(table.version())]
             self._histories[uri] = versions or [int(table.version())]
+            self._metadata_only[uri] = metadata_only
         return self._histories[uri]
+
+    def _refresh_versions(self, stage_name: str) -> list[int]:
+        """Versions that can change logical rows (metadata-only commits dropped)."""
+        versions = self._versions(stage_name)
+        skipped = self._metadata_only.get(self._table_uri(stage_name), set())
+        return [version for version in versions if version not in skipped]
 
     def _primary_stage(self) -> str:
         if self.stage_tables and self.stage not in self.stage_tables:
@@ -124,7 +159,9 @@ class DeltaSource:
         return primary
 
     def list_versions(self) -> list[str]:
-        return [str(version) for version in self._versions(self._primary_stage())]
+        return [
+            str(version) for version in self._refresh_versions(self._primary_stage())
+        ]
 
     def available_stages(self, version: str) -> list[str]:
         if self.stage_tables:

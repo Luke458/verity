@@ -75,7 +75,7 @@ def _week_progression_ok(frame: pd.DataFrame, week_column: str) -> tuple[bool, s
         return False, "weeks must be finite integers"
     unique = sorted(int(value) for value in weeks.unique())
     contiguous = all(
-        right - left == 1 for left, right in zip(unique, unique[1:])
+        right - left == 1 for left, right in zip(unique, unique[1:], strict=False)
     )
     if not contiguous:
         return False, f"week gaps in {unique[:3]}...{unique[-3:]}"

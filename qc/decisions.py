@@ -662,7 +662,7 @@ class TrainedDecisionProvider:
                 requires = bool(value)
             distribution = {
                 class_name: float(probability)
-                for class_name, probability in zip(head.classes, probabilities)
+                for class_name, probability in zip(head.classes, probabilities, strict=False)
             }
             values[field_name] = DecisionValue(
                 field=field_name,

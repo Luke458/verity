@@ -113,7 +113,7 @@ def _consecutive_psi(
     )
     weeks = sorted(weekly.index)
     scores: list[float] = []
-    for previous, current in zip(weeks, weeks[1:]):
+    for previous, current in zip(weeks, weeks[1:], strict=False):
         score = population_stability_index(weekly[previous], weekly[current], bins)
         if score is not None and math.isfinite(score):
             scores.append(score)

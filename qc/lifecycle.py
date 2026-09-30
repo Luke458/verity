@@ -282,7 +282,7 @@ def _product_commodity_map(
     if dim is not None and {"product_id", "commodity_id"} <= set(dim.columns):
         return {
             str(product): str(commodity)
-            for product, commodity in zip(dim["product_id"], dim["commodity_id"])
+            for product, commodity in zip(dim["product_id"], dim["commodity_id"], strict=False)
         }
     if "product_id" in frame.columns and "commodity_id" in frame.columns:
         grouped = frame.groupby("product_id")["commodity_id"].agg(

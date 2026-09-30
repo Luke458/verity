@@ -647,7 +647,7 @@ def _dataset_certificate(
 ) -> ExplanationCertificate:
     """Assessment-scope record; it never authorizes clearing a finding."""
     temporal_findings = tuple(
-        str(getattr(item, "finding_id"))
+        str(item.finding_id)
         for item in errors
         if getattr(item, "finding_id", None)
     )

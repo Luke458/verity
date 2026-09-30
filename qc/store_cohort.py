@@ -110,7 +110,7 @@ def freeze_store_cohort(path: str, cutoff: str, out: str | None = None) -> dict:
             else None
         )
     if enough:
-        for left, right in zip(SPLITS, SPLITS[1:]):
+        for left, right in zip(SPLITS, SPLITS[1:], strict=False):
             earlier = [c["observed_at"] for c in cases if c["split"] == left]
             later = [c["observed_at"] for c in cases if c["split"] == right]
             if not earlier or not later or max(earlier) >= min(later):

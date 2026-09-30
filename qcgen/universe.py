@@ -100,7 +100,7 @@ def generate_universe(
         banner_ids_array, size=max(0, config.n_stores - len(guaranteed))
     )
     store_banner = rng.permutation(np.concatenate([guaranteed, remaining]))
-    banner_state = dict(zip(banners["banner_id"], banners["home_state"]))
+    banner_state = dict(zip(banners["banner_id"], banners["home_state"], strict=False))
     open_weeks = np.ones(config.n_stores, dtype=np.int32)
     # A small share of stores open part-way through the history.
     n_late = max(1, config.n_stores // 8)

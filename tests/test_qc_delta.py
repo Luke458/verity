@@ -76,3 +76,20 @@ def test_run_qc_over_delta_versions(tmp_path):
         event.classification == "LATEST_WEEK_MISSING" for event in result.events
     )
     assert result.machine["version_pair"]["shape"] == "NORMAL"
+
+
+def test_metadata_only_commits_are_not_refreshes(tmp_path):
+    # An OPTIMIZE after a refresh must not become the "current" version whose
+    # predecessor is the refresh itself (identical logical data).
+    from deltalake import DeltaTable
+
+    path = tmp_path / "fact"
+    write_deltalake(str(path), pd.DataFrame(_rows(range(1, 5), ("S1", "S2"))))
+    write_deltalake(str(path), pd.DataFrame(_rows([5], ("S1", "S2"))), mode="append")
+    DeltaTable(str(path)).optimize.compact()
+    source = DeltaSource(uri=str(path))
+    history = describe_delta_table(str(path))["history"]
+    assert any(entry["operation"] == "OPTIMIZE" for entry in history)
+    optimized = [entry["version"] for entry in history if entry["operation"] == "OPTIMIZE"]
+    assert source.list_versions() == ["0", "1"]
+    assert all(str(version) not in source.list_versions() for version in optimized)

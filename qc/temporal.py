@@ -291,7 +291,7 @@ def seasonal_z(
 ) -> float:
     same = [
         float(value)
-        for week, value in zip(weeks, values)
+        for week, value in zip(weeks, values, strict=False)
         if math.isfinite(float(value))
         and (target_week - int(week)) % season == 0
     ]
@@ -412,7 +412,7 @@ def backtest_forecaster(
             median = float(predictions[median_index])
             scale = _forecast_scale(predictions, levels)
             residuals.append((actual - median) / scale)
-            for level, prediction in zip(levels, predictions):
+            for level, prediction in zip(levels, predictions, strict=False):
                 if actual <= float(prediction):
                     hits[str(level)] += 1
             count += 1
@@ -613,7 +613,7 @@ def fit_model(
 ):
     pairs = [
         (int(week), float(value))
-        for week, value in zip(weeks, values)
+        for week, value in zip(weeks, values, strict=False)
         if math.isfinite(float(value))
     ]
     observed_weeks = [week for week, _ in pairs]
@@ -710,7 +710,7 @@ def rolling_origin_errors(
     """
     pairs = [
         (int(week), float(value))
-        for week, value in zip(weeks, values)
+        for week, value in zip(weeks, values, strict=False)
         if math.isfinite(float(value))
     ]
     eligible = _rolling_evaluations(pairs, horizon, config, origins)
@@ -854,7 +854,7 @@ def select_candidate(
     """
     observed = [
         (int(week), float(value))
-        for week, value in zip(weeks, values)
+        for week, value in zip(weeks, values, strict=False)
         if math.isfinite(float(value))
     ]
     history_weeks = (
@@ -1356,12 +1356,12 @@ def share_shift_test(
         return None
     parent = {
         int(week_id): float(value)
-        for week_id, value in zip(parent_weeks, parent_values)
+        for week_id, value in zip(parent_weeks, parent_values, strict=False)
         if math.isfinite(float(value)) and float(value) > 0.0
     }
     shares = [
         float(value) / parent[int(week_id)]
-        for week_id, value in zip(child_weeks, child_values)
+        for week_id, value in zip(child_weeks, child_values, strict=False)
         if int(week_id) in parent and math.isfinite(float(value))
     ][-max(int(window), MIN_SHARE_HISTORY):]
     n = len(shares)
@@ -1436,7 +1436,7 @@ def decide_leaf_anomalies(
         adjusted = list(p_values)
         significant = [value <= config.temporal_fdr_q for value in p_values]
     for leaf, adjusted_p, is_significant, share_tested in zip(
-        leaves, adjusted, significant, uses_share
+        leaves, adjusted, significant, uses_share, strict=False
     ):
         leaf.adjusted_p = float(adjusted_p)
         leaf.fdr_significant = bool(is_significant)
@@ -1551,7 +1551,7 @@ def _run_single_target(
         values = [float(value) for value in group["value"]]
         observed = [
             (week_id, value)
-            for week_id, value in zip(weeks, values)
+            for week_id, value in zip(weeks, values, strict=False)
             if math.isfinite(value)
         ]
         # Every pre-target observation, and nothing at or after the target, may
@@ -1563,7 +1563,7 @@ def _run_single_target(
         ]
         actuals = [
             value
-            for week_id, value in zip(weeks, values)
+            for week_id, value in zip(weeks, values, strict=False)
             if week_id == target and math.isfinite(value)
         ]
         series_key = str(series_id)
@@ -1618,7 +1618,7 @@ def _run_single_target(
             scale = _forecast_scale(predictions, levels)
             quantiles = {
                 str(level): float(prediction)
-                for level, prediction in zip(levels, predictions)
+                for level, prediction in zip(levels, predictions, strict=False)
             }
         # The latest configured origins are reserved exclusively for
         # calibration; selection never reuses them.
@@ -1642,7 +1642,7 @@ def _run_single_target(
         history_weeks = target - min(weeks) + 1
         missing_weeks = tuple(
             int(week_id)
-            for week_id, value in zip(weeks, values)
+            for week_id, value in zip(weeks, values, strict=False)
             if week_id <= target and not math.isfinite(value)
         )
         pending.append(
@@ -1692,7 +1692,7 @@ def _run_single_target(
             values = [float(value) for value in group["value"]]
             observed = [
                 (week_id, value_id)
-                for week_id, value_id in zip(weeks, values)
+                for week_id, value_id in zip(weeks, values, strict=False)
                 if math.isfinite(value_id)
             ]
             training = [
@@ -1702,7 +1702,7 @@ def _run_single_target(
             ]
             actuals = [
                 value_id
-                for week_id, value_id in zip(weeks, values)
+                for week_id, value_id in zip(weeks, values, strict=False)
                 if week_id == target and math.isfinite(value_id)
             ]
             if len(observed) < 4 or len(training) < 4 or not actuals:
@@ -1733,7 +1733,7 @@ def _run_single_target(
                     "history_weeks": target - min(weeks) + 1,
                     "missing_weeks": tuple(
                         int(week_id)
-                        for week_id, value_id in zip(weeks, values)
+                        for week_id, value_id in zip(weeks, values, strict=False)
                         if week_id <= target and not math.isfinite(value_id)
                     ),
                 }
@@ -2061,9 +2061,9 @@ def run_temporal_qc(
     for result in results:
         selections.update(result.calibration.get("selection", {}))
         parent_share.extend(result.calibration.get("parent_share", []))
-        for horizon_key, value in (result.calibration.get("coverage") or {}).items():
-            horizon_name = str(result.calibration.get("horizon", ""))
-            coverage.setdefault(horizon_name, value)
+        # Same key as a single-measure result: the nominal coverage level.
+        for level_key, value in (result.calibration.get("coverage") or {}).items():
+            coverage.setdefault(level_key, value)
     calibration = {
         "n": sum(int(pool.get("n", 0)) for pool in pools),
         "coverage": coverage,

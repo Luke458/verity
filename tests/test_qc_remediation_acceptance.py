@@ -593,7 +593,7 @@ def test_selection_and_calibration_partitions_are_disjoint_with_exact_horizons()
     config = replace(CONFIG, temporal_calibration_origins=6)
     horizon = 2
     eligible = _rolling_evaluations(
-        list(zip(weeks, values)), horizon, config, None
+        list(zip(weeks, values, strict=False)), horizon, config, None
     )
     selection = eligible[:-6]
     calibration = eligible[-6:]

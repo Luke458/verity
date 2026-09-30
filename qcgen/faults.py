@@ -106,7 +106,7 @@ def inject_new_store_backfill(
 
     pieces: list[pd.DataFrame] = []
     new_rows: list[dict] = []
-    for new_id, source_id in zip(new_ids, sources):
+    for new_id, source_id in zip(new_ids, sources, strict=False):
         history = fact.loc[
             (fact["store_id"] == source_id) & fact["week"].between(start, end)
         ].copy()

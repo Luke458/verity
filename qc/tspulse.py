@@ -246,4 +246,4 @@ def cosine(left: Sequence[float], right: Sequence[float]) -> float:
     a = _finite(left, "left")
     b = _finite(right, "right")
     denominator = math.sqrt(sum(x * x for x in a) * sum(x * x for x in b))
-    return sum(x * y for x, y in zip(a, b)) / denominator if denominator else 0.0
+    return sum(x * y for x, y in zip(a, b, strict=False)) / denominator if denominator else 0.0
