@@ -198,8 +198,78 @@ def test_webhook_requires_target() -> None:
 def test_non_positive_timeout_rejected() -> None:
     with pytest.raises(ValueError, match="timeout must be positive"):
         NotificationSpec.from_dict(
-            {"kind": "webhook", "target": "http://x", "timeout": 0}
+            {"kind": "webhook", "target": "https://x", "timeout": 0}
         )
+
+
+def test_suppressed_payload_reaches_no_sink(tmp_path: Path) -> None:
+    # Regression: suppression used to be a payload field only, and the payload
+    # was still delivered, so every clean week and cached retry re-paged.
+    target = tmp_path / "weekly.jsonl"
+    spec = NotificationSpec("file", str(target))
+    for result in (_result(status="PASS"), _result(skipped=True)):
+        outcome = dispatch_all([spec], result)[0]
+        assert outcome.suppressed and not outcome.delivered
+    assert not target.exists()
+
+
+def test_shrink_drops_as_many_sections_as_needed() -> None:
+    # Regression: a payload that needed two sections dropped used to drop none
+    # and then refuse, losing the alert entirely.
+    result = _result(
+        decision={"x": "a" * 3000},
+        drift={"y": "b" * 3000},
+        artifacts={"c": "c" * 3000},
+    )
+    payload = build_payload(result, max_bytes=5000)
+    assert len(json.dumps(payload, sort_keys=True)) <= 5000
+    assert {"artifacts", "decision"} <= set(payload["omitted"])
+    assert "drift" in payload and "drift" not in payload["omitted"]
+
+
+def test_webhook_refuses_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A redirect would forward the Authorization header to another origin.
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    seen: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            seen.append(self.path)
+            self.send_response(302)
+            self.send_header("Location", "/elsewhere")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("QC_NOTIFY_TEST_TOKEN", "secret")
+        spec = NotificationSpec(
+            "webhook",
+            f"http://127.0.0.1:{server.server_port}/hook",
+            timeout=5.0,
+            token_env="QC_NOTIFY_TEST_TOKEN",
+        )
+        outcome = dispatch_all([spec], _result())[0]
+    finally:
+        server.shutdown()
+    assert outcome.delivered is False
+    assert "302" in outcome.detail
+    assert seen == ["/hook"]
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["http://hooks.example.com/x", "file:///etc/passwd", "ftp://example.com/x"],
+)
+def test_webhook_requires_https_off_loopback(target: str) -> None:
+    with pytest.raises(ValueError, match="https"):
+        NotificationSpec.from_dict({"kind": "webhook", "target": target})
 
 
 def test_spec_file_accepts_both_shapes(tmp_path: Path) -> None:

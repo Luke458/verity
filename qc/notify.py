@@ -51,8 +51,8 @@ DEFAULT_NOTIFY_STATUSES: tuple[str, ...] = (
 DEFAULT_MAX_PAYLOAD_BYTES = 16_384
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-# Ordered by how much a human needs them. ``decision`` is last because it is the
-# most narratively useful and the first thing to drop on a large run.
+# Ordered by how much a human needs them; ``_shrink`` drops from the end of the
+# tuple first, so ``run_id`` goes before ``decision`` and ``drift`` goes last.
 _OPTIONAL_SECTIONS: tuple[str, ...] = (
     "drift",
     "expectations",
@@ -74,6 +74,7 @@ class NotificationResult:
     bytes_sent: int
     detail: str = ""
     payload_digest: str = ""
+    suppressed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,7 +83,37 @@ class NotificationResult:
             "bytes_sent": self.bytes_sent,
             "detail": self.detail,
             "payload_digest": self.payload_digest,
+            "suppressed": self.suppressed,
         }
+
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _validate_webhook_target(target: str) -> None:
+    """HTTPS only, except plain HTTP to a loopback listener (local relays, tests)."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(target)
+    if parts.scheme == "https" and parts.hostname:
+        return
+    if parts.scheme == "http" and parts.hostname in _LOOPBACK_HOSTS:
+        return
+    raise ValueError(
+        f"webhook target must be https:// (or http:// to loopback), got {target!r}"
+    )
+
+
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: it would forward the bearer token elsewhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        raise urllib.error.HTTPError(
+            req.full_url, code, f"redirect to {newurl} refused", headers, fp
+        )
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirect)
 
 
 @dataclass(frozen=True)
@@ -106,6 +137,8 @@ class NotificationSpec:
         target = str(spec.get("target", ""))
         if kind in ("webhook", "file") and not target:
             raise ValueError(f"notification sink {kind!r} requires a target")
+        if kind == "webhook":
+            _validate_webhook_target(target)
         timeout = float(spec.get("timeout", DEFAULT_TIMEOUT_SECONDS))
         if timeout <= 0:
             raise ValueError("notification timeout must be positive")
@@ -202,21 +235,27 @@ def _digest(payload: Mapping[str, Any]) -> str:
 
 
 def _shrink(payload: dict[str, Any], max_bytes: int) -> dict[str, Any]:
-    """Drop optional sections in a fixed order until the body fits."""
+    """Drop optional sections in a fixed order until the body fits.
+
+    Drops accumulate: several sections may have to go before the body fits, and
+    nothing is dropped once it does.
+    """
+    payload = dict(payload)
     omitted: list[str] = []
     for name in reversed(_OPTIONAL_SECTIONS):
+        if len(json_dumps(payload, sort_keys=True).encode("utf-8")) <= max_bytes:
+            break
         if name not in payload:
             continue
-        candidate = dict(payload)
-        candidate.pop(name)
-        candidate["omitted"] = sorted({*omitted, name})
-        if len(json_dumps(candidate, sort_keys=True).encode("utf-8")) <= max_bytes:
-            payload, omitted = candidate, [*omitted, name]
+        payload.pop(name)
+        omitted.append(name)
+        payload["omitted"] = sorted(omitted)
     return payload
 
 
 def notify_webhook(spec: NotificationSpec, payload: Mapping[str, Any]) -> NotificationResult:
     """POST the payload as JSON. Token comes from the environment, never argv."""
+    _validate_webhook_target(spec.target)
     body = json_dumps(payload, sort_keys=True)
     data = body.encode("utf-8")
     headers = {
@@ -238,7 +277,7 @@ def notify_webhook(spec: NotificationSpec, payload: Mapping[str, Any]) -> Notifi
         spec.target, data=data, headers=headers, method="POST"
     )
     try:
-        with urllib.request.urlopen(request, timeout=spec.timeout) as response:
+        with _OPENER.open(request, timeout=spec.timeout) as response:
             response.read(4096)
     except urllib.error.HTTPError as error:
         return NotificationResult(
@@ -347,6 +386,19 @@ def dispatch_all(
                 delivered=False,
                 bytes_sent=0,
                 detail=f"payload error: {type(error).__name__}: {error}",
+            )
+            for spec in specs
+        ]
+    if "suppressed" in payload:
+        # A clean status or a cached retry must not reach any sink.
+        return [
+            NotificationResult(
+                sink=spec.kind,
+                delivered=False,
+                bytes_sent=0,
+                detail=f"suppressed: {payload['suppressed']}",
+                payload_digest=str(payload.get("payload_digest", "")),
+                suppressed=True,
             )
             for spec in specs
         ]

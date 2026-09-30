@@ -1548,6 +1548,8 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
 
     if args.notify:
         for outcome in _dispatch_notifications(args, result):
+            if outcome.suppressed:
+                continue
             if not outcome.delivered:
                 # A sink failure is recorded, never propagated: the assessment
                 # status and exit code above are already decided.

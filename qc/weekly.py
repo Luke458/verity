@@ -228,6 +228,7 @@ def run_weekly(
         lock_handle.close()
         return WeeklyResult(config.name, current, previous, stage, "LOCKED", skipped=True)
     store = None
+    attempt_id: str | None = None
     try:
         store = SqliteStore(store_path or out / "assessments.sqlite")
         connection = store.connection
@@ -350,8 +351,10 @@ def run_weekly(
     except Exception as error:
         if store is not None:
             store.connection.rollback()
-            store.connection.execute("UPDATE attempts SET error = ? WHERE attempt_id = ?", (str(error), attempt_id))
-            store.connection.commit()
+            if attempt_id is not None:
+                # Failures before the attempt row exists have nothing to annotate.
+                store.connection.execute("UPDATE attempts SET error = ? WHERE attempt_id = ?", (str(error), attempt_id))
+                store.connection.commit()
         raise
     finally:
         if store is not None:

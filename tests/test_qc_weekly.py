@@ -182,11 +182,11 @@ def test_weekly_cached_assessment_notification_is_suppressed(tmp_path):
     out = tmp_path / "weekly"
     sinks = _sink_file(tmp_path / "sinks.json")
     main(["weekly", "--uri", str(path), "--out", str(out), "--notify", sinks])
-    first = json.loads((tmp_path / "out.jsonl").read_text().strip().split("\n")[-1])
     main(["weekly", "--uri", str(path), "--out", str(out), "--notify", sinks])
-    second = json.loads((tmp_path / "out.jsonl").read_text().strip().split("\n")[-1])
-    assert "suppressed" not in first
-    assert second["suppressed"] == "assessment was cached; no new notification"
+    lines = (tmp_path / "out.jsonl").read_text().strip().split("\n")
+    # The cached retry is suppressed and never reaches the sink.
+    assert len(lines) == 1
+    assert "suppressed" not in json.loads(lines[0])
 
 
 def test_weekly_force_rerun_notes_duplicate_run(tmp_path):
@@ -253,3 +253,19 @@ def test_records_from_result_match_temporal_series(tmp_path):
     assert len(records) == len(result.temporal.series)
     assert all(record.scope == "check" for record in records)
     assert all(record.available_on == record.target_week for record in records)
+
+
+def test_weekly_early_store_failure_surfaces_original_error(tmp_path, monkeypatch):
+    # Regression: a failure before the attempt row existed raised
+    # UnboundLocalError from the handler and hid the real error.
+    from qc.store import SqliteStore
+
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31))
+
+    def boom(self, *args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(SqliteStore, "recurrence_inputs", boom)
+    with pytest.raises(RuntimeError, match="database is locked"):
+        run_weekly(str(path), out_root=tmp_path / "weekly")
