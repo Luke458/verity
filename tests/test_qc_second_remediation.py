@@ -877,8 +877,15 @@ def test_store_and_synthetic_evaluation_produce_identical_gates():
         "min_detection_rate": 0.9,
         "max_false_positive_rate": 0.1,
     })
-    assert common == evaluation_gates(mapped, minimum_detection_rate=0.9)
-    assert any(check["gate"] == "false_clearance_upper_bound" for check in checks)
+    shared = evaluation_gates(mapped, minimum_detection_rate=0.9)["gates"]
+    for name in ("detection_rate", "false_positive_rate"):
+        assert common["gates"][name] == shared[name]
+    # The false-clearance bound is reported by the cohort, not gated.
+    assert common["false_clearance_upper_bound"]["incidents"] == 12
+    assert [check["gate"] for check in checks] == [
+        "min_detection_rate",
+        "max_false_positive_rate",
+    ]
 
 
 # ---------------------------------------------------------------------------

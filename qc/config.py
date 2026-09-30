@@ -269,7 +269,11 @@ class DatasetConfig:
     qualification_path: str = ""
     # Leaf anomaly screening controls false discoveries before escalation.
     temporal_fdr_enabled: bool = True
-    temporal_fdr_q: float = 0.05
+    # One BH family per refresh (temporal.decide_anomalies): ~q is the chance
+    # of a false page per clean refresh under the null. 0.01 cost no detection
+    # on the synthetic small profile (40 clean + 45 fault refreshes, seeds
+    # 3000-3039 disjoint from the cohort plan): 2/40 false alarms vs 3/40.
+    temporal_fdr_q: float = 0.01
     # Recurrence escalation: a finding repeated in at least
     # ``recurrence_minimum`` of the last ``recurrence_window`` refreshes whose
     # cumulative impact is material escalates to review.

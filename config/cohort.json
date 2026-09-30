@@ -31,5 +31,6 @@
   ],
   "controls": [
     "clean"
-  ]
+  ],
+  "scenarios_per_control": 20
 }
