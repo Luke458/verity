@@ -192,7 +192,7 @@ def run_benchmark(
     fault_detections = [arm for arm in faults if arm.drifted_scopes]
     pairs = [
         (control, fault)
-        for control, fault in zip(controls, faults, strict=False)
+        for control, fault in zip(controls, faults, strict=True)
         if control.scenario_id == fault.scenario_id
     ]
     separated = [

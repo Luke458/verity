@@ -1432,7 +1432,9 @@ def decide_anomalies(
         entry.level != "national" and entry.share_p is not None for entry in series
     ]
     p_values = [
-        float(entry.share_p) if tested else _two_sided_percentile(entry)
+        float(entry.share_p)
+        if tested and entry.share_p is not None
+        else _two_sided_percentile(entry)
         for entry, tested in zip(series, share_tested, strict=True)
     ]
     if config.temporal_fdr_enabled:
