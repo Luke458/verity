@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "retail-qc"
-version = "0.22.0"
-description = "Deterministic, temporal and semantic evidence system for retail transactional QC"
+name = "verity"
+version = "0.23.0"
+description = "Automated QC for versioned retail transactional table refreshes"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

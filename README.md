@@ -1,4 +1,4 @@
-# retail-qc
+# Verity
 
 Automated QC for retail transactional tables refreshed as versioned snapshots.
 Given two versions of a table, the engine checks data contracts, explains the
