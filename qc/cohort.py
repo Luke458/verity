@@ -48,6 +48,30 @@ KNOWN_GATES: tuple[str, ...] = (
     "min_reconstruction_score",
     "min_lineage_first_divergence_accuracy",
 )
+# The oracle's fault classes and injection stages in the engine's label
+# vocabulary (``qc.decisions.CAUSE_VALUES`` / ``ORIGIN_VALUES``). Severity has
+# no ground truth in the generator and is not scored.
+ORACLE_CAUSE: dict[str, str] = {
+    "missing_stores": "MISSING_STORES",
+    "missing_products": "MISSING_PRODUCTS",
+    "entity_merge": "ENTITY_MERGE",
+    "backfill": "BACKFILL",
+    "truncation": "HISTORICAL_CORRECTION",
+    "reclassification": "RECLASSIFICATION",
+    "coding": "CODING",
+    "warehouse": "WAREHOUSE",
+    "historical_correction": "HISTORICAL_CORRECTION",
+    "schema_failure": "SCHEMA_FAILURE",
+    "null_duplicate_storm": "SCHEMA_FAILURE",
+    "market_movement": "MARKET_MOVEMENT",
+}
+ORACLE_ORIGIN: dict[str, str] = {
+    "source": "SOURCE",
+    "coded": "CODING",
+    "warehouse": "WAREHOUSE",
+    "report": "REPORT",
+}
+
 LINEAGE_FAMILIES: dict[str, str] = {
     "new_store_backfill": "source",
     "expected_event": "source",
@@ -149,9 +173,40 @@ class CohortCase:
     detected: bool
     expected_match: bool
     false_positive: bool
+    # Cause/origin labels: oracle truth in the engine vocabulary vs the label
+    # attached to the run. None when the family has no ground truth for it.
+    expected_cause: str | None = None
+    predicted_cause: str | None = None
+    expected_origin: str | None = None
+    predicted_origin: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _label_accuracy(
+    cases: Sequence[CohortCase], expected: str, predicted: str
+) -> dict[str, Any]:
+    """Accuracy with a Wilson interval, overall and per family."""
+    scored = [case for case in cases if getattr(case, expected) is not None]
+    correct = [getattr(case, expected) == getattr(case, predicted) for case in scored]
+    low, high = wilson_interval(sum(correct), len(correct))
+    by_family: dict[str, dict[str, Any]] = {}
+    for case, hit in zip(scored, correct, strict=True):
+        entry = by_family.setdefault(case.family, {"n": 0, "correct": 0, "predicted": {}})
+        entry["n"] += 1
+        entry["correct"] += int(hit)
+        label = str(getattr(case, predicted))
+        entry["predicted"][label] = entry["predicted"].get(label, 0) + 1
+    for entry in by_family.values():
+        entry["accuracy"] = entry["correct"] / entry["n"]
+    return {
+        "n": len(scored),
+        "accuracy": _rate(correct),
+        "accuracy_ci_low": low if scored else None,
+        "accuracy_ci_high": high if scored else None,
+        "by_family": dict(sorted(by_family.items())),
+    }
 
 
 @dataclass
@@ -207,6 +262,12 @@ def git_dirty(root: str | Path | None = None) -> bool | None:
     if completed.returncode != 0:
         return None
     return bool(completed.stdout.strip())
+
+
+def _label(result: Any, name: str) -> str | None:
+    decisions = getattr(result, "decisions", None)
+    value = decisions.get(name) if decisions is not None else None
+    return str(value.value) if value is not None else None
 
 
 def _rate(values: list[bool]) -> float | None:
@@ -270,6 +331,12 @@ def _metrics(cases: list[CohortCase]) -> dict[str, Any]:
             ]
         ),
         "lineage_comparable": len(comparable),
+        # Label quality is reported, not gated: it measures the attached cause
+        # labels (the rule provider today), the baseline any model must beat.
+        "labels": {
+            "cause": _label_accuracy(faults, "expected_cause", "predicted_cause"),
+            "origin": _label_accuracy(faults, "expected_origin", "predicted_origin"),
+        },
     }
 
 
@@ -484,6 +551,10 @@ def run_cohort(
                             false_positive=(
                                 is_control and run_result.status not in ("PASS", "PASS_WITH_EXPLANATION")
                             ),
+                            expected_cause=ORACLE_CAUSE.get(str(case.get("expected_class"))),
+                            predicted_cause=_label(run_result, "likely_cause"),
+                            expected_origin=ORACLE_ORIGIN.get(str(case.get("expected_origin"))),
+                            predicted_origin=_label(run_result, "likely_origin"),
                         )
                     )
 

@@ -41,7 +41,7 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 | Temporal QC | `validated-synthetic` | Share-of-parent tests for leaves, forecast p-values for national series, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out case. `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`. |
 | Findings and final status | `validated-synthetic` | One status path (`policy.apply_policy`); nothing is cleared automatically. |
 | Recurrence | `plumbing-only` | Stable keys survive serialization and storage; frozen, hash-checked predecessors. `tests/test_qc_second_remediation.py`. |
-| Rule cause labels | `plumbing-only` | Label cause, origin and severity; cannot change status or review. Label accuracy is not measured. |
+| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 60/72 = 0.833 (Wilson 0.731-0.902), origin 66/66. All misses are two whole families: `market_movement` is labelled UNKNOWN by design (temporal-only anomalies get no cause) and `recalculation` is labelled SOURCE_INGESTION where the oracle says HISTORICAL_CORRECTION. Severity has no ground truth and is not scored. This is the baseline any decision model must beat. |
 | Weekly orchestrator and journal | `validated-synthetic` | Content-addressed identity, locking, fault injection at all five journal/publication seams (`tests/test_reliability.py`), atomic publication. |
 | Notification | `plumbing-only` | Suppressed statuses and cached retries reach no sink; accumulating size bound; https-only webhooks without redirects. `tests/test_qc_notify.py`. |
 | Delta source and onboarding | `plumbing-only` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. |
@@ -52,7 +52,7 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 - Any detection rate, false-positive rate or alarm volume on real refreshes.
   Real data typically has more entity churn, messier seasonality and faults the
   generator does not model.
-- Accuracy of the rule-based cause labels.
+- Accuracy of the cause labels on anything but the generator's families.
 - Delivery guarantees for notifications (no retry queue).
 - Capacity beyond a single machine. `optional/scale_benchmark.py` last measured
   8.2 s / 1.07 GiB peak RSS for 1M rows and 53.3 s / 4.58 GiB for 5M rows (320

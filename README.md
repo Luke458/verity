@@ -72,7 +72,7 @@ DATA_CONTRACT_FAILURE, 4 for INCOMPLETE, 75 when locked and 1 on error.
 | Temporal QC | validated on synthetic data |
 | Findings and final status | validated on synthetic data |
 | Recurrence | plumbing |
-| Rule cause labels | plumbing |
+| Rule cause labels | validated on synthetic data |
 | Weekly orchestrator and journal | validated on synthetic data |
 | Notification | plumbing |
 | Delta source and onboarding | plumbing |

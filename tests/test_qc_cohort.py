@@ -53,6 +53,11 @@ def test_small_cohort_end_to_end(tmp_path):
     assert result.gate_results[1]["status"] == "INSUFFICIENT_EVIDENCE"
     assert result.gates_passed is False
     assert "oracle_disagreements" in result.metrics["common_gates"]
+    # Cause labels are scored against the oracle for every fault case.
+    cause = result.metrics["labels"]["cause"]
+    assert cause["n"] == 2
+    assert set(cause["by_family"]) == {"missing_stores", "coding_error"}
+    assert cause["by_family"]["missing_stores"]["accuracy"] == 1.0
     assert any("Synthetic" in limitation for limitation in result.limitations)
 
     payload = json.loads((tmp_path / "out" / "cohort.json").read_text())
@@ -189,3 +194,18 @@ def test_cli_cohort_exits_nonzero_when_a_gate_fails(tmp_path, capsys):
     code = main(["cohort", "--plan", str(path), "--workdir", str(tmp_path / "work")])
     assert code == 3
     assert "n/a" in capsys.readouterr().out
+
+
+def test_label_accuracy_counts_only_cases_with_ground_truth():
+    from qc.cohort import _label_accuracy
+
+    cases = [
+        _case(expected_cause="CODING", predicted_cause="CODING"),
+        _case(expected_cause="CODING", predicted_cause="WAREHOUSE", family="coding_error"),
+        _case(expected_cause=None, predicted_cause="UNKNOWN", family="clean"),
+    ]
+    scores = _label_accuracy(cases, "expected_cause", "predicted_cause")
+    assert scores["n"] == 2
+    assert scores["accuracy"] == 0.5
+    assert scores["by_family"]["coding_error"]["predicted"] == {"WAREHOUSE": 1}
+    assert "clean" not in scores["by_family"]

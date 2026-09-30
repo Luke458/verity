@@ -334,6 +334,13 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
         f"expected_match={result.metrics['expected_status_match_rate']} "
         f"reconstruction={result.metrics['mean_reconstruction_score']}"
     )
+    for field_name, scores in result.metrics.get("labels", {}).items():
+        if scores["n"]:
+            print(
+                f"  label {field_name}: accuracy={scores['accuracy']:.3f} "
+                f"ci=[{scores['accuracy_ci_low']:.3f}, {scores['accuracy_ci_high']:.3f}] "
+                f"n={scores['n']} (reported, not gated)"
+            )
     for check in result.gate_results:
         state = check.get("status") or ("PASS" if check["passed"] else "FAIL")
         actual = check["actual"]

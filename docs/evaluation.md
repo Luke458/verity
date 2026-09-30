@@ -39,6 +39,10 @@ evaluated on the held-out split only:
 Controls are sized separately (`scenarios_per_control: 20`, so 60 held-out
 clean refreshes): the FPR bound cannot reach 0.1 with fewer than ~35 controls.
 The 1% false-clearance bound and oracle disagreements are reported, not gated.
+So is label quality: the cause and origin labels attached to each fault case
+are scored against the oracle (accuracy with a Wilson interval, per family,
+with the predicted-label distribution) under `metrics.labels`. Severity has no
+ground truth in the generator and is not scored.
 Each result records the plan hash, the engine code hash, whether the tree was
 dirty, and the evaluated configuration; a result is evidence only for exactly
 that configuration. The current numbers are in [claims.md](claims.md).
