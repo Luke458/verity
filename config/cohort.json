@@ -1,11 +1,35 @@
 {
-  "profile": "tiny",
+  "profile": "small",
   "scenarios_per_family": 2,
-  "dev_seeds": [1101, 1102],
-  "heldout_seeds": [7101, 7102, 7103],
+  "dev_seeds": [
+    1101,
+    1102
+  ],
+  "heldout_seeds": [
+    7101,
+    7102,
+    7103
+  ],
   "gates": {
     "min_detection_rate": 0.9,
     "max_false_positive_rate": 0.1,
     "min_lineage_first_divergence_accuracy": 0.9
-  }
+  },
+  "families": [
+    "missing_stores",
+    "missing_products",
+    "entity_merge",
+    "new_store_backfill",
+    "history_truncation",
+    "commodity_remap",
+    "coding_error",
+    "warehouse_transform_error",
+    "recalculation",
+    "schema_failure",
+    "null_duplicate_storm",
+    "market_movement"
+  ],
+  "controls": [
+    "clean"
+  ]
 }

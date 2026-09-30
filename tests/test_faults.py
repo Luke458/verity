@@ -65,7 +65,7 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
         assert oracle["expected_events"] == []
     elif family == "expected_event":
         assert case["kind"] == "expected_event"
-        assert case["expected_status"] == "INVESTIGATE"
+        assert case["expected_status"] == "PASS_WITH_EXPLANATION"
         events = oracle["expected_events"]
         assert len(events) == 1
         assert events[0]["entity_ids"] == case["affected"]["stores"]
@@ -107,10 +107,14 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
         assert case["details"]["duplicated_rows"] > 0
         assert effect["units"] > 0
     elif family == "market_movement":
-        assert case["kind"] == "control"
+        assert case["kind"] == "movement"
         assert case["expected_status"] == "INVESTIGATE"
         assert effect["dollar"] < 0
         assert effect["units"] < 0
+    elif family == "clean":
+        assert case["kind"] == "control"
+        assert case["expected_status"] == "PASS"
+        assert all(abs(value) <= 1e-9 for value in effect.values())
     else:
         pytest.fail(f"unhandled family {family}")
 

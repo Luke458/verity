@@ -472,6 +472,44 @@ def test_reliably_present_entity_absence_is_still_flagged():
     assert events["SPARSE"].classification == LATEST_MISSING
 
 
-def test_default_presence_threshold_preserves_prior_behaviour():
-    # Default 0.0 must not change the dense synthetic semantics.
-    assert DatasetConfig().entity_presence_threshold == 0.0
+def test_default_presence_threshold_ignores_sparse_entities():
+    # An entity must have traded in at least half its trailing window before its
+    # absence counts as missing; sparse entities going quiet is ordinary.
+    assert DatasetConfig().entity_presence_threshold == 0.5
+    previous, current = _sparse_presence_frames([2, 3])
+    pair = _pair(previous, current)
+    events = classify_entity_changes(previous, current, pair, CONFIG)
+    assert not any(LATEST_MISSING in event.classifications for event in events)
+
+
+def _missing_frames(missing_value: float, other_value: float):
+    rows_prev, rows_curr = [], []
+    for week in range(1, 10):
+        for store, value in (("BIG", other_value), ("GONE", missing_value)):
+            row = {"week": week, "store_id": store, "dollar": value, "units": 1}
+            rows_prev.append(row)
+            rows_curr.append(dict(row))
+    rows_curr.append({"week": 10, "store_id": "BIG", "dollar": other_value, "units": 1})
+    return _fact(rows_prev), _fact(rows_curr)
+
+
+def test_missing_entity_escalates_only_when_material():
+    from qc.lifecycle import missing_entity_impact
+
+    for missing_value, material in ((0.5, False), (50.0, True)):
+        previous, current = _missing_frames(missing_value, 1000.0)
+        pair = _pair(previous, current)
+        events = classify_entity_changes(previous, current, pair, CONFIG)
+        gone = next(event for event in events if event.entity_id == "GONE")
+        # The absence is always recorded as a fact ...
+        assert LATEST_MISSING in gone.classifications
+        assert gone.expected_value == pytest.approx(missing_value)
+        # ... but escalates only above the revision materiality ratio (0.1%).
+        impact = missing_entity_impact(events, CONFIG)["store"]
+        assert impact["material"] is material
+        attribution = explain_revision(
+            build_revision_cube(previous, current, ["store_id", "week"], CONFIG, pair.new_periods),
+            events, [], CONFIG,
+        )
+        status = classify_run("PASS", events, attribution, CONFIG)
+        assert (status == "INVESTIGATE") is material

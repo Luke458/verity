@@ -21,7 +21,6 @@ from .attribution import AttributionResult, classify_run, explain_revision
 from .config import DatasetConfig
 from .contracts import ContractCheck, ContractResult, validate_contracts
 from .counterfactual import CounterfactualResult, reconstruct_counterfactual
-from .coverage import assess_aggregate_coverage
 from .decisions import DecisionProvider, DecisionSet, RuleDecisionProvider
 from .distribution_drift import (
     DistributionDriftResult,
@@ -220,7 +219,7 @@ def _machine(
     relationships: Sequence[EntityRelationship] = (),
     reference: dict[str, Any] | None = None,
     drift: DistributionDriftResult | None = None,
-    coverage_gate: dict[str, Any] | None = None,
+    drift_error: str = "",
 ) -> dict[str, Any]:
     historical: dict[str, Any] | None = None
     if attribution is not None:
@@ -242,9 +241,10 @@ def _machine(
         "dataset": dataset,
         "status": status,
         "distribution_drift": (
-            drift.to_dict() if drift is not None else None
+            drift.to_dict()
+            if drift is not None
+            else ({"status": "UNAVAILABLE", "error": drift_error} if drift_error else None)
         ),
-        "coverage_gate": coverage_gate or None,
         "historical_revision": historical,
         "latest_week": temporal.to_dict() if temporal is not None else None,
         "counterfactual": (
@@ -543,16 +543,9 @@ def run_qc(
             provenance=provenance,
             qualification=qualification,
         )
-    stages_to_check: list[str] = []
-    for stage in common_stages:
-        if stage in common_stages and stage not in stages_to_check:
-            stages_to_check.append(stage)
-    if not stages_to_check:
-        stages_to_check = [common_stages[-1]]
-
     checks: list[ContractCheck] = []
     contract_current_fact: pd.DataFrame | None = None
-    for stage in stages_to_check:
+    for stage in common_stages:
         current_fact = source.read_fact(current_id, stage)
         previous_fact = source.read_fact(previous_id, stage)
         stage_result = validate_contracts(current_fact, previous_fact, config, stage)
@@ -653,7 +646,12 @@ def run_qc(
     approved_events = [item for item in registry.events() if approval_available(item)]
     attribution = explain_revision(cubes["base"], events, approved_events, config)
     counterfactual = reconstruct_counterfactual(previous, current, events, config)
-    reconciliation = run_reconciliation(current, contract_current_fact if config.analysis_stage != config.contract_stage else None, config)
+    reconciliation = run_reconciliation(
+        current,
+        contract_current_fact if config.analysis_stage != config.contract_stage else None,
+        config,
+        periods=pair.new_periods,
+    )
     lineage = analyze_lineage(
         source, previous_id, current_id, common_stages, config, pair
     )
@@ -682,8 +680,11 @@ def run_qc(
             series=[], unavailable_series=["provider_execution"],
         )
     drift = None
+    drift_error = ""
     if config.distribution_drift_enabled and pair.new_periods:
         target_period = max(pair.new_periods)
+        # An opted-in check that errors is required evidence that is missing,
+        # never a silent pass.
         try:
             drift = assess_distribution_drift(
                 current,
@@ -694,50 +695,21 @@ def run_qc(
                 abs_floor=config.distribution_drift_abs_floor,
                 threshold_quantile=config.distribution_drift_quantile,
             )
-        except Exception:  # noqa: BLE001 - preserve completed deterministic checks
-            drift = None
-    # Aggregate coverage gate. Per-entity absences are facts and stay in the
-    # evidence; whether they are allowed to ESCALATE is a separate question,
-    # and on a sparse real source the answer must be "did this entity type
-    # actually lose counterpart keys", not "did any one of 38 scopes twitch".
-    # Opt-in: the default preserves the prior ungated escalation exactly.
-    coverage_gate: dict[str, Any] = {}
-    if config.coverage_gating_enabled and pair.new_periods:
-        try:
-            measured = assess_aggregate_coverage(
-                current, config, max(pair.new_periods)
-            )
-            coverage_gate = {
-                column: entry.to_dict() for column, entry in measured.items()
-            }
-        except Exception:  # noqa: BLE001 - preserve completed deterministic checks
-            coverage_gate = {}
-    suppressed_entity_types: frozenset[str] = frozenset()
-    if config.coverage_gating_enabled and coverage_gate:
-        suppressed_entity_types = frozenset(
-            column
-            for column, entry in coverage_gate.items()
-            if entry.get("regressed") is False
-        )
+        except Exception as error:  # noqa: BLE001 - recorded as unavailable evidence
+            input_findings.append({"check": "distribution_drift", "scope": config.name,
+                                   "outcome": "UNAVAILABLE", "required": True})
+            drift_error = f"{type(error).__name__}: {error}"
+    # The final status is computed exactly once, from findings, by
+    # ``apply_policy``. Every check that can escalate must emit a finding; the
+    # historical status here is only the provisional value until then.
     status = historical_status
-    if (
-        temporal is not None
-        and temporal.anomaly
-        and status in ("PASS", "PASS_WITH_EXPLANATION")
-    ):
-        status = "INVESTIGATE"
-    if (
-        reference_report is not None
-        and reference_report["status"] == "MISMATCH"
-    ):
-        status = "INVESTIGATE"
-    if drift is not None and drift.any_drift and status in ("PASS", "PASS_WITH_EXPLANATION"):
-        status = "INVESTIGATE"
     from .calendar import build_calendar
     calendar = build_calendar(config)
     try:
         hierarchy = hierarchy_checks(current, config)
     except ValueError:
+        input_findings.append({"check": "hierarchy", "scope": config.name,
+                               "outcome": "UNAVAILABLE", "required": False})
         hierarchy = []
     configured_metrics = config.temporal_metrics() or (config.primary_metric,)
     metric_ledgers: dict[str, ExplanationLedger] = {}
@@ -783,27 +755,6 @@ def run_qc(
     reasons = _reasons(
         contracts, events, attribution, config, historical_status, relationships
     )
-    if suppressed_entity_types:
-        # Keep the absence as a fact, drop it as an escalation: with the gate
-        # on, a missing-entity finding only reaches review when the aggregate
-        # coverage for that entity type actually fell.
-        from .lifecycle import _entity_type
-
-        suppressed_types = {
-            _entity_type(column) for column in suppressed_entity_types
-        }
-        reasons = [
-            reason
-            for reason in reasons
-            if not (
-                reason.startswith("latest_week_missing:")
-                and reason.split(":", 2)[1] in suppressed_types
-            )
-        ]
-        reasons.extend(
-            f"latest_week_coverage_ok:{column}"
-            for column in sorted(suppressed_entity_types)
-        )
     reasons.extend(
         f"reference_mismatch:{metric}"
         for metric in reference_mismatches(reference_report)
@@ -875,7 +826,7 @@ def run_qc(
                 relationships,
                 reference_report,
                 drift,
-                coverage_gate,
+                drift_error,
             ),
         ),
         decision_provider,

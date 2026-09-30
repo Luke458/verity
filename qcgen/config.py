@@ -29,9 +29,12 @@ FAULT_FAMILIES: tuple[str, ...] = (
     "schema_failure",
     "null_duplicate_storm",
     "expected_event",
+    "market_movement",
 )
 
-CONTROL_FAMILIES: tuple[str, ...] = ("market_movement",)
+# Negative controls: refreshes that must PASS. The false-positive rate is
+# measured on these and only these.
+CONTROL_FAMILIES: tuple[str, ...] = ("clean",)
 
 ALL_FAMILIES: tuple[str, ...] = FAULT_FAMILIES + CONTROL_FAMILIES
 

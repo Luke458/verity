@@ -31,6 +31,7 @@ KNOWN_CLASSES = frozenset(
         "schema_failure",
         "null_duplicate_storm",
         "market_movement",
+        "clean",
     }
 )
 
@@ -86,6 +87,10 @@ def _family_checks(
                 case["injected_effect"].get("dollar_moved", 0.0) > 0,
                 case["injected_effect"],
             )
+        return
+
+    if family == "clean":
+        _check(checks, f"{case_id}: no effect", not _nonzero(effect), effect)
         return
 
     _check(checks, f"{case_id}: effect nonzero", _nonzero(effect), effect)

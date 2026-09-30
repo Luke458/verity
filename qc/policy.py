@@ -71,7 +71,6 @@ SCOPE_REVISION = "revision"
 SCOPE_REFERENCE = "reference"
 SCOPE_APPROVAL = "approval"
 SCOPE_TEMPORAL = "temporal_series"
-SCOPE_COORDINATED = "coordinated"
 SCOPE_RECURRENCE = "recurrence"
 SCOPE_HIERARCHY = "hierarchy"
 SCOPE_LINEAGE = "lineage"
@@ -82,7 +81,6 @@ _CHECK_SCOPE_KINDS = {
     "revision_missing_evidence": SCOPE_REVISION,
     "reference": SCOPE_REFERENCE,
     "ratio:dollar_per_unit": SCOPE_APPROVAL,
-    "coordinated_residual": SCOPE_COORDINATED,
     "recurrence": SCOPE_RECURRENCE,
     "temporal": SCOPE_TEMPORAL,
 }
@@ -355,6 +353,24 @@ def collect_findings(
         if outcome is None:
             raise ValueError(f"unknown hierarchy status {check.status!r}")
         findings.append(finding(check.name, check.level, outcome))
+    drift = getattr(result, "distribution_drift", None)
+    if drift is not None:
+        # Opt-in check: when it ran, each drifted scope escalates; a scope with
+        # too little history to estimate its own threshold is informational.
+        for scope in drift.scopes:
+            findings.append(
+                finding(
+                    "distribution_drift",
+                    scope.scope,
+                    "FAIL" if scope.drifted else ("PASS" if scope.psi is not None else "UNAVAILABLE"),
+                    required=False,
+                    metric=scope.metric,
+                    level=scope.scope_type,
+                    period=int(scope.period),
+                    impact=float(scope.psi or 0.0),
+                    materiality=float(scope.threshold or 0.0),
+                )
+            )
     lineage = getattr(result, "lineage", None)
     if lineage is not None:
         # A first divergence is expected refresh evidence (attribution explains
@@ -484,25 +500,14 @@ def collect_findings(
                     metric=series.metric,
                     level=series.level,
                     period=int(series.target_week),
-                    impact=float(series.residual),
+                    # A share-tested leaf's impact is the movement attributable
+                    # to its share change, not the parent-driven residual.
+                    impact=float(
+                        series.share_impact
+                        if getattr(series, "share_impact", None) is not None
+                        else series.residual
+                    ),
                     materiality=_temporal_materiality(series, config),
-                )
-            )
-        # Coordinated same-direction residuals are combined before materiality;
-        # groups already captured by an individual anomaly add no duplicate.
-        for group in getattr(result.temporal, "coordinated", ()):
-            if group.get("individually_flagged"):
-                continue
-            findings.append(
-                finding(
-                    "coordinated_residual",
-                    f"{group.get('metric', '')}:{group['level']}:{group['direction']}",
-                    "FAIL",
-                    metric=str(group.get("metric", "")),
-                    level=str(group.get("level", "")),
-                    period=group.get("target_week"),
-                    impact=float(group.get("combined_residual", 0.0)),
-                    materiality=float(group.get("materiality", 0.0)),
                 )
             )
 

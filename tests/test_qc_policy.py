@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from qc.config import DatasetConfig
@@ -23,7 +24,11 @@ from qc.policy import (
     status_for,
 )
 from qc.recurrence import assess_recurrence
-from qc.temporal import SeriesTemporalEvidence, coordinated_groups
+from qc.temporal import (
+    SeriesTemporalEvidence,
+    share_shift_test,
+    student_t_two_sided_p,
+)
 
 CONFIG = DatasetConfig()
 
@@ -344,43 +349,26 @@ def test_recurrence_requires_repetition_and_material_cumulative_impact():
     assert alternating[0].material
 
 
-def test_coordinated_groups_combine_same_direction_residuals():
-    def item(series_id, level, residual, relative):
-        return SeriesTemporalEvidence(
-            series_id=series_id,
-            target_week=41,
-            actual=100.0,
-            adjusted_actual=100.0,
-            adjustment=0.0,
-            forecast_median=100.0,
-            forecast_quantiles={},
-            residual=residual,
-            relative_residual=relative,
-            nominal_percentile=0.2,
-            calibrated_percentile=None,
-            standardized_residual=1.0,
-            robust_z=1.0,
-            seasonal_z=1.0,
-            ewma_z=1.0,
-            change_point_score=0.0,
-            anomaly=False,
-            flags=[],
-            level=level,
-        )
+@pytest.mark.parametrize(
+    ("t", "df", "expected"),
+    [(0.0, 10, 1.0), (2.0, 10, 0.07339), (3.0, 5, 0.03010), (-2.228, 10, 0.05)],
+)
+def test_student_t_two_sided_p_matches_reference_values(t, df, expected):
+    assert student_t_two_sided_p(t, df) == pytest.approx(expected, abs=2e-4)
 
-    evidence = [
-        item("national", "national", -300.0, -0.03),
-        item("banner_id:B1", "banner_id", -80.0, -0.012),
-        item("banner_id:B2", "banner_id", -70.0, -0.011),
-        item("banner_id:B3", "banner_id", 40.0, 0.006),
-    ]
-    groups = coordinated_groups(evidence, CONFIG)
-    assert len(groups) == 1
-    assert groups[0]["level"] == "banner_id"
-    assert groups[0]["direction"] == "decrease"
-    assert groups[0]["series_ids"] == ["banner_id:B1", "banner_id:B2"]
-    assert groups[0]["combined_ratio"] >= CONFIG.temporal_min_relative_residual
-    assert groups[0]["individually_flagged"] is False
 
-    quiet = coordinated_groups(evidence[:1], CONFIG)
-    assert quiet == []
+def test_share_shift_ignores_common_movement_and_flags_leaf_shift():
+    rng = np.random.default_rng(3)
+    weeks = list(range(1, 31))
+    parent = [1000.0 * (1.0 + 0.1 * rng.standard_normal()) for _ in weeks]
+    share = [0.3 + 0.005 * rng.standard_normal() for _ in weeks]
+    child = [p * s for p, s in zip(parent, share)]
+    # A 15% market-wide drop keeps the leaf's share: not a leaf anomaly.
+    common = share_shift_test(weeks, child, weeks, parent, 0.85 * 0.3 * 1000, 0.85 * 1000, 26)
+    assert common is not None and common[1] > 0.05
+    # The same leaf alone dropping 20% moves its share far outside its history.
+    shifted = share_shift_test(weeks, child, weeks, parent, 0.8 * 0.3 * 1000, 1000.0, 26)
+    assert shifted is not None and shifted[1] < 1e-6
+    assert shifted[2] < 0.0
+    # Too little aligned history is not evaluated rather than guessed.
+    assert share_shift_test(weeks[:5], child[:5], weeks[:5], parent[:5], 300, 1000, 26) is None

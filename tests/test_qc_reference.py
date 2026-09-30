@@ -56,10 +56,10 @@ def test_reference_match_preserves_status(expected_event_case):
         reference_spec=spec,
     )
     assert result.machine["reference"]["status"] == "MATCH"
-    # The registered event explains the revision (PASS_WITH_EXPLANATION
-    # historical status); residual secondary-measure drift is reviewed.
+    # The registered event explains the revision and a matching reference
+    # leaves that explanation intact.
     assert result.machine["historical_revision"]["status"] == "PASS_WITH_EXPLANATION"
-    assert result.status == "INVESTIGATE"
+    assert result.status == "PASS_WITH_EXPLANATION"
 
 
 def test_reference_mismatch_forces_investigate(expected_event_case):

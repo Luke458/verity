@@ -30,13 +30,14 @@ def test_shadow_over_generated_suite(tmp_path):
 
     assert summary["scenarios"] == 5
     assert summary["detection_rate"] == 1.0
+    # The clean control passes end to end: no false positive at any layer.
     assert summary["false_positive_rate"] == 0.0
-    assert summary["latest_week_control_rate"] == 1.0
+    assert summary["latest_week_control_rate"] == 0.0
     assert summary["reconciliation_failures"] == 0
     assert summary["lineage_first_divergence_accuracy"] == 1.0
     assert summary["lineage_comparable"] >= 2
     assert summary["reconstruction_evaluated"] >= 2
-    assert summary["engine_status_counts"].get("PASS", 0) == 0
+    assert summary["engine_status_counts"].get("PASS", 0) >= 1
 
     assert (out_dir / "shadow.json").exists()
     assert (out_dir / "shadow.jsonl").exists()
@@ -60,6 +61,10 @@ def test_labels_out_writes_real_oracle_labels(tmp_path):
     for record in records:
         assert record.source == "oracle"
         assert record.family, "oracle labels must name the fault family"
+        if record.family == "clean":
+            # The negative control has no cause and needs no review.
+            assert record.labels["requires_investigation"] == "False"
+            continue
         assert record.labels["likely_cause"] != "UNKNOWN"
         assert record.text
 

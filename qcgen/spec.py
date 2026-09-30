@@ -9,9 +9,13 @@ The two historically contradictory cases are resolved here:
 
 * ``null_duplicate_storm`` is a contract failure (the report table is not fit
   for revision QC), not an ordinary INVESTIGATE.
-* ``market_movement`` is a control whose latest week is a genuine movement, so
-  the engine status is INVESTIGATE (latest-week anomaly) even though the
-  historical revision is clean.
+* ``market_movement`` is a genuine latest-week business movement (kind
+  ``movement``), not a data fault. It is expected to surface as INVESTIGATE
+  (latest-week anomaly) even though the historical revision is clean, so it is
+  scored as a detection target, never as a control.
+* ``clean`` is the negative control: a refresh with no injection at all. It is
+  the only family whose expected status is PASS, and the false-positive rate is
+  measured on it.
 """
 
 from __future__ import annotations
@@ -44,14 +48,14 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "new_store_backfill": FamilySpec(
         "new_store_backfill", "source", "fault", "INVESTIGATE", "backfill", "source"
     ),
-    # The registered event explains the historical revision, but every
-    # configured measure is now assessed: residual secondary-measure
-    # coordinated drift on this onboarding therefore requires review.
+    # The registered event explains the historical revision. (M8 had pinned this
+    # to INVESTIGATE because a same-direction residual sum, since removed as
+    # statistically invalid, fired on ordinary noise.)
     "expected_event": FamilySpec(
         "expected_event",
         "source",
         "expected_event",
-        "INVESTIGATE",
+        "PASS_WITH_EXPLANATION",
         "backfill",
         "source",
         registry_required=True,
@@ -105,11 +109,12 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "market_movement": FamilySpec(
         "market_movement",
         "warehouse",
-        "control",
+        "movement",
         "INVESTIGATE",
         "market_movement",
         None,
     ),
+    "clean": FamilySpec("clean", "warehouse", "control", "PASS", "clean", None),
     "missing_products": FamilySpec(
         "missing_products", "source", "fault", "INVESTIGATE", "missing_products", "source"
     ),

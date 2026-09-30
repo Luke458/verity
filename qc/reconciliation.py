@@ -9,6 +9,7 @@ checks were all skipped is ``NOT_EVALUATED``, never ``PASS``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -197,22 +198,39 @@ def _aggregate_marker_checks(
     return checks
 
 
-def _ratio_flags(base: pd.DataFrame, config: DatasetConfig) -> list[dict]:
+def _ratio_flags(
+    base: pd.DataFrame,
+    config: DatasetConfig,
+    periods: Sequence[int] | None = None,
+) -> list[dict]:
+    """Price outliers in the assessed periods against the prior-week reference.
+
+    Only ``periods`` are tested (every week when ``None``), and the reference
+    median/MAD comes from weeks before the earliest assessed period, so a
+    historical outlier is not re-flagged on every later refresh and the tested
+    week cannot move its own reference.
+    """
     week = config.week_column
     if "dollar" not in base.columns or "units" not in base.columns:
         return []
     grouped = base.groupby(week)[["dollar", "units"]].sum()
     grouped = grouped[grouped["units"] > 0]
-    if len(grouped) < 5:
-        return []
     ratios = grouped["dollar"] / grouped["units"]
-    median = float(ratios.median())
-    mad = float((ratios - median).abs().median())
+    if periods is not None:
+        targets = {int(value) for value in periods}
+        reference = ratios[[int(w) < min(targets) for w in ratios.index]] if targets else ratios.iloc[:0]
+        tested = ratios[[int(w) in targets for w in ratios.index]]
+    else:
+        reference = tested = ratios
+    if len(reference) < 5:
+        return []
+    median = float(reference.median())
+    mad = float((reference - median).abs().median())
     # Floating-point dust around a constant ratio is not a price outlier.
     if mad <= 1e-9 * max(abs(median), 1.0):
         return []
     flags = []
-    for week_id, ratio in ratios.items():
+    for week_id, ratio in tested.items():
         robust_z = 0.6745 * (float(ratio) - median) / mad
         if abs(robust_z) > config.price_outlier_k:
             flags.append(
@@ -230,6 +248,7 @@ def run_reconciliation(
     base_current: pd.DataFrame | None,
     report_current: pd.DataFrame | None,
     config: DatasetConfig,
+    periods: Sequence[int] | None = None,
 ) -> ReconciliationResult:
     if base_current is None or report_current is None:
         return ReconciliationResult(
@@ -254,5 +273,5 @@ def run_reconciliation(
     return ReconciliationResult(
         status=status,
         checks=checks,
-        ratio_flags=_ratio_flags(base_current, config),
+        ratio_flags=_ratio_flags(base_current, config, periods),
     )

@@ -444,6 +444,14 @@ def inject_entity_merge(
     return {**state, "fact": new_fact, "stores": new_dim}, case
 
 
+def inject_clean(
+    state: State, ctx: FaultContext, params: dict
+) -> tuple[State, GroundTruthCase]:
+    """Negative control: the refresh is passed through untouched."""
+    case = _case(ctx, injection_stage=ctx.stage, affected={}, weeks=[ctx.current_week])
+    return state, case
+
+
 INJECTORS = {
     "missing_stores": inject_missing_stores,
     "missing_products": inject_missing_products,
@@ -458,4 +466,5 @@ INJECTORS = {
     "schema_failure": inject_schema_failure,
     "null_duplicate_storm": inject_null_duplicate_storm,
     "market_movement": inject_market_movement,
+    "clean": inject_clean,
 }

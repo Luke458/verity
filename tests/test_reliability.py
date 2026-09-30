@@ -433,8 +433,8 @@ def test_future_ratio_approval_cannot_clear_historical_review(monkeypatch):
     from qc.expectations import RatioExpectation
     from qc.reconciliation import run_reconciliation
 
-    def flagged(*args):
-        report = run_reconciliation(*args)
+    def flagged(*args, **kwargs):
+        report = run_reconciliation(*args, **kwargs)
         report.ratio_flags.append({"week": 4, "dollar_per_unit": 10.0})
         return report
 

@@ -11,6 +11,7 @@ scope that cannot be evaluated must report that, never zero drift.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -239,3 +240,53 @@ def test_invalid_arguments_rejected() -> None:
 def test_check_is_disabled_by_default() -> None:
     # A detector that is not qualified on real data must not run implicitly.
     assert CONFIG.distribution_drift_enabled is False
+
+
+def test_enabled_drift_escalates_through_run_qc(tmp_path):
+    """Regression: drift used to set a status that apply_policy then discarded.
+
+    The value redistribution below preserves every row, key, null cell, every
+    per-store weekly sum and therefore every reconciliation total; only the
+    distribution drift check can see it, and with the check enabled its
+    finding must reach the final status.
+    """
+    from qc.run import run_qc
+    from qcgen.config import suite_config
+    from qcgen.scenarios import build_scenario
+    from qcgen.sources import ScenarioSource
+
+    built = build_scenario(
+        suite_config("small"), 0, tmp_path, "clean",
+        ("source", "coded", "warehouse", "report"),
+    )
+
+    class Redistributed:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def read_fact(self, version, stage):
+            frame = self.inner.read_fact(version, stage)
+            if version == "V0002" and stage != "report":
+                latest = frame["week"] == frame["week"].max()
+                frame.loc[latest, "dollar"] = (
+                    frame.loc[latest]
+                    .groupby("store_id")["dollar"]
+                    .transform(lambda values: np.sort(values.to_numpy()))
+                    .to_numpy()
+                )
+            return frame
+
+    base = replace(DatasetConfig(), temporal_enabled=False)
+    source = Redistributed(ScenarioSource(built.directory))
+    off = run_qc(source, "V0002", "V0001", base)
+    on = run_qc(source, "V0002", "V0001", replace(base, distribution_drift_enabled=True))
+    assert off.status == "PASS"
+    assert on.distribution_drift is not None and on.distribution_drift.any_drift
+    assert on.status == "INVESTIGATE"
+    assert any(
+        item["check"] == "distribution_drift" and item["outcome"] == "FAIL"
+        for item in on.machine["findings"]
+    )

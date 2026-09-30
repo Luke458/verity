@@ -93,6 +93,8 @@ def fault_spec(
         )
     if family == "market_movement":
         return FaultSpec(family, "warehouse", {"factor": float(rng.uniform(0.7, 0.88))})
+    if family == "clean":
+        return FaultSpec(family, "warehouse", {})
     raise ValueError(f"unknown fault family: {family!r}")
 
 

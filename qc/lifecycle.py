@@ -54,6 +54,11 @@ class LifecycleEvent:
     historical_value_removed: float = 0.0
     value_added_by_week: dict[int, float] = field(default_factory=dict)
     value_removed_by_week: dict[int, float] = field(default_factory=dict)
+    # LATEST_WEEK_MISSING only: the entity's expected contribution to the
+    # missing period (trailing mean over the presence window, absent weeks
+    # counted as zero) and the expected period total it is a share of.
+    expected_value: float = 0.0
+    expected_period_total: float = 0.0
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -122,6 +127,13 @@ def classify_entity_changes(
         return []
     overlap = set(pair.overlap_weeks)
     events: list[LifecycleEvent] = []
+    window = [
+        week_id for week_id in range(pair.overlap_start, pair.previous_max_week + 1)
+    ][-config.entity_presence_window :]
+    period_totals = previous.loc[previous[week].isin(window)].groupby(week)[metric].sum()
+    expected_period_total = (
+        float(period_totals.sum()) / len(window) if window else 0.0
+    )
 
     for entity_column in config.entity_columns:
         if entity_column not in previous.columns or entity_column not in current.columns:
@@ -165,12 +177,7 @@ def classify_entity_changes(
             # entity-specific reliability baseline, absence degenerates into
             # "always fires" on any naturally sparse source, which on real data
             # is every refresh.
-            candidates = [
-                week_id
-                for week_id in range(
-                    pair.overlap_start, pair.previous_max_week + 1
-                )
-            ][-config.entity_presence_window :]
+            candidates = window
             presence_rate = (
                 sum(1 for week_id in candidates if week_id in previous_set)
                 / len(candidates)
@@ -222,11 +229,51 @@ def classify_entity_changes(
                 event.value_removed_by_week = _values_by_week(
                     previous_values, entity_id, historical_removed
                 )
+            if LATEST_MISSING in classifications and candidates:
+                event.expected_value = _value_for_weeks(
+                    previous_values, entity_id, set(candidates)
+                ) / len(candidates)
+                event.expected_period_total = expected_period_total
             event.classifications = tuple(classifications)
             event.classification = classifications[0]
             events.append(event)
 
     return events
+
+
+def missing_entity_impact(
+    events: list[LifecycleEvent], config: DatasetConfig
+) -> dict[str, dict[str, Any]]:
+    """Expected value lost to latest-period absences, per entity type.
+
+    An absence escalates only when the entities of one type that are missing
+    were together expected to carry a material share of the period, using the
+    same ``materiality_ratio``/``materiality_abs`` as historical revisions. One
+    sparse product out of thousands going quiet is a fact in the evidence, not a
+    coverage regression.
+    """
+    impact: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if LATEST_MISSING not in (event.classifications or (event.classification,)):
+            continue
+        entry = impact.setdefault(
+            event.entity_type,
+            {"entities": 0, "expected_lost": 0.0, "expected_period_total": 0.0},
+        )
+        entry["entities"] += 1
+        entry["expected_lost"] += abs(float(event.expected_value))
+        entry["expected_period_total"] = max(
+            entry["expected_period_total"], abs(float(event.expected_period_total))
+        )
+    for entry in impact.values():
+        total = entry["expected_period_total"]
+        threshold = max(
+            config.materiality_abs, config.materiality_ratio * total
+        )
+        entry["share"] = entry["expected_lost"] / total if total else None
+        entry["threshold"] = threshold
+        entry["material"] = entry["expected_lost"] > threshold
+    return impact
 
 
 def _product_commodity_map(

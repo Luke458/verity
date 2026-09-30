@@ -34,8 +34,10 @@ DEFAULT_FAMILIES: tuple[str, ...] = (
     "recalculation",
     "schema_failure",
     "null_duplicate_storm",
+    "market_movement",
 )
-DEFAULT_CONTROLS: tuple[str, ...] = ("market_movement",)
+# Clean refreshes: the only cases whose INVESTIGATE is a false positive.
+DEFAULT_CONTROLS: tuple[str, ...] = ("clean",)
 DEFAULT_GATES: dict[str, float] = {
     "min_detection_rate": 0.9,
     "max_false_positive_rate": 0.1,

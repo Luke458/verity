@@ -39,7 +39,7 @@ cannot drift again: change `FAMILY_SPECS`, then update this table to match.
 | missing_products | source | fault | missing_products | source | INVESTIGATE | |
 | entity_merge | source | fault | entity_merge | source | INVESTIGATE | |
 | new_store_backfill | source | fault | backfill | source | INVESTIGATE | |
-| expected_event | source | expected_event | backfill | source | INVESTIGATE | Registered event explains the historical revision, but every configured measure is assessed: residual secondary-measure coordinated drift still requires review. |
+| expected_event | source | expected_event | backfill | source | PASS_WITH_EXPLANATION | Registered event explains the historical revision; blind runs (no registry) report INVESTIGATE. |
 | history_truncation | source | fault | truncation | source | INVESTIGATE | |
 | commodity_remap | source | fault | reclassification | source | INVESTIGATE | |
 | coding_error | coded | fault | coding | coded | INVESTIGATE | |
@@ -47,7 +47,8 @@ cannot drift again: change `FAMILY_SPECS`, then update this table to match.
 | recalculation | source | fault | historical_correction | source | INVESTIGATE | |
 | schema_failure | report | fault | schema_failure | report | DATA_CONTRACT_FAILURE | |
 | null_duplicate_storm | warehouse | fault | null_duplicate_storm | warehouse | DATA_CONTRACT_FAILURE | Contract failure — the report table is not fit for revision QC — not an ordinary INVESTIGATE. |
-| market_movement | warehouse | control | market_movement | (none) | INVESTIGATE | Negative control whose latest week is a genuine movement, so the engine status is INVESTIGATE (latest-week anomaly) even though the historical revision is clean. |
+| market_movement | warehouse | movement | market_movement | (none) | INVESTIGATE | Genuine latest-week business movement, not a data fault; it must surface as a latest-week anomaly and is scored as a detection target, never as a control. |
+| clean | warehouse | control | clean | (none) | PASS | Negative control: no injection. The only family expected to PASS; the false-positive rate is measured on it. |
 
 `requires_investigation` is derived, not declared: it is true exactly when the
 expected status is `INVESTIGATE` or `DATA_CONTRACT_FAILURE`

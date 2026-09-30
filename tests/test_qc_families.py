@@ -26,6 +26,7 @@ FAMILIES = (
     "market_movement",
     "missing_products",
     "entity_merge",
+    "clean",
 )
 
 EXPECTATIONS = {
@@ -41,20 +42,16 @@ EXPECTATIONS = {
         "fraction_min": 0.99,
     },
     "expected_event": {
-        # The registered event explains the revision; residual secondary
-        # measure drift is a separate movement and is reviewed.
-        "status": "INVESTIGATE",
+        # The registered event explains the revision and nothing else moved.
+        "status": "PASS_WITH_EXPLANATION",
         "classification": "NEW_ENTITY_HISTORICAL_BACKFILL",
         "fraction_min": 0.99,
-        # A coordinated secondary-measure deviation is temporal evidence even
-        # without an individually flagged series or target-week flag.
-        "latest_week_anomaly": True,
+        "latest_week_anomaly": False,
     },
     "history_truncation": {
         "status": "INVESTIGATE",
         "classification": "ENTITY_HISTORY_TRUNCATED",
         "fraction_min": 0.99,
-        "latest_week_anomaly": True,
     },
     "commodity_remap": {
         "status": "INVESTIGATE",
@@ -91,6 +88,12 @@ EXPECTATIONS = {
         "reason_prefix": "possible_replacement",
         "classification": "ENTITY_REMOVED",
         "fraction_min": 0.99,
+    },
+    # The negative control: an untouched refresh must PASS end to end.
+    "clean": {
+        "status": "PASS",
+        "historical_status": "PASS",
+        "latest_week_anomaly": False,
     },
 }
 

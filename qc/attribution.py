@@ -17,7 +17,6 @@ from .config import DatasetConfig
 from .lifecycle import (
     EXPLAINABLE_CLASSES,
     EXTENDED,
-    LATEST_MISSING,
     NEW_BACKFILL,
     NEW_RECENT,
     RECLASSIFIED,
@@ -25,6 +24,7 @@ from .lifecycle import (
     TRUNCATED,
     LifecycleEvent,
     _entity_type,
+    missing_entity_impact,
 )
 
 
@@ -313,7 +313,7 @@ def classify_run(
 ) -> str:
     if contract_status == "DATA_CONTRACT_FAILURE":
         return "DATA_CONTRACT_FAILURE"
-    if any(event.classification == LATEST_MISSING for event in events):
+    if any(entry["material"] for entry in missing_entity_impact(events, config).values()):
         return "INVESTIGATE"
     if attribution.structural_events:
         explained_enough = (

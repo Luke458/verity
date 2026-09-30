@@ -32,14 +32,14 @@ FAMILIES = (
     "market_movement",
     "missing_products",
     "entity_merge",
+    "clean",
 )
 
 EXPECTED = {
     "missing_stores": ("MISSING_STORES", True),
     "new_store_backfill": ("BACKFILL", True),
-    # Policy review applies to residual secondary-measure drift even though the
-    # rule provider itself would not escalate the registered backfill.
-    "expected_event": ("BACKFILL", True),
+    # The registered backfill is explained; nothing else requires review.
+    "expected_event": ("BACKFILL", False),
     "history_truncation": ("HISTORICAL_CORRECTION", True),
     "commodity_remap": ("RECLASSIFICATION", True),
     "coding_error": ("CODING", True),
@@ -50,6 +50,7 @@ EXPECTED = {
     "market_movement": ("UNKNOWN", True),
     "missing_products": ("MISSING_PRODUCTS", True),
     "entity_merge": ("ENTITY_MERGE", True),
+    "clean": ("UNKNOWN", False),
 }
 
 

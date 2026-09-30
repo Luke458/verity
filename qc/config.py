@@ -242,20 +242,10 @@ class DatasetConfig:
     distribution_drift_quantile: float = 0.95
     # Entity presence reliability. An entity absent from the appended period is
     # only evidence of a coverage regression if it traded in at least this
-    # fraction of its own trailing window. Default 0.0 preserves the previous
-    # behaviour exactly (any entity that traded last week and not this week is
-    # flagged); the synthetic generator is dense, so it never needed a baseline.
-    # Real transactional sources are sparse and fire on every refresh without
-    # one, which is what the real-table replay measured.
-    entity_presence_threshold: float = 0.0
+    # fraction of its own trailing window: on a sparse transactional source a
+    # product that trades one week in five is expected to be absent next week.
+    entity_presence_threshold: float = 0.5
     entity_presence_window: int = 8
-    # Aggregate coverage gating of per-entity missing escalation. Off by default:
-    # the per-scope coverage gate in config/coverage-gate.json passed but was
-    # left unwired, and this aggregate form is the decision-grade alternative.
-    # With it on, LATEST_MISSING escalates only when the entity type actually
-    # lost counterpart keys against its own trailing history. The per-entity
-    # absences remain in the evidence either way.
-    coverage_gating_enabled: bool = False
     # Absolute materiality floor per metric/period/scope; never an accumulated
     # historical total.
     temporal_materiality_abs: float = 0.0

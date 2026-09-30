@@ -62,6 +62,7 @@ SEVERITY_BY_FAMILY: dict[str, str] = {
     "expected_event": "LOW",
     "recalculation": "LOW",
     "market_movement": "LOW",
+    "clean": "LOW",
 }
 
 

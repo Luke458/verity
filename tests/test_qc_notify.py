@@ -235,7 +235,7 @@ def test_webhook_refuses_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802 - http.server API
+        def do_POST(self) -> None:
             seen.append(self.path)
             self.send_response(302)
             self.send_header("Location", "/elsewhere")

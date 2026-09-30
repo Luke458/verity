@@ -79,7 +79,10 @@ def _summarize(
     def rate(values: list[bool]) -> float:
         return sum(values) / len(values) if values else 0.0
 
-    faulty = [r for r in records if r.case_kind in ("fault", "expected_event")]
+    # Faults and genuine movements must surface; registered expected events are
+    # scored separately (they should be explained, not detected); only
+    # ``control`` cases (clean refreshes) count toward false positives.
+    faulty = [r for r in records if r.case_kind in ("fault", "movement")]
     controls = [r for r in records if r.case_kind == "control"]
     expected_events = [r for r in records if r.case_kind == "expected_event"]
     comparable = [
@@ -100,7 +103,12 @@ def _summarize(
         "scenarios": len(records),
         "engine_status_counts": status_counts,
         "detection_rate": rate([r.engine_status not in ("PASS", "PASS_WITH_EXPLANATION") for r in faulty]),
+        # Detection and false positives are both measured on the final status;
+        # the historical-layer rate is reported separately and is not the FPR.
         "false_positive_rate": rate(
+            [r.engine_status not in ("PASS", "PASS_WITH_EXPLANATION") for r in controls]
+        ),
+        "historical_false_positive_rate": rate(
             [
                 r.historical_status not in (None, "PASS", "PASS_WITH_EXPLANATION")
                 for r in controls

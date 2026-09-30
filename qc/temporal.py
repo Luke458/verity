@@ -1135,87 +1135,6 @@ def _two_sided_percentile(item: SeriesTemporalEvidence) -> float:
     return min(1.0, max(0.0, 2.0 * min(percentile, 1.0 - percentile)))
 
 
-def coordinated_groups(
-    evidence: Sequence[SeriesTemporalEvidence],
-    config: DatasetConfig,
-) -> list[dict[str, Any]]:
-    """Combine same-direction leaf residuals within a level and period.
-
-    Only groups where the combined movement crosses the materiality threshold
-    and at least two contributors individually carry at least half of it are
-    reported; groups already captured by an individual anomaly are labelled as
-    such so they add no duplicate escalation.
-    """
-    floor = config.temporal_min_relative_residual / 2.0
-    absolute_floor = float(getattr(config, "temporal_materiality_abs", 0.0))
-    national_by_target = {
-        (item.metric, item.target_week): item
-        for item in evidence
-        if item.series_id == "national"
-    }
-    groups: dict[tuple[str, int, str, int], list[SeriesTemporalEvidence]] = {}
-    for item in evidence:
-        if item.level == "national" or item.residual == 0.0:
-            continue
-        direction = 1 if item.residual > 0 else -1
-        if abs(item.relative_residual) < floor:
-            continue
-        groups.setdefault(
-            (item.metric, item.target_week, item.level, direction), []
-        ).append(item)
-    coordinated: list[dict[str, Any]] = []
-    for (metric, target_week, level, direction), items in sorted(groups.items()):
-        if len(items) < 2:
-            continue
-        national = national_by_target.get((metric, target_week))
-        parent_value = abs(national.actual) if national is not None else 0.0
-        combined = float(sum(item.residual for item in items))
-        ratio = abs(combined) / parent_value if parent_value else 0.0
-        if abs(combined) < absolute_floor:
-            continue
-        if ratio < config.temporal_min_relative_residual:
-            continue
-        coordinated.append(
-            {
-                "metric": metric,
-                "target_week": target_week,
-                "level": level,
-                "direction": "increase" if direction > 0 else "decrease",
-                "series_ids": [item.series_id for item in items],
-                "combined_residual": combined,
-                "combined_ratio": ratio,
-                "materiality": max(
-                    absolute_floor,
-                    config.temporal_min_relative_residual * parent_value,
-                ),
-                "individually_flagged": any(item.anomaly for item in items),
-            }
-        )
-    # Hierarchy levels decompose the same parent movement; keep one group per
-    # measure/target/direction (the most granular, most material decomposition)
-    # so parent and child results are never counted twice.
-    best: dict[tuple[str, int, str], dict[str, Any]] = {}
-    for group in coordinated:
-        key = (group["metric"], group["target_week"], group["direction"])
-        current = best.get(key)
-        if current is None or (
-            group["combined_ratio"],
-            len(group["series_ids"]),
-        ) > (
-            current["combined_ratio"],
-            len(current["series_ids"]),
-        ):
-            best[key] = group
-    return sorted(
-        best.values(),
-        key=lambda group: (
-            group["metric"],
-            group["target_week"],
-            group["direction"],
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Latest-week evidence
 # ---------------------------------------------------------------------------
@@ -1268,6 +1187,12 @@ class SeriesTemporalEvidence:
     training_endpoint_week: int = 0
     forecast_origin_week: int = 0
     aggregation: str = "flow"
+    # Share-of-parent shift test (leaves only): the leaf's share of its parent
+    # this period against its own trailing share distribution.
+    share_t: float | None = None
+    share_p: float | None = None
+    share_impact: float | None = None
+    share_n: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1315,6 +1240,10 @@ class SeriesTemporalEvidence:
             "materiality": self.materiality,
             "training_endpoint_week": self.training_endpoint_week,
             "forecast_origin_week": self.forecast_origin_week,
+            "share_t": self.share_t,
+            "share_p": self.share_p,
+            "share_impact": self.share_impact,
+            "share_n": self.share_n,
         }
 
 
@@ -1327,7 +1256,6 @@ class TemporalResult:
     series: list[SeriesTemporalEvidence]
     unavailable_series: list[str] = field(default_factory=list)
     calendar: dict[str, Any] = field(default_factory=dict)
-    coordinated: list[dict[str, Any]] = field(default_factory=list)
     targets: list[int] = field(default_factory=list)
     unavailable: list[dict[str, Any]] = field(default_factory=list)
     metric_status: dict[str, str] = field(default_factory=dict)
@@ -1343,17 +1271,186 @@ class TemporalResult:
             "unavailable_series": self.unavailable_series,
             "unavailable": [dict(item) for item in self.unavailable],
             "calendar": dict(self.calendar),
-            "coordinated": [dict(item) for item in self.coordinated],
             "metric_status": dict(self.metric_status),
         }
 
 
-# Flags that describe the target week itself. ``change_point`` is reported as
-# series history evidence but does not by itself make the new week anomalous.
-# A forecast extreme or seasonal deviation is self-sufficient; robust z and
-# EWMA must corroborate each other so low-variance noise is not flagged.
-STRONG_TARGET_FLAGS = frozenset({"forecast_lower", "forecast_upper", "seasonal_z"})
-CONFIRMING_TARGET_FLAGS = frozenset({"robust_z", "ewma"})
+# Only these flags decide an anomaly: a calibrated forecast extreme (national
+# series, and leaves without a share test) or a significant share-of-parent
+# shift (leaves). Robust, seasonal and EWMA z-scores and change points ignore
+# trend, seasonality and multiplicity; they are reported as evidence only.
+DECISION_FLAGS = frozenset({"forecast_lower", "forecast_upper", "share_shift"})
+FORECAST_FLAGS = frozenset({"forecast_lower", "forecast_upper"})
+# A share shift needs this many trailing aligned observations to estimate the
+# leaf's own share variability.
+MIN_SHARE_HISTORY = 8
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the regularized incomplete beta function."""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c if abs(c) > tiny else tiny
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c if abs(c) > tiny else tiny
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-12:
+            break
+    return h
+
+
+def student_t_two_sided_p(t: float, df: int) -> float:
+    """Two-sided Student-t p-value (exact, via the incomplete beta function)."""
+    if not math.isfinite(t):
+        return 0.0
+    if df < 1:
+        raise ValueError("degrees of freedom must be positive")
+    x = df / (df + t * t)
+    a, b = df / 2.0, 0.5
+    front = math.exp(
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+        + a * math.log(x) + b * math.log1p(-x)
+    ) if 0.0 < x < 1.0 else 0.0
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    if x < (a + 1.0) / (a + b + 2.0):
+        value = front * _betacf(a, b, x) / a
+    else:
+        value = 1.0 - front * _betacf(b, a, 1.0 - x) / b
+    return min(1.0, max(0.0, value))
+
+
+def share_shift_test(
+    child_weeks: Sequence[int],
+    child_values: Sequence[float],
+    parent_weeks: Sequence[int],
+    parent_values: Sequence[float],
+    child_actual: float,
+    parent_actual: float,
+    window: int,
+) -> tuple[float, float, float, int] | None:
+    """Test the leaf's share of its parent against its own trailing shares.
+
+    Returns ``(t, p, impact, n)`` where ``impact`` is the leaf movement
+    attributable to the share change at the parent's current level, or
+    ``None`` when the share history is too short or degenerate. A common
+    (market-wide) movement leaves shares unchanged and is not a leaf anomaly.
+    """
+    if not (math.isfinite(parent_actual) and parent_actual > 0.0):
+        return None
+    if not math.isfinite(child_actual):
+        return None
+    parent = {
+        int(week_id): float(value)
+        for week_id, value in zip(parent_weeks, parent_values)
+        if math.isfinite(float(value)) and float(value) > 0.0
+    }
+    shares = [
+        float(value) / parent[int(week_id)]
+        for week_id, value in zip(child_weeks, child_values)
+        if int(week_id) in parent and math.isfinite(float(value))
+    ][-max(int(window), MIN_SHARE_HISTORY):]
+    n = len(shares)
+    if n < MIN_SHARE_HISTORY:
+        return None
+    history = np.asarray(shares, dtype=float)
+    mean = float(history.mean())
+    sd = float(history.std(ddof=1))
+    if not math.isfinite(sd) or sd <= 1e-12 * max(abs(mean), 1e-12):
+        return None
+    observed = child_actual / parent_actual
+    # Prediction interval for one new observation: the trailing mean is itself
+    # estimated, so the spread is sd * sqrt(1 + 1/n) with n - 1 df.
+    t = (observed - mean) / (sd * math.sqrt(1.0 + 1.0 / n))
+    p = student_t_two_sided_p(t, n - 1)
+    return t, p, (observed - mean) * parent_actual, n
+
+
+def _attach_share_tests(
+    evidence: list[SeriesTemporalEvidence],
+    pending: Sequence[dict[str, Any]],
+    config: DatasetConfig,
+) -> None:
+    """Run the share-of-parent test for every leaf of one measure and period."""
+    items = {item["series_id"]: item for item in pending}
+    national = next((entry for entry in evidence if entry.series_id == "national"), None)
+    parent_item = items.get("national")
+    if national is None or parent_item is None:
+        return
+    window = max(config.temporal_window * 2, MIN_SHARE_HISTORY)
+    for leaf in evidence:
+        item = items.get(leaf.series_id)
+        if leaf.level == "national" or item is None:
+            continue
+        tested = share_shift_test(
+            item["train_weeks"],
+            item["train_values"],
+            parent_item["train_weeks"],
+            parent_item["train_values"],
+            leaf.adjusted_actual,
+            national.adjusted_actual,
+            window,
+        )
+        if tested is not None:
+            leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested
+
+
+def decide_leaf_anomalies(
+    evidence: Sequence[SeriesTemporalEvidence], config: DatasetConfig
+) -> None:
+    """Leaf anomalies from share shifts, with one BH-FDR family per assessment.
+
+    National series keep their forecast decision. Every leaf of every measure
+    and period is one hypothesis in a single BH family: the measures of one
+    refresh move together, so per-measure families would let one share wobble
+    page once per measure. A leaf without a share test (no national parent or
+    degenerate share history) contributes its forecast p-value instead.
+    """
+    from .conformal import benjamini_hochberg
+
+    leaves = [entry for entry in evidence if entry.level != "national"]
+    if not leaves:
+        return
+    uses_share = [leaf.share_p is not None for leaf in leaves]
+    p_values = [
+        float(leaf.share_p) if leaf.share_p is not None else _two_sided_percentile(leaf)
+        for leaf in leaves
+    ]
+    if config.temporal_fdr_enabled:
+        adjusted, significant = benjamini_hochberg(p_values, config.temporal_fdr_q)
+    else:
+        adjusted = list(p_values)
+        significant = [value <= config.temporal_fdr_q for value in p_values]
+    for leaf, adjusted_p, is_significant, share_tested in zip(
+        leaves, adjusted, significant, uses_share
+    ):
+        leaf.adjusted_p = float(adjusted_p)
+        leaf.fdr_significant = bool(is_significant)
+        if share_tested:
+            leaf.flags = [flag for flag in leaf.flags if flag != "share_shift"]
+            # Forecast extremes on a leaf are evidence of a movement the share
+            # test attributes to the parent; only the share shift decides.
+            material = abs(float(leaf.share_impact or 0.0)) >= leaf.materiality
+            if is_significant and material and "share_shift" not in leaf.flags:
+                leaf.flags.append("share_shift")
+            leaf.anomaly = bool(is_significant and material)
+        elif not is_significant:
+            leaf.flags = [flag for flag in leaf.flags if flag not in FORECAST_FLAGS]
+            leaf.anomaly = bool(set(leaf.flags) & DECISION_FLAGS)
 
 
 def new_period_adjustments(
@@ -1771,10 +1868,7 @@ def _run_single_target(
         if cp >= config.temporal_change_point_threshold:
             flags.append("change_point")
 
-        flag_set = set(flags)
-        anomaly = bool(flag_set & STRONG_TARGET_FLAGS) or (
-            len(flag_set & CONFIRMING_TARGET_FLAGS) >= 2
-        )
+        anomaly = bool(set(flags) & DECISION_FLAGS)
 
         evidence.append(
             SeriesTemporalEvidence(
@@ -1822,39 +1916,8 @@ def _run_single_target(
                 forecast_origin_week=int(item["forecast_origin_week"]),
             )
         )
-    if config.temporal_fdr_enabled:
-        from .conformal import benjamini_hochberg
-
-        # Screening runs within one measure: p-values from different metrics
-        # are never pooled into a single false-discovery procedure.
-        by_metric: dict[str, list[SeriesTemporalEvidence]] = {}
-        for series_item in evidence:
-            if series_item.level != "national":
-                by_metric.setdefault(series_item.metric, []).append(series_item)
-        for leaves in by_metric.values():
-            p_values = [_two_sided_percentile(item) for item in leaves]
-            adjusted, significant = benjamini_hochberg(
-                p_values, config.temporal_fdr_q
-            )
-            for leaf, adjusted_p, is_significant in zip(
-                leaves, adjusted, significant
-            ):
-                leaf.adjusted_p = float(adjusted_p)
-                leaf.fdr_significant = bool(is_significant)
-                if is_significant:
-                    continue
-                if not {"forecast_lower", "forecast_upper"} & set(leaf.flags):
-                    continue
-                leaf.flags = [
-                    flag
-                    for flag in leaf.flags
-                    if flag not in ("forecast_lower", "forecast_upper")
-                ]
-                flag_set = set(leaf.flags)
-                leaf.anomaly = bool(flag_set & STRONG_TARGET_FLAGS) or (
-                    len(flag_set & CONFIRMING_TARGET_FLAGS) >= 2
-                )
-    coordinated = coordinated_groups(evidence, config)
+    # Leaf decisions are made once per assessment in ``run_temporal_qc``.
+    _attach_share_tests(evidence, pending, config)
     anomalies = [item for item in evidence if item.anomaly]
     overall_flags = sorted({flag for item in anomalies for flag in item.flags})
     coverage: dict[str, float] = {}
@@ -1889,20 +1952,16 @@ def _run_single_target(
             if item.get("fallback")
         ],
     }
-    coordinated_material = [
-        group for group in coordinated if not group["individually_flagged"]
-    ]
     return TemporalResult(
         target_week=target,
         targets=[target],
-        anomaly=bool(anomalies) or bool(coordinated_material),
+        anomaly=bool(anomalies),
         flags=overall_flags,
         calibration=calibration,
         series=evidence,
         unavailable_series=unavailable_series,
         unavailable=unavailable,
         calendar=calendar_identity(config),
-        coordinated=coordinated,
         metric_status={metric: "ASSESSED"},
     )
 
@@ -1977,15 +2036,18 @@ def run_temporal_qc(
                 for metric in metrics
             ],
             calendar=calendar_identity(config),
-            coordinated=[],
             metric_status=metric_status,
         )
+    series = [entry for result in results for entry in result.series]
+    # Re-decide leaves with every measure and period in one BH family.
+    decide_leaf_anomalies(series, config)
     if len(results) == 1:
         result = results[0]
         result.metric_status = dict(metric_status)
+        anomalous = [entry for entry in result.series if entry.anomaly]
+        result.anomaly = bool(anomalous)
+        result.flags = sorted({flag for entry in anomalous for flag in entry.flags})
         return result
-    series = [entry for result in results for entry in result.series]
-    coordinated = [group for result in results for group in result.coordinated]
     unavailable = [entry for result in results for entry in result.unavailable]
     unavailable_series = sorted(
         {entry for result in results for entry in result.unavailable_series}
@@ -2031,20 +2093,16 @@ def run_temporal_qc(
         "parent_share": parent_share,
     }
     anomalies = [entry for entry in series if entry.anomaly]
-    coordinated_material = [
-        group for group in coordinated if not group["individually_flagged"]
-    ]
     flags = sorted({flag for entry in anomalies for flag in entry.flags})
     return TemporalResult(
         target_week=max(valid_targets),
         targets=list(valid_targets),
-        anomaly=bool(anomalies) or bool(coordinated_material),
+        anomaly=bool(anomalies),
         flags=flags,
         calibration=calibration,
         series=series,
         unavailable_series=unavailable_series,
         unavailable=unavailable,
         calendar=calendar_identity(config),
-        coordinated=coordinated,
         metric_status=dict(metric_status),
     )

@@ -27,7 +27,8 @@ FAULT_DESCRIPTIONS = {
     "recalculation": ("source", "Small changes across most historical weeks."),
     "schema_failure": ("report", "Required column missing from the report."),
     "null_duplicate_storm": ("warehouse", "Nulls and duplicated rows introduced."),
-    "market_movement": ("warehouse", "Genuine trend shift; negative control."),
+    "market_movement": ("warehouse", "Genuine latest-week trend shift; must surface."),
+    "clean": ("warehouse", "No injection; negative control that must PASS."),
 }
 
 
