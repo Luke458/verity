@@ -21,7 +21,12 @@ from .attribution import AttributionResult, classify_run, explain_revision
 from .config import DatasetConfig
 from .contracts import ContractCheck, ContractResult, validate_contracts
 from .counterfactual import CounterfactualResult, reconstruct_counterfactual
+from .coverage import assess_aggregate_coverage
 from .decisions import DecisionProvider, DecisionSet, RuleDecisionProvider
+from .distribution_drift import (
+    DistributionDriftResult,
+    assess_distribution_drift,
+)
 from .evidence import EvidenceGraph, build_evidence_graph
 from .hierarchy import HierarchyCheck, hierarchy_checks
 from .ledger import ExplanationLedger, build_explanation_ledger
@@ -65,6 +70,7 @@ class QCRunResult:
     reconciliation: ReconciliationResult | None = None
     lineage: LineageResult | None = None
     temporal: TemporalResult | None = None
+    distribution_drift: DistributionDriftResult | None = None
     evidence: EvidenceGraph | None = None
     decisions: DecisionSet | None = None
     relationships: list[EntityRelationship] = field(default_factory=list)
@@ -213,6 +219,8 @@ def _machine(
     evidence: EvidenceGraph | None = None,
     relationships: Sequence[EntityRelationship] = (),
     reference: dict[str, Any] | None = None,
+    drift: DistributionDriftResult | None = None,
+    coverage_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     historical: dict[str, Any] | None = None
     if attribution is not None:
@@ -233,6 +241,10 @@ def _machine(
         "run_id": run_id,
         "dataset": dataset,
         "status": status,
+        "distribution_drift": (
+            drift.to_dict() if drift is not None else None
+        ),
+        "coverage_gate": coverage_gate or None,
         "historical_revision": historical,
         "latest_week": temporal.to_dict() if temporal is not None else None,
         "counterfactual": (
@@ -669,6 +681,44 @@ def run_qc(
             calibration={"unavailable_reason": f"{type(exc).__name__}: {exc}"},
             series=[], unavailable_series=["provider_execution"],
         )
+    drift = None
+    if config.distribution_drift_enabled and pair.new_periods:
+        target_period = max(pair.new_periods)
+        try:
+            drift = assess_distribution_drift(
+                current,
+                config,
+                target_period,
+                bins=config.distribution_drift_bins,
+                reference_weeks=config.distribution_drift_reference_weeks,
+                abs_floor=config.distribution_drift_abs_floor,
+                threshold_quantile=config.distribution_drift_quantile,
+            )
+        except Exception:  # noqa: BLE001 - preserve completed deterministic checks
+            drift = None
+    # Aggregate coverage gate. Per-entity absences are facts and stay in the
+    # evidence; whether they are allowed to ESCALATE is a separate question,
+    # and on a sparse real source the answer must be "did this entity type
+    # actually lose counterpart keys", not "did any one of 38 scopes twitch".
+    # Opt-in: the default preserves the prior ungated escalation exactly.
+    coverage_gate: dict[str, Any] = {}
+    if config.coverage_gating_enabled and pair.new_periods:
+        try:
+            measured = assess_aggregate_coverage(
+                current, config, max(pair.new_periods)
+            )
+            coverage_gate = {
+                column: entry.to_dict() for column, entry in measured.items()
+            }
+        except Exception:  # noqa: BLE001 - preserve completed deterministic checks
+            coverage_gate = {}
+    suppressed_entity_types: frozenset[str] = frozenset()
+    if config.coverage_gating_enabled and coverage_gate:
+        suppressed_entity_types = frozenset(
+            column
+            for column, entry in coverage_gate.items()
+            if entry.get("regressed") is False
+        )
     status = historical_status
     if (
         temporal is not None
@@ -680,6 +730,8 @@ def run_qc(
         reference_report is not None
         and reference_report["status"] == "MISMATCH"
     ):
+        status = "INVESTIGATE"
+    if drift is not None and drift.any_drift and status in ("PASS", "PASS_WITH_EXPLANATION"):
         status = "INVESTIGATE"
     from .calendar import build_calendar
     calendar = build_calendar(config)
@@ -731,6 +783,27 @@ def run_qc(
     reasons = _reasons(
         contracts, events, attribution, config, historical_status, relationships
     )
+    if suppressed_entity_types:
+        # Keep the absence as a fact, drop it as an escalation: with the gate
+        # on, a missing-entity finding only reaches review when the aggregate
+        # coverage for that entity type actually fell.
+        from .lifecycle import _entity_type
+
+        suppressed_types = {
+            _entity_type(column) for column in suppressed_entity_types
+        }
+        reasons = [
+            reason
+            for reason in reasons
+            if not (
+                reason.startswith("latest_week_missing:")
+                and reason.split(":", 2)[1] in suppressed_types
+            )
+        ]
+        reasons.extend(
+            f"latest_week_coverage_ok:{column}"
+            for column in sorted(suppressed_entity_types)
+        )
     reasons.extend(
         f"reference_mismatch:{metric}"
         for metric in reference_mismatches(reference_report)
@@ -739,6 +812,9 @@ def run_qc(
         for item in temporal.series:
             if item.anomaly:
                 reasons.append(f"latest_week_anomaly:{item.series_id}")
+    if drift is not None and drift.any_drift:
+        for scope in drift.drifted:
+            reasons.append(f"latest_week_drift:{scope.scope}")
     evidence = build_evidence_graph(
         run_id=run_id,
         pair=pair,
@@ -765,6 +841,7 @@ def run_qc(
             attribution=attribution,
             counterfactual=counterfactual,
             reconciliation=reconciliation,
+            distribution_drift=drift,
             lineage=lineage,
             temporal=temporal,
             evidence=evidence,
@@ -797,6 +874,8 @@ def run_qc(
                 evidence,
                 relationships,
                 reference_report,
+                drift,
+                coverage_gate,
             ),
         ),
         decision_provider,

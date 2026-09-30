@@ -190,6 +190,25 @@ def run_shadow(
     else:
         registry_mode = "blind"
     label_store = LabelStore(labels_out) if labels_out else None
+    if label_store is not None:
+        # --labels-out writes records with provenance "oracle". Synthesising
+        # them from an absent vault would tag placeholders as ground truth and
+        # let `qc train` fit a provider to noise, so require the payload up
+        # front rather than after every scenario has been scored.
+        missing = [
+            entry["scenario_id"]
+            for entry in suite["scenarios"]
+            if not vault.exists(str(entry["scenario_id"]))
+        ]
+        if missing:
+            shown = ", ".join(missing[:5]) + ("..." if len(missing) > 5 else "")
+            raise ValueError(
+                f"--labels-out needs an oracle payload for every scenario, but "
+                f"{len(missing)} are missing under {vault.root}: {shown}. "
+                "Without one the labels would be placeholders carrying "
+                'provenance "oracle". Generate the vault (qcgen generate) or '
+                "drop --labels-out."
+            )
     calibration_store = (
         PrequentialStore(prequential_store) if prequential_store else None
     )

@@ -684,12 +684,6 @@ class TrainedDecisionProvider:
             values=values,
             requires_investigation=requires,
         )
-        return DecisionSet(
-            run_id=getattr(result, "run_id", ""),
-            provider=self.name,
-            values=values,
-            requires_investigation=requires,
-        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

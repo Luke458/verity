@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "name": "aggregate_coverage_gating",
+  "registered": "2026-09-26",
+  "metric": "decision_level_fire_rate_on_real_periods",
+  "max_fire_rate": 0.25,
+  "min_injected_detection_rate": 1.0,
+  "min_detectable_drop_fraction": 0.3,
+  "corpus": "real",
+  "why_a_second_gate": "config/coverage-gate.json governs the per-scope check and is recorded as PASS but NOT WIRED, because a lower-tail quantile over 8 reference periods produces roughly 43 scope flags per real period. Wiring that signal to the escalation path would trade a 100% alarm rate for a different kind of noise. That is a *different decision* from the per-scope check's accuracy, so it gets its own registration rather than an edit to the first gate. The first gate is left exactly as run.",
+  "hypothesis": "Gating per-entity missing escalation on AGGREGATE coverage - did this entity type lose distinct counterpart keys relative to its own trailing history - is a decision-grade signal, because it asks the question the escalation actually means ('did we lose products / did we lose stores') rather than 'did any one of 38 scopes twitch'.",
+  "design": {
+    "signal": "for each configured entity key column, the number of distinct counterpart keys present in the appended period, compared against that column's own trailing per-period counts at the registered lower-tail quantile",
+    "threshold": "per entity column, from that column's own history; never a global constant and never an absolute expected count",
+    "direction": "one-sided; only a fall gates",
+    "held_constant": "identical real suite, identical periods, identical quantile. Only whether the aggregate gate is consulted changes.",
+    "arms": {
+      "ungated": "the current behaviour, which produced a 100% alarm rate across 27 real refreshes",
+      "gated": "LATEST_WEEK_MISSING escalates to MISSING_STORES / MISSING_PRODUCTS only when the corresponding aggregate coverage regressed"
+    }
+  },
+  "acceptance": {
+    "max_fire_rate": "over the real period sequence, the fraction of periods in which the aggregate gate fires. Must be at or below max_fire_rate. This is the number that decides whether the gate is usable as an escalation gate at all.",
+    "min_injected_detection_rate": "over injected aggregate drops at or above min_detectable_drop_fraction, the fraction the gate must catch, so that wiring the gate cannot silently blind the escalation path."
+  },
+  "claims_limit": "Passing authorises wiring the aggregate coverage gate into the escalation path as an opt-in configuration, and nothing more. It does not confer validated-real, does not establish a production false-positive rate, and does not resolve the residual per-entity sensitivity: with the gate on, a genuine per-entity drop that does not move aggregate coverage is still suppressed. That limitation is inherent to any scope-level gate and is recorded rather than hidden.",
+  "note": "Written BEFORE the wiring was implemented or measured. If it fails it is reported as failed and not retro-fitted."
+}

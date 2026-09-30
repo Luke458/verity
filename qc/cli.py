@@ -280,6 +280,11 @@ def _cmd_decide(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt(value: Any, precision: int = 3) -> str:
+    """Format a possibly-absent metric without inventing a number."""
+    return "n/a" if value is None else f"{float(value):.{precision}f}"
+
+
 def _cmd_train(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     if args.cohort:
@@ -340,6 +345,15 @@ def _cmd_train(args: argparse.Namespace) -> int:
             print(
                 f"    {field:<24} acc={field_metrics['accuracy']:.3f} "
                 f"brier={field_metrics['brier']:.3f} ece={field_metrics['ece']:.3f}"
+            )
+            # Imbalance-aware surface: accuracy flatters a head that never
+            # finds a rare class, and cost records what each miss is worth.
+            print(
+                f"    {'':<24} macro_f1={_fmt(field_metrics['macro_f1'])} "
+                f"mcc={_fmt(field_metrics['mcc'])} "
+                f"g_mean={_fmt(field_metrics['g_mean'])} "
+                f"cost_score={_fmt(field_metrics['cost_score'])} "
+                f"unmapped={field_metrics['n_unmapped']}"
             )
     print("  warning:", trained.metadata.get("warning", ""))
     return 0
@@ -1439,6 +1453,37 @@ def _cmd_evidence_bench(args: argparse.Namespace) -> int:
     return 0 if result.gates["status"] == "PASS" else 2
 
 
+
+
+def _dispatch_notifications(
+    args: argparse.Namespace, result: Any
+) -> list[Any]:
+    """Fire the configured sinks. Never raises; returns one outcome per sink."""
+    from .notify import (
+        DEFAULT_MAX_PAYLOAD_BYTES,
+        DEFAULT_NOTIFY_STATUSES,
+        dispatch_all,
+        load_notification_specs,
+    )
+
+    statuses = (
+        tuple(part.strip() for part in args.notify_status.split(",") if part.strip())
+        if args.notify_status
+        else DEFAULT_NOTIFY_STATUSES
+    )
+    max_bytes = args.notify_max_bytes or DEFAULT_MAX_PAYLOAD_BYTES
+    try:
+        specs = load_notification_specs(args.notify)
+    except Exception as error:  # noqa: BLE001 - never fail the assessment
+        print(
+            f"weekly: notification spec unusable: "
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        return []
+    return dispatch_all(specs, result, statuses=statuses, max_bytes=max_bytes)
+
+
 def _cmd_weekly(args: argparse.Namespace) -> int:
     # Storage credentials may arrive via the environment so they never appear
     # in the process argument list.
@@ -1500,6 +1545,19 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
             print(f"  note: {note}")
         if result.report_dir:
             print(f"  report: {result.report_dir}")
+
+    if args.notify:
+        for outcome in _dispatch_notifications(args, result):
+            if not outcome.delivered:
+                # A sink failure is recorded, never propagated: the assessment
+                # status and exit code above are already decided.
+                print(
+                    f"  note: notification to {outcome.sink} not delivered: "
+                    f"{outcome.detail}",
+                    file=sys.stderr,
+                )
+            elif not args.json:
+                print(f"  notified {outcome.sink} ({outcome.bytes_sent} bytes)")
 
     if result.status in ("PASS", "PASS_WITH_EXPLANATION") and result.decision and result.decision.get("requires_investigation"):
         return 2
@@ -1933,6 +1991,23 @@ def build_parser() -> argparse.ArgumentParser:
     weekly.add_argument("--min-samples", type=int, default=9)
     weekly.add_argument("--provider", default=None)
     weekly.add_argument("--force", action="store_true")
+    weekly.add_argument(
+        "--notify",
+        default=None,
+        help="JSON file of notification sinks to fire when the status is actionable",
+    )
+    weekly.add_argument(
+        "--notify-status",
+        default=None,
+        help="comma-separated statuses that trigger notification "
+        "(default: INVESTIGATE,DATA_CONTRACT_FAILURE,CONTRACT_FAILURE,INCOMPLETE)",
+    )
+    weekly.add_argument(
+        "--notify-max-bytes",
+        type=int,
+        default=16384,
+        help="payload byte budget; optional sections are dropped, not truncated",
+    )
     weekly.add_argument(
         "--allow-investigate",
         action="store_true",

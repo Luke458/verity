@@ -293,6 +293,116 @@ def _incomparable_window_fails_closed() -> None:
     )
 
 
+@negative_control("drift:redistribution_is_detected")
+def _drift_detects_invariant_redistribution() -> None:
+    # A value redistribution preserves every key the deterministic layer reads
+    # (rows, nulls, duplicates, entity set, column sums). If the drift check
+    # cannot see it, the check is vacuous.
+    import pandas as pd
+
+    from qc.config import DatasetConfig
+    from qc.distribution_drift import assess_distribution_drift
+
+    config = DatasetConfig()
+    weeks = list(range(1, 15))
+    rows = []
+    for week in weeks:
+        for index in range(60):
+            rows.append(
+                {
+                    "week": week,
+                    "store_id": f"S{index % 4}",
+                    "product_id": f"P{index}",
+                    "dollar": float(10 + (index % 7)),
+                }
+            )
+    frame = pd.DataFrame(rows)
+    target = max(weeks)
+    period_rows = frame.index[frame["week"] == target]
+    donate = period_rows[:30]
+    receive = period_rows[30:]
+    moved = float(frame.loc[donate, "dollar"].sum()) * 0.5
+    frame.loc[donate, "dollar"] -= moved / len(donate)
+    frame.loc[receive, "dollar"] += moved / len(receive)
+    # The invariant the deterministic layer keys on must hold, or the control
+    # is testing something else entirely.
+    original_total = float(
+        sum(10 + (index % 7) for index in range(60))
+    )
+    assert abs(float(frame.loc[period_rows, "dollar"].sum()) - original_total) < 1e-6
+    result = assess_distribution_drift(frame, config, target)
+    assert result.evaluated
+    assert result.any_drift, "invariant-preserving redistribution went undetected"
+
+
+@negative_control("drift:stable_period_does_not_fire")
+def _drift_silent_on_stable_period() -> None:
+    # The complement: a period drawn from the same process must stay quiet, or
+    # the check is a false-positive generator.
+    import pandas as pd
+
+    from qc.config import DatasetConfig
+    from qc.distribution_drift import assess_distribution_drift
+
+    config = DatasetConfig()
+    rows = []
+    for week in range(1, 15):
+        for index in range(60):
+            rows.append(
+                {
+                    "week": week,
+                    "store_id": f"S{index % 4}",
+                    "product_id": f"P{index}",
+                    "dollar": float(10 + (index % 7)),
+                }
+            )
+    result = assess_distribution_drift(pd.DataFrame(rows), config, 14)
+    assert result.evaluated
+    assert not result.any_drift, "drift fired on an unchanged period"
+
+
+@negative_control("drift:volatile_scope_uses_own_threshold")
+def _drift_uses_scope_specific_threshold() -> None:
+    # A global PSI constant is wrong because PSI is sample-size dependent: the
+    # same number means different things in a volatile scope and a stable one.
+    # This scope is deliberately noisy, so its ordinary week-to-week movement
+    # is large. A period that is *typical for this scope* must stay quiet, which
+    # only a per-scope threshold can deliver.
+    import numpy as np
+    import pandas as pd
+
+    from qc.config import DatasetConfig
+    from qc.distribution_drift import assess_distribution_drift
+
+    config = DatasetConfig()
+    rng = np.random.default_rng(11)
+    rows = []
+    for week in range(1, 15):
+        for index in range(60):
+            rows.append(
+                {
+                    "week": week,
+                    "store_id": f"S{index % 4}",
+                    "product_id": f"P{index}",
+                    "dollar": float(100 + rng.normal(0, 45)),
+                }
+            )
+    result = assess_distribution_drift(pd.DataFrame(rows), config, 14)
+    assert result.evaluated
+    national = next(
+        scope for scope in result.scopes if scope.scope_type == "national"
+    )
+    # The scope's own history is genuinely volatile: the derived threshold must
+    # reflect that, and must exceed the flat 0.25 a global constant would use.
+    assert national.threshold is not None
+    assert national.threshold > 0.25, (
+        f"derived threshold {national.threshold} did not rise for a volatile scope"
+    )
+    assert not national.drifted, (
+        "a period typical of a volatile scope was alarmed"
+    )
+
+
 def test_negative_controls_are_registered() -> None:
     assert len(NEGATIVE_CONTROLS) >= 14, (
         "the negative-control registry shrank; every check must keep a control"
@@ -305,3 +415,75 @@ def test_every_negative_control_fails() -> None:
             control()
         except AssertionError as error:  # pragma: no cover - diagnostic path
             raise AssertionError(f"negative control {name!r} did not fail") from error
+
+
+@negative_control("coverage:aggregate_drop_is_detected")
+def _coverage_detects_aggregate_drop() -> None:
+    # The gate's whole purpose is to catch a genuine loss of counterpart keys.
+    # If it cannot, the gate is vacuous and must not be wired.
+    import pandas as pd
+
+    from qc.config import DatasetConfig
+    from qc.coverage import assess_aggregate_coverage
+
+    config = DatasetConfig(
+        entity_key_columns=("store_id", "product_id"),
+        entity_columns=("store_id", "product_id"),
+    )
+    rows = []
+    for week in range(1, 16):
+        for store in range(6):
+            for product in range(6):
+                rows.append(
+                    {
+                        "week": week,
+                        "store_id": f"S{store}",
+                        "product_id": f"P{product}",
+                        "dollar": 1.0,
+                    }
+                )
+    frame = pd.DataFrame(rows)
+    baseline = assess_aggregate_coverage(frame, config, 15)
+    assert baseline["product_id"].regressed is False
+
+    # Drop two thirds of the stores carrying products in the appended period.
+    period_rows = frame.index[frame["week"] == 15]
+    doomed = [
+        index
+        for index in period_rows
+        if frame.at[index, "store_id"] in ("S4", "S5")
+    ]
+    mutated = frame.drop(index=doomed)
+    result = assess_aggregate_coverage(mutated, config, 15)
+    assert result["product_id"].regressed, (
+        "aggregate coverage drop went undetected"
+    )
+
+
+@negative_control("coverage:normal_period_does_not_fire")
+def _coverage_quiet_on_normal_period() -> None:
+    # The complement: an unchanged period must stay quiet, or the gate is a
+    # false-positive generator rather than a gate.
+    import pandas as pd
+
+    from qc.config import DatasetConfig
+    from qc.coverage import assess_aggregate_coverage
+
+    config = DatasetConfig(
+        entity_key_columns=("store_id", "product_id"),
+        entity_columns=("store_id", "product_id"),
+    )
+    rows = []
+    for week in range(1, 16):
+        for store in range(5):
+            for product in range(5):
+                rows.append(
+                    {
+                        "week": week,
+                        "store_id": f"S{store}",
+                        "product_id": f"P{product}",
+                        "dollar": 1.0,
+                    }
+                )
+    result = assess_aggregate_coverage(pd.DataFrame(rows), config, 15)
+    assert not any(entry.regressed for entry in result.values())

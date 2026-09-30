@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 
@@ -420,3 +422,56 @@ def test_cross_metric_flag():
         cross_metric_flags=["dollar_change_without_units"],
     )
     assert classify_run("PASS", events, attribution, CONFIG) == "INVESTIGATE"
+
+
+def _sparse_presence_frames(trailing_present):
+    """SPARSE trades in ``trailing_present`` of weeks 1..9 in BOTH versions.
+
+    Week 10 exists only in the current version, so the pair has overlap 1..9
+    and a single new period. SPARSE is present in the overlap either way, so
+    this isolates *latest-period* absence from historical removal.
+    """
+    rows_prev = []
+    rows_curr = []
+    for week in range(1, 10):
+        rows_prev.append({"week": week, "store_id": "ALWAYS", "dollar": 1.0, "units": 1})
+        rows_curr.append({"week": week, "store_id": "ALWAYS", "dollar": 1.0, "units": 1})
+    for week in trailing_present:
+        rows_prev.append({"week": week, "store_id": "SPARSE", "dollar": 2.0, "units": 1})
+        rows_curr.append({"week": week, "store_id": "SPARSE", "dollar": 2.0, "units": 1})
+    rows_curr.append({"week": 10, "store_id": "ALWAYS", "dollar": 1.0, "units": 1})
+    return _fact(rows_prev), _fact(rows_curr)
+
+
+def test_sparse_entity_absence_is_not_a_coverage_regression():
+    # An entity that traded in 2 of the last 8 weeks and is absent now is
+    # ordinary on real transactional data, where most pairs do not trade every
+    # week. Flagging it is what made every real refresh an INVESTIGATE.
+    previous, current = _sparse_presence_frames([2, 3])
+    pair = _pair(previous, current)
+    strict = replace(CONFIG, entity_presence_threshold=1.0, entity_presence_window=8)
+    events = {
+        event.entity_id: event
+        for event in classify_entity_changes(previous, current, pair, strict)
+        if event.entity_type == "store"
+    }
+    assert "SPARSE" not in events or LATEST_MISSING not in events["SPARSE"].classifications
+
+
+def test_reliably_present_entity_absence_is_still_flagged():
+    # The complement: an entity present in every trailing week and absent now
+    # IS a coverage regression, and the reliability gate must not silence it.
+    previous, current = _sparse_presence_frames([2, 3, 4, 5, 6, 7, 8, 9])
+    pair = _pair(previous, current)
+    strict = replace(CONFIG, entity_presence_threshold=1.0, entity_presence_window=8)
+    events = {
+        event.entity_id: event
+        for event in classify_entity_changes(previous, current, pair, strict)
+        if event.entity_type == "store"
+    }
+    assert events["SPARSE"].classification == LATEST_MISSING
+
+
+def test_default_presence_threshold_preserves_prior_behaviour():
+    # Default 0.0 must not change the dense synthetic semantics.
+    assert DatasetConfig().entity_presence_threshold == 0.0

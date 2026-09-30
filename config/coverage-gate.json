@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "name": "scope_coverage_baseline",
+  "registered": "2026-09-26",
+  "metric": "control_alarm_rate_on_real_refreshes",
+  "max_control_alarm_rate": 0.1,
+  "min_detection_rate": 1.0,
+  "min_detectable_drop_fraction": 0.3,
+  "corpus": "real",
+  "hypothesis": "Scope coverage regressed only when a scope's appended-period entity coverage falls below that scope's OWN trailing distribution, so that ordinary sparsity in real transactional data does not escalate while a genuine coverage drop still does.",
+  "why_this_gate_exists": "The 27-refresh real replay measured a 100% alarm rate: 25 of 27 real weekly refreshes returned INVESTIGATE, every one MISSING_STORES or MISSING_PRODUCTS. Root cause was measured, not assumed: 80-89% of previously-seen store-product pairs are absent in any given real week (mean 85.1% absent), and the per-entity rule escalated any entity that traded last week and not this week. Real data has no ceiling effect, so unlike every other gate in this repository this one is measured on a real corpus and does not depend on the synthetic oracle.",
+  "design": {
+    "signal": "distinct entity coverage of the appended period, compared against the same scope's own consecutive-period coverage counts",
+    "threshold": "derived per scope from that scope's trailing counts at the registered quantile; never a global constant and never an absolute expected-entity count, because real scopes differ by orders of magnitude in size and volatility",
+    "direction": "coverage is one-sided: only a fall below the scope's own recent experience is evidence; a rise is never a regression",
+    "held_constant": "identical real suite, identical split, identical scope set. Only the presence of the coverage gate and its quantile differ.",
+    "arms": {
+      "per_entity_only": "existing LATEST_WEEK_MISSING rule, un-gated (the behaviour that produced the 100% alarm rate)",
+      "per_entity_gated": "LATEST_WEEK_MISSING escalates only when the scope's own coverage has regressed"
+    }
+  },
+  "acceptance": {
+    "control_alarm_rate": "over the real refresh sequence, the fraction of periods where a scope is reported as coverage-regressed while the scope is within its own trailing range. Must be at or below max_control_alarm_rate.",
+    "min_detection_rate": "over injected coverage drops at or above min_detectable_drop_fraction of the scope's entities removed, the fraction the check must flag. A drop of this size is far outside any real scope's own range.",
+    "per_entity_suppression": "with the gate active, the number of LATEST_WEEK_MISSING escalations on a normal real refresh must be zero; the per-entity events remain available as facts, they simply stop escalating on their own."
+  },
+  "claims_limit": "Passing this gate authorises `research` status and permits defaulting the per-entity escalation to the gated form. It does not confer validated-real, does not authorise statistical clearance, and does not establish a production false-positive rate. It is measured on one public retail corpus, which is real data but not the owner's production table, and which contains no analyst-confirmed outcomes.",
+  "note": "Written BEFORE any measurement of the coverage check's behaviour. If the gate fails it is reported as failed and not retro-fitted, exactly as the B1 decomposition gate was."
+}

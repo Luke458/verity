@@ -229,6 +229,33 @@ class DatasetConfig:
     temporal_z_threshold: float = 3.0
     temporal_change_point_threshold: float = 5.0
     temporal_min_relative_residual: float = 0.02
+    # Distribution drift over the appended period. Off by default: the gate in
+    # config/drift-gate.json passed on synthetic data only, and enabling a
+    # detector before it has real-data calibration is how false-positive
+    # generators get promoted. The threshold is derived per scope from that
+    # scope's own consecutive-week PSI distribution, never from a global
+    # constant, because PSI is sample-size dependent.
+    distribution_drift_enabled: bool = False
+    distribution_drift_bins: int = 10
+    distribution_drift_reference_weeks: int = 8
+    distribution_drift_abs_floor: float = 0.01
+    distribution_drift_quantile: float = 0.95
+    # Entity presence reliability. An entity absent from the appended period is
+    # only evidence of a coverage regression if it traded in at least this
+    # fraction of its own trailing window. Default 0.0 preserves the previous
+    # behaviour exactly (any entity that traded last week and not this week is
+    # flagged); the synthetic generator is dense, so it never needed a baseline.
+    # Real transactional sources are sparse and fire on every refresh without
+    # one, which is what the real-table replay measured.
+    entity_presence_threshold: float = 0.0
+    entity_presence_window: int = 8
+    # Aggregate coverage gating of per-entity missing escalation. Off by default:
+    # the per-scope coverage gate in config/coverage-gate.json passed but was
+    # left unwired, and this aggregate form is the decision-grade alternative.
+    # With it on, LATEST_MISSING escalates only when the entity type actually
+    # lost counterpart keys against its own trailing history. The per-entity
+    # absences remain in the evidence either way.
+    coverage_gating_enabled: bool = False
     # Absolute materiality floor per metric/period/scope; never an accumulated
     # historical total.
     temporal_materiality_abs: float = 0.0

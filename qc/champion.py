@@ -33,7 +33,7 @@ from .fingerprints import manifest_data_fingerprint
 from .jsonutil import dumps as json_dumps
 from .labels import LabelRecord, oracle_labels_for_result
 from .text_provider import TextDecisionProvider, TextEmbedder, train_text_provider
-from .training import train_decision_provider
+from .training import label_metrics, train_decision_provider
 
 DEFAULT_CHAMPION_GATES: dict[str, float] = {
     "min_overall_accuracy": 0.85,
@@ -60,6 +60,13 @@ class ProviderScore:
     overall_accuracy: float = 0.0
     cause_accuracy: float = 0.0
     per_field: dict[str, float] = field(default_factory=dict)
+    # Imbalance-aware surface. Accuracy flatters a provider that never finds a
+    # rare class, so selection must see macro-F1, Matthews correlation and the
+    # cost-weighted score on the same cases (docs/next-phase-plan.md, B4).
+    macro_f1: float | None = None
+    mcc: float | None = None
+    mean_cost: float | None = None
+    per_field_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     correct_by_case: dict[str, int] = field(default_factory=dict)
     total_by_case: dict[str, int] = field(default_factory=dict)
     cases: int = 0
@@ -166,19 +173,62 @@ def _accuracy(correct: dict[str, int], total: dict[str, int]) -> dict[str, float
     }
 
 
+def _shape_metrics(
+    pairs: dict[str, list[tuple[str, str]]], unanswered: dict[str, int]
+) -> tuple[dict[str, dict[str, Any]], float | None, float | None, float | None]:
+    """Per-field shape metrics plus the unweighted mean across fields."""
+    per_field: dict[str, dict[str, Any]] = {}
+    for field_name, values in pairs.items():
+        expected = [truth for truth, _ in values]
+        predicted = [guess for _, guess in values]
+        metrics = label_metrics(
+            field_name,
+            expected,
+            predicted,
+            unanswered=unanswered.get(field_name, 0),
+        )
+        # The per-class breakdown and confusion matrix belong to the training
+        # report; a champion comparison needs the headline numbers only.
+        per_field[field_name] = {
+            key: metrics[key]
+            for key in (
+                "n",
+                "n_unanswered",
+                "macro_f1",
+                "mcc",
+                "g_mean",
+                "mean_cost",
+                "cost_score",
+            )
+        }
+
+    def _mean(key: str) -> float | None:
+        values = [item[key] for item in per_field.values() if item[key] is not None]
+        return (sum(values) / len(values)) if values else None
+
+    return per_field, _mean("macro_f1"), _mean("mcc"), _mean("mean_cost")
+
+
 def _score_result_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderScore:
     relevant = [item for item in items if item.result is not None]
     correct: dict[str, int] = {}
     total: dict[str, int] = {}
     correct_by_case: dict[str, int] = {}
     total_by_case: dict[str, int] = {}
+    pairs: dict[str, list[tuple[str, str]]] = {}
+    unanswered: dict[str, int] = {}
     for item in relevant:
         decisions = provider.decide(item.result)
         for field_name, expected in item.labels.items():
             total[field_name] = total.get(field_name, 0) + 1
             total_by_case[item.case_id] = total_by_case.get(item.case_id, 0) + 1
             decision = decisions.get(field_name)
-            if decision is not None and _normalize(decision.value) == expected:
+            if decision is None:
+                unanswered[field_name] = unanswered.get(field_name, 0) + 1
+                continue
+            guessed = _normalize(decision.value)
+            pairs.setdefault(field_name, []).append((expected, guessed))
+            if guessed == expected:
                 correct[field_name] = correct.get(field_name, 0) + 1
                 correct_by_case[item.case_id] = (
                     correct_by_case.get(item.case_id, 0) + 1
@@ -187,12 +237,17 @@ def _score_result_provider(provider: Any, items: Sequence[EvalItem]) -> Provider
     overall = (
         sum(correct.values()) / sum(total.values()) if sum(total.values()) else 0.0
     )
+    shaped, macro_f1, mcc, mean_cost = _shape_metrics(pairs, unanswered)
     return ProviderScore(
         provider=provider.name,
         available=True,
         overall_accuracy=overall,
         cause_accuracy=per_field.get("likely_cause", 0.0),
         per_field=per_field,
+        macro_f1=macro_f1,
+        mcc=mcc,
+        mean_cost=mean_cost,
+        per_field_metrics=shaped,
         correct_by_case=correct_by_case,
         total_by_case=total_by_case,
         cases=len(relevant),
@@ -223,6 +278,8 @@ def _score_head_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderSc
     total: dict[str, int] = {}
     correct_by_case: dict[str, int] = {}
     total_by_case: dict[str, int] = {}
+    pairs: dict[str, list[tuple[str, str]]] = {}
+    unanswered: dict[str, int] = {}
     for field_name, head in provider.heads.items():
         probabilities = head.probabilities(features)
         predictions = [
@@ -232,7 +289,11 @@ def _score_head_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderSc
             expected = record.labels.get(field_name)
             total[field_name] = total.get(field_name, 0) + 1
             total_by_case[item.case_id] = total_by_case.get(item.case_id, 0) + 1
-            if expected is not None and predicted == expected:
+            if expected is None:
+                unanswered[field_name] = unanswered.get(field_name, 0) + 1
+                continue
+            pairs.setdefault(field_name, []).append((expected, predicted))
+            if predicted == expected:
                 correct[field_name] = correct.get(field_name, 0) + 1
                 correct_by_case[item.case_id] = (
                     correct_by_case.get(item.case_id, 0) + 1
@@ -241,12 +302,17 @@ def _score_head_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderSc
     overall = (
         sum(correct.values()) / sum(total.values()) if sum(total.values()) else 0.0
     )
+    shaped, macro_f1, mcc, mean_cost = _shape_metrics(pairs, unanswered)
     return ProviderScore(
         provider=provider.name,
         available=True,
         overall_accuracy=overall,
         cause_accuracy=per_field.get("likely_cause", 0.0),
         per_field=per_field,
+        macro_f1=macro_f1,
+        mcc=mcc,
+        mean_cost=mean_cost,
+        per_field_metrics=shaped,
         correct_by_case=correct_by_case,
         total_by_case=total_by_case,
         cases=len(records),

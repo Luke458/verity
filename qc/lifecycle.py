@@ -158,10 +158,30 @@ def classify_entity_changes(
             removed_weeks = previous_set - current_set
             historical_added = added_weeks & overlap
             historical_removed = removed_weeks & overlap
+            # An entity that traded last week and not this week is only evidence
+            # of a coverage regression if that entity is *reliably* present. Real
+            # transactional data is sparse: a product that trades in roughly one
+            # week in five is expected to be absent in the next one. Without an
+            # entity-specific reliability baseline, absence degenerates into
+            # "always fires" on any naturally sparse source, which on real data
+            # is every refresh.
+            candidates = [
+                week_id
+                for week_id in range(
+                    pair.overlap_start, pair.previous_max_week + 1
+                )
+            ][-config.entity_presence_window :]
+            presence_rate = (
+                sum(1 for week_id in candidates if week_id in previous_set)
+                / len(candidates)
+                if candidates
+                else 0.0
+            )
             latest_missing = (
                 pair.previous_max_week in previous_set
                 and pair.current_max_week in pair.new_periods
                 and pair.current_max_week not in current_set
+                and presence_rate >= config.entity_presence_threshold
             )
 
             classifications: list[str] = []

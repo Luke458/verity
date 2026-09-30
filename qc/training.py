@@ -2,9 +2,11 @@
 
 Fits one linear softmax head per field over the versioned feature encoder and
 fits a scalar temperature on a held-out split. Metrics are reported per field
-(accuracy, multiclass Brier, top-label ECE) and overall. Artifacts record their
-training provenance; a provider trained on synthetic oracle labels must not be
-presented as validated on real refresh behaviour.
+(accuracy, multiclass Brier, top-label ECE, macro-F1, Matthews correlation,
+G-mean, per-class precision/recall/F1, confusion matrix and cost-weighted
+score) and overall. Artifacts record their training provenance; a provider
+trained on synthetic oracle labels must not be presented as validated on real
+refresh behaviour.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from .config import DatasetConfig
 from .conformal import wilson_interval
 from .decisions import (
     FEATURE_VERSION,
+    SEVERITY_VALUES,
     FeatureEncoder,
     LinearHead,
     TrainedDecisionProvider,
@@ -206,6 +209,187 @@ def fit_temperature(
     return best_temperature
 
 
+# ---------------------------------------------------------------------------
+# Cost-weighted scoring.
+#
+# Flat accuracy treats every mistake alike, and it should not: in retail QC a
+# missed actionable cause costs downstream consumers far more than a false
+# alarm costs an analyst. The constants below are a DECLARED DEFAULT pinned by
+# tests/test_qc_training.py so a silent change is visible in review. They are
+# not derived from measured business costs, which do not exist yet. Replace
+# them with an operations-supplied matrix before any threshold that gates an
+# action is tuned against them (docs/next-phase-plan.md, B4).
+# ---------------------------------------------------------------------------
+
+MISS_COST = 2.0  # truth is actionable, prediction claims UNKNOWN / LOW
+FALSE_ALARM_COST = 0.5  # truth is UNKNOWN, prediction raises a cause
+WRONG_CAUSE_COST = 1.0  # both actionable, the wrong one named
+SEVERITY_UNDER_COST = 2.0  # understating severity is worse than overstating
+SEVERITY_OVER_COST = 1.0
+
+UNKNOWNISH = frozenset({"UNKNOWN", "False", "LOW"})
+
+
+def pair_cost(field: str, true_label: str, pred_label: str) -> float:
+    """Cost of predicting ``pred_label`` when the truth is ``true_label``."""
+    if true_label == pred_label:
+        return 0.0
+    if field == "severity":
+        order = list(SEVERITY_VALUES)
+        if true_label not in order or pred_label not in order:
+            return WRONG_CAUSE_COST
+        gap = order.index(pred_label) - order.index(true_label)
+        span = max(len(order) - 1, 1)
+        weight = SEVERITY_UNDER_COST if gap < 0 else SEVERITY_OVER_COST
+        return weight * abs(gap) / span
+    true_quiet = true_label in UNKNOWNISH
+    pred_quiet = pred_label in UNKNOWNISH
+    if pred_quiet and not true_quiet:
+        return MISS_COST
+    if true_quiet and not pred_quiet:
+        return FALSE_ALARM_COST
+    return WRONG_CAUSE_COST
+
+
+def cost_matrix(field: str, classes: Sequence[str]) -> np.ndarray:
+    """``matrix[i, j]`` is the cost of predicting ``classes[j]`` for ``classes[i]``."""
+    size = len(classes)
+    matrix = np.zeros((size, size), dtype=float)
+    for i, true_label in enumerate(classes):
+        for j, pred_label in enumerate(classes):
+            matrix[i, j] = pair_cost(field, true_label, pred_label)
+    return matrix
+
+
+def _multiclass(
+    predictions: np.ndarray, targets: np.ndarray, classes: Sequence[str]
+) -> dict[str, Any]:
+    """Macro-F1, Matthews correlation, G-mean and the per-class breakdown.
+
+    ``predictions`` and ``targets`` must already exclude unmapped labels: the
+    head cannot emit a class it was never given, so these quantities are only
+    well defined on the mapped subset. Callers report ``n_unmapped`` beside
+    them so a high macro-F1 over few mapped cases cannot read as strength.
+    """
+    size = len(classes)
+    confusion = np.zeros((size, size), dtype=int)
+    for truth, pred in zip(targets, predictions, strict=True):
+        confusion[int(truth), int(pred)] += 1
+    support = confusion.sum(axis=1)
+    predicted = confusion.sum(axis=0)
+    true_positive = np.diag(confusion).astype(float)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        precision = np.where(
+            predicted > 0, true_positive / np.maximum(predicted, 1), 0.0
+        )
+        recall = np.where(support > 0, true_positive / np.maximum(support, 1), 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f1 = np.where(
+            (precision + recall) > 0,
+            2 * precision * recall / np.maximum(precision + recall, 1e-12),
+            0.0,
+        )
+
+    # Macro averages are taken over classes that actually occur in the truth.
+    # A class with zero support has no defined F1 and must not drag the mean.
+    present = support > 0
+    macro_f1 = float(f1[present].mean()) if present.any() else None
+    recalls = recall[present]
+    # G-mean is the geometric mean of per-class recalls: it collapses to zero as
+    # soon as one real class is never found, which is exactly the property we
+    # want when a rare but severe defect is in the label set.
+    g_mean = (
+        float(np.exp(np.log(np.clip(recalls, 1e-12, 1.0)).mean()))
+        if recalls.size and (recalls > 0).all()
+        else (0.0 if recalls.size else None)
+    )
+
+    # Multiclass Matthews correlation (Gorodkin 2004).
+    n = float(confusion.sum())
+    covariance = float(true_positive.sum() * n - np.dot(predicted, support))
+    denominator = float(
+        np.sqrt((n * n - np.dot(predicted, predicted)) * (n * n - np.dot(support, support)))
+    )
+    mcc = (covariance / denominator) if denominator > 0 else 0.0
+
+    return {
+        "macro_f1": macro_f1,
+        "mcc": float(mcc),
+        "g_mean": g_mean,
+        "n_mapped": int(confusion.sum()),
+        "per_class": {
+            classes[i]: {
+                "support": int(support[i]),
+                "predicted": int(predicted[i]),
+                "precision": float(precision[i]),
+                "recall": float(recall[i]),
+                "f1": float(f1[i]),
+            }
+            for i in range(size)
+        },
+        "confusion": confusion.tolist(),
+    }
+
+
+def label_metrics(
+    field: str,
+    expected: Sequence[str],
+    predicted: Sequence[str],
+    unanswered: int = 0,
+) -> dict[str, Any]:
+    """Macro-F1, MCC, G-mean and cost for paired string labels.
+
+    Unlike `evaluate_decision_provider`, this scores hard predictions rather
+    than probabilities, so it can score any provider - a rule adapter, a
+    remote Jev endpoint or a trained head - on the same footing. A label the
+    provider never predicts simply appears as a class with zero recall, which
+    is exactly what macro-F1 and G-mean should punish.
+
+    ``unanswered`` counts cases where the provider produced no value for the
+    field. They are charged the flat MISS_COST and left out of the shape
+    metrics, which are only defined over real label pairs, and they are
+    reported so a high macro-F1 over few answered cases cannot read as
+    strength.
+    """
+    if len(expected) != len(predicted):
+        raise ValueError("expected and predicted must have the same length")
+    n = len(expected) + unanswered
+    if not expected:
+        return {
+            "n": n,
+            "n_unanswered": unanswered,
+            "macro_f1": None,
+            "mcc": None,
+            "g_mean": None,
+            "mean_cost": (MISS_COST if unanswered else None),
+            "cost_score": (0.0 if unanswered else None),
+            "per_class": {},
+            "confusion": [],
+        }
+    vocabulary = sorted(set(expected) | set(predicted))
+    index = {label: position for position, label in enumerate(vocabulary)}
+    targets = np.asarray([index[label] for label in expected], dtype=int)
+    guesses = np.asarray([index[label] for label in predicted], dtype=int)
+    result = _multiclass(guesses, targets, vocabulary)
+    total_cost = float(
+        sum(
+            pair_cost(field, truth, guess)
+            for truth, guess in zip(expected, predicted, strict=True)
+        )
+    ) + unanswered * MISS_COST
+    mean_cost = total_cost / n
+    result.update(
+        {
+            "n": n,
+            "n_unanswered": unanswered,
+            "mean_cost": mean_cost,
+            "cost_score": 1.0 - mean_cost / MISS_COST,
+        }
+    )
+    return result
+
+
 def _brier(probabilities: np.ndarray, targets: np.ndarray) -> float:
     one_hot = np.zeros_like(probabilities)
     one_hot[np.arange(len(targets)), targets] = 1.0
@@ -229,6 +413,85 @@ def _ece(probabilities: np.ndarray, targets: np.ndarray, bins: int = 10) -> floa
     return float(ece)
 
 
+def evaluate_field(
+    field_name: str,
+    probabilities: np.ndarray,
+    classes: Sequence[str],
+    records: Sequence[LabelRecord],
+) -> dict[str, Any]:
+    """The full metric surface for one field over one set of records.
+
+    ``probabilities`` is ``(n_records, n_classes)`` and ``classes`` names its
+    columns. Shared by every substrate - a flat multi-class head, a decomposed
+    set of binary heads, or anything else that can emit a distribution - so two
+    arms of an experiment are always scored identically.
+    """
+    classes = tuple(classes)
+    # A label outside the head's classes is a miss, not a free pass: it is
+    # counted in the denominator and never in the numerator.
+    targets = np.asarray(
+        [
+            classes.index(record.labels[field_name])
+            if record.labels.get(field_name) in classes
+            else -1
+            for record in records
+        ]
+    )
+    valid = targets >= 0
+    predictions = probabilities.argmax(axis=1)
+    correct = (predictions == targets) & valid
+    n_total = len(records)
+    n_correct = int(correct.sum())
+    ci_low, ci_high = wilson_interval(n_correct, n_total)
+    valid_targets = targets[valid]
+    metrics: dict[str, Any] = {
+        "n": n_total,
+        "n_unmapped": int((~valid).sum()),
+        "accuracy": n_correct / n_total if n_total else 0.0,
+        "accuracy_ci_low": ci_low,
+        "accuracy_ci_high": ci_high,
+        "brier": (
+            _brier(probabilities[valid], valid_targets) if len(valid_targets) else None
+        ),
+        "ece": (
+            _ece(probabilities[valid], valid_targets) if len(valid_targets) else None
+        ),
+    }
+    # Cost is charged over every case, including unmapped labels: a truth the
+    # head cannot even name is charged at the flat MISS_COST whatever it
+    # predicted, because the failure is that the class is not in the head's
+    # vocabulary. The shape metrics below are only defined on the mapped
+    # subset and are reported beside n_unmapped so a high macro-F1 over few
+    # mapped cases cannot read as strength.
+    if n_total:
+        charged = np.asarray(
+            [
+                (
+                    MISS_COST
+                    if record.labels.get(field_name) not in classes
+                    else pair_cost(
+                        field_name,
+                        record.labels[field_name],
+                        classes[int(pred)],
+                    )
+                )
+                for record, pred in zip(records, predictions, strict=True)
+            ],
+            dtype=float,
+        )
+        mean_cost = float(charged.mean())
+        metrics["mean_cost"] = mean_cost
+        # Normalized by the declared worst case rather than the matrix
+        # maximum, so the score is comparable across fields and stays honest
+        # when an unmapped label is charged above the matrix.
+        metrics["cost_score"] = 1.0 - mean_cost / MISS_COST
+    else:
+        metrics["mean_cost"] = None
+        metrics["cost_score"] = None
+    metrics.update(_multiclass(predictions[valid], valid_targets, classes))
+    return metrics
+
+
 def evaluate_decision_provider(
     provider: TrainedDecisionProvider,
     records: Sequence[LabelRecord],
@@ -242,43 +505,12 @@ def evaluate_decision_provider(
     correct_total = 0
     predictions_total = 0
     for field_name, head in provider.heads.items():
-        # A label outside the head's classes is a miss, not a free pass: it is
-        # counted in the denominator and never in the numerator.
-        targets = np.asarray(
-            [
-                head.classes.index(record.labels[field_name])
-                if record.labels.get(field_name) in head.classes
-                else -1
-                for record in records
-            ]
+        metrics = evaluate_field(
+            field_name, head.probabilities(features), head.classes, records
         )
-        valid = targets >= 0
-        probabilities = head.probabilities(features)
-        predictions = probabilities.argmax(axis=1)
-        correct = (predictions == targets) & valid
-        n_total = len(records)
-        n_correct = int(correct.sum())
-        ci_low, ci_high = wilson_interval(n_correct, n_total)
-        valid_targets = targets[valid]
-        per_field[field_name] = {
-            "n": n_total,
-            "n_unmapped": int((~valid).sum()),
-            "accuracy": n_correct / n_total if n_total else 0.0,
-            "accuracy_ci_low": ci_low,
-            "accuracy_ci_high": ci_high,
-            "brier": (
-                _brier(probabilities[valid], valid_targets)
-                if len(valid_targets)
-                else None
-            ),
-            "ece": (
-                _ece(probabilities[valid], valid_targets)
-                if len(valid_targets)
-                else None
-            ),
-        }
-        correct_total += n_correct
-        predictions_total += n_total
+        per_field[field_name] = metrics
+        correct_total += int(round(metrics["accuracy"] * metrics["n"]))
+        predictions_total += metrics["n"]
     return {
         "n": len(records),
         "fields": per_field,

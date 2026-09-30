@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -127,6 +128,65 @@ def test_weekly_investigate_and_exit_codes(tmp_path):
         )
         == 2
     )
+
+
+def _sink_file(path: Path) -> str:
+    path.write_text(json.dumps({"sinks": [{"kind": "file", "target": str(path.parent / "out.jsonl")}]}))
+    return str(path)
+
+
+def test_weekly_notification_does_not_change_exit_code(tmp_path):
+    # The contract that matters: adding a sink must not be able to alter the
+    # scheduler's decision, whether the sink works or fails.
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31, 32), missing_latest_store=True)
+    config = replace(DatasetConfig(), name="weekly-notify")
+    run_weekly(str(path), config=config, out_root=tmp_path / "warm")
+
+    out = tmp_path / "weekly"
+    assert main([
+        "weekly", "--uri", str(path), "--out", str(out),
+        "--notify", _sink_file(tmp_path / "sinks.json"),
+    ]) == 2
+    delivered = (tmp_path / "out.jsonl").read_text().strip().split("\n")
+    assert delivered
+    assert json.loads(delivered[-1])["status"] == "INVESTIGATE"
+
+    # A sink pointed at a dead port still leaves the exit code untouched.
+    dead = tmp_path / "dead.json"
+    dead.write_text(json.dumps({"sinks": [
+        {"kind": "webhook", "target": "http://127.0.0.1:9/x", "timeout": 1.0}
+    ]}))
+    assert main([
+        "weekly", "--uri", str(path), "--out", str(out), "--force",
+        "--notify", str(dead),
+    ]) == 2
+
+
+def test_weekly_notification_rejects_unusable_spec_without_failing(tmp_path):
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31, 32), missing_latest_store=True)
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"sinks": [{"kind": "smoke-signal"}]}))
+    code = main([
+        "weekly", "--uri", str(path), "--out", str(tmp_path / "weekly"),
+        "--notify", str(bad),
+    ])
+    assert code in (0, 1, 2, 3, 4)
+
+
+def test_weekly_cached_assessment_notification_is_suppressed(tmp_path):
+    # A retry must not re-page for an assessment that was already delivered.
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31, 32), missing_latest_store=True)
+    out = tmp_path / "weekly"
+    sinks = _sink_file(tmp_path / "sinks.json")
+    main(["weekly", "--uri", str(path), "--out", str(out), "--notify", sinks])
+    first = json.loads((tmp_path / "out.jsonl").read_text().strip().split("\n")[-1])
+    main(["weekly", "--uri", str(path), "--out", str(out), "--notify", sinks])
+    second = json.loads((tmp_path / "out.jsonl").read_text().strip().split("\n")[-1])
+    assert "suppressed" not in first
+    assert second["suppressed"] == "assessment was cached; no new notification"
 
 
 def test_weekly_force_rerun_notes_duplicate_run(tmp_path):

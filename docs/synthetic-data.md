@@ -29,25 +29,31 @@ Any field can be overridden in `config/datasets/*.yaml`.
 
 ## Fault families
 
-| Family | Stage | Expected class | Expected status |
-|---|---|---|---|
-| missing_stores | source | missing_stores | INVESTIGATE |
-| missing_products | source | missing_products | INVESTIGATE |
-| entity_merge | source | entity_merge | INVESTIGATE |
-| new_store_backfill | source | backfill | INVESTIGATE |
-| expected_event | source | backfill | PASS_WITH_EXPLANATION |
-| history_truncation | source | truncation | INVESTIGATE |
-| commodity_remap | source | reclassification | INVESTIGATE |
-| coding_error | coded | coding | INVESTIGATE |
-| warehouse_transform_error | warehouse | warehouse | INVESTIGATE |
-| recalculation | source | historical_correction | INVESTIGATE |
-| schema_failure | report | schema_failure | DATA_CONTRACT_FAILURE |
-| null_duplicate_storm | warehouse | null_duplicate_storm | INVESTIGATE |
-| market_movement | warehouse | market_movement | PASS (negative control) |
+This table is generated from `qcgen/spec.py` (`FAMILY_SPECS`), which is the
+single source of truth. `tests/test_docs_sync.py` diffs the two, so the table
+cannot drift again: change `FAMILY_SPECS`, then update this table to match.
 
-A suite cycles through the families and interleaves controls after every third
-fault, so a run with `--scenarios 5` on the default config covers a mixed plan
-and a larger run covers every family.
+| Family | Stage | Kind | Expected class | Expected origin | Expected status | Notes |
+|---|---|---|---|---|---|---|
+| missing_stores | source | fault | missing_stores | source | INVESTIGATE | |
+| missing_products | source | fault | missing_products | source | INVESTIGATE | |
+| entity_merge | source | fault | entity_merge | source | INVESTIGATE | |
+| new_store_backfill | source | fault | backfill | source | INVESTIGATE | |
+| expected_event | source | expected_event | backfill | source | INVESTIGATE | Registered event explains the historical revision, but every configured measure is assessed: residual secondary-measure coordinated drift still requires review. |
+| history_truncation | source | fault | truncation | source | INVESTIGATE | |
+| commodity_remap | source | fault | reclassification | source | INVESTIGATE | |
+| coding_error | coded | fault | coding | coded | INVESTIGATE | |
+| warehouse_transform_error | warehouse | fault | warehouse | warehouse | INVESTIGATE | |
+| recalculation | source | fault | historical_correction | source | INVESTIGATE | |
+| schema_failure | report | fault | schema_failure | report | DATA_CONTRACT_FAILURE | |
+| null_duplicate_storm | warehouse | fault | null_duplicate_storm | warehouse | DATA_CONTRACT_FAILURE | Contract failure — the report table is not fit for revision QC — not an ordinary INVESTIGATE. |
+| market_movement | warehouse | control | market_movement | (none) | INVESTIGATE | Negative control whose latest week is a genuine movement, so the engine status is INVESTIGATE (latest-week anomaly) even though the historical revision is clean. |
+
+`requires_investigation` is derived, not declared: it is true exactly when the
+expected status is `INVESTIGATE` or `DATA_CONTRACT_FAILURE`
+(`FamilySpec.requires_investigation`). A suite cycles through the families and
+interleaves controls after every third fault, so a run with `--scenarios 5` on
+the default config covers a mixed plan and a larger run covers every family.
 
 The product-level and merge families close coverage gaps rather than add
 volume: `missing_products` exercises the `MISSING_PRODUCTS` semantic class, and

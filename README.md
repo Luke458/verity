@@ -175,9 +175,31 @@ uv pip install --python .venv/bin/python -e ".[test]"
 .venv/bin/python -m optional.scale_benchmark --profile five-million \
   --out reports/benchmarks/scale-5m.json
 
+# Distribution drift over the appended period (opt-in; per-scope thresholds).
+# Catches a value redistribution that preserves row counts, null cells, entity
+# sets and every column sum -- invisible to the deterministic layer.
+#   echo 'distribution_drift_enabled: true' > drift.yaml
+#   .venv/bin/qc run --scenario-dir data/suites/demo/scenario-0000 --config drift.yaml
+#
+# Pre-registered gate (config/drift-gate.json), run as registered:
+.venv/bin/python -m optional.drift_benchmark --suite data/suites/demo \
+#  --out reports/benchmarks/drift.json
+
 # Weekly entry point for a scheduler (idempotent; exit 2 = INVESTIGATE)
 .venv/bin/qc weekly --uri ./lake/fact --store data/qc.db \
   --out reports/weekly
+
+
+# Notify on an actionable weekly status (fail-soft; cannot change the exit code)
+cat > sinks.json <<'JSON'
+{"sinks": [
+  {"kind": "webhook", "target": "https://example.invalid/qc",
+   "token_env": "QC_WEBHOOK_TOKEN"},
+  {"kind": "file", "target": "reports/notify/weekly.jsonl"}
+]}
+JSON
+.venv/bin/qc weekly --uri ./lake/fact --store data/qc.db --out reports/weekly \
+  --notify sinks.json
 
 # Real-data pilot label prerequisites (see docs/real-pilot.md)
 .venv/bin/qc pilot-check --store data/pilot.db --plan config/cohort.json
@@ -215,9 +237,13 @@ status and known weaknesses of each row.
 | Evaluation | Frozen cohorts, conformal intervals, prequential calibration, bounded evidence queries | implemented; group confidence bounds, independent fixture labels and provider-rerun ablations (M8) |
 | Evidence engine | Declared calendar, disjoint selection/calibration, hierarchy and ledger evidence, bound certificate clearance, `qc explain` / `qc evidence-bench` | implemented; per-period findings and pinned qualification required for clearance; synthetic qualification cannot clear real data |
 | Operations | Confirmed-only SQLite store, revisioned registry, drift monitoring | implemented; provenance, locking and atomicity enforced (M4); schema 6 backs up before migration and preserves feature/text versions |
+| Notification | Fail-soft webhook/file/stdout sinks fired from `qc weekly`, bounded deterministic payloads, credentials read from the environment, cached-retry suppression | implemented; delivery cannot alter status, exit code or report; no production endpoint exercised |
+| Distribution drift | Per-scope PSI over the appended period, thresholded against that scope's own week-to-week history; catches invariant-preserving value redistribution | research; pre-registered gate passed on synthetic data (detection 1.000, control alarm 0.077); off by default, no real-data FPR claimed |
+| Scope coverage baseline | Per-scope coverage against that scope's own trailing distribution; the missing-entity escalation gate real sparse data needs | research; pre-registered gate passed on real data (control alarm 0.010, detection 1.000); ~43 scope flags/period, so **not** wired |
+| Aggregate coverage gating | Gates `MISSING_STORES`/`MISSING_PRODUCTS` on whether the entity type actually lost counterpart keys; absences stay in the evidence | research; pre-registered gate **FAILED** (detection 0.500 vs 1.0 required); off by default, do not enable on this evidence |
 | Substrates | Frozen-encoder text probe (ModernBERT-class) | research; eligibility requires a pinned real evaluation and operational checks |
 | Champion | Provider bake-off with pre-registered gates and leakage checks | implemented; paired selection and provenance enforced; real-label selection pending |
-| Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; never run on a real table |
+| Onboarding | Delta profiling, config proposal, readiness assessment, outcome import, production field mapping | implemented; run end to end on a real table (UCI Online Retail) — contracts PASS, weekly reaches INVESTIGATE; still no analyst-confirmed cohort |
 | Feedback simulation | Synthetic analyst outcomes with drafts, mistakes, corrections, provenance gates | research; tags from simulated cause |
 | Verity spine | Replay, scoped expectations, reference controls, bounded RCA loop, prequential point-in-time forecasting | ported; Spark/Databricks not implemented |
 | Weekly run | `qc weekly` orchestrator, frozen recurrence inputs and qualification state in assessment identity, recoverable journal, review exit codes | implemented; SQLite schema 6 plus atomic report publication |

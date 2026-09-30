@@ -16,6 +16,7 @@ from qc.config import DatasetConfig
 from qc.labels import LabelStore, build_oracle_labels, records_from_store
 from qc.run import run_qc
 from qc.store import SqliteStore
+from qc.training import MISS_COST
 from qcgen.config import suite_config
 from qcgen.scenarios import build_scenario, generate_suite
 from qcgen.sources import ScenarioSource
@@ -139,6 +140,37 @@ def test_bakeoff_reports_every_provider(cohorts):
     assert not by_name["text_probe"].available
     assert "no text embedder" in by_name["text_probe"].note
     assert not by_name["remote"].available
+    json.dumps(result.to_dict(), default=str)
+
+
+def test_champion_scores_report_the_imbalance_surface(cohorts):
+    """Selection must see more than accuracy (docs/next-phase-plan.md, B4)."""
+    records, items, _ = cohorts
+    result = run_champion(
+        records, items, DatasetConfig(), gates=_permissive_gates()
+    )
+    for score in result.scores:
+        if not score.available:
+            continue
+        assert score.macro_f1 is not None or not score.per_field_metrics
+        if score.mean_cost is not None:
+            assert 0.0 <= score.mean_cost <= MISS_COST
+        for field, metrics in score.per_field_metrics.items():
+            for key in (
+                "n",
+                "n_unanswered",
+                "macro_f1",
+                "mcc",
+                "g_mean",
+                "mean_cost",
+                "cost_score",
+            ):
+                assert key in metrics, f"{score.provider}/{field} missing {key}"
+            # The confusion matrix and per-class table stay in the training
+            # report; the champion comparison is deliberately compact.
+            assert "confusion" not in metrics
+            assert metrics["n_unanswered"] >= 0
+    # The report must remain JSON-serializable with the added surface.
     json.dumps(result.to_dict(), default=str)
 
 

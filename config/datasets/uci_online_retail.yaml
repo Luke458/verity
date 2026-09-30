@@ -1,0 +1,23 @@
+name: lake
+week_column: week
+metric_columns:
+- dollar
+- units
+- n_txn
+primary_metric: dollar
+entity_columns:
+- store_id
+- product_id
+entity_key_columns:
+- store_id
+- product_id
+report_grain: []
+count_entity_map:
+- - store_count
+  - store_id
+- - product_count
+  - product_id
+required_columns:
+- week
+- dollar
+- units
