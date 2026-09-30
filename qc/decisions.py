@@ -1,32 +1,22 @@
-"""Typed semantic decisions over the evidence graph (Milestone D).
+"""Typed cause labels for a completed run.
 
-The runtime returns typed fields - ``likely_cause``, ``likely_origin``,
-``severity`` and ``requires_investigation`` - with distributions and explicit
-evidence references. Two providers share one interface:
-
-- ``RuleDecisionProvider`` maps deterministic and temporal evidence to fields
-  with heuristic probabilities. It needs no training and is the working
-  provider until real analyst labels exist.
-- ``TrainedDecisionProvider`` is a linear softmax head per field over the
-  versioned feature encoder, fitted offline by ``qc.training``.
-
-``probability_kind`` is ``heuristic`` for rules and ``temperature_scaled`` for
-trained heads; neither is a calibration certificate.
+``RuleDecisionProvider`` maps deterministic and temporal evidence to
+``likely_cause``, ``likely_origin`` and ``severity`` with explicit evidence
+references. ``requires_investigation`` is never a provider opinion: it is the
+policy verdict (the final status is not PASS or PASS_WITH_EXPLANATION), so a
+label can neither clear nor escalate a run. Probabilities are heuristic
+(``probability_kind="heuristic"``), not calibrated.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from dataclasses import field as dc_field
-from pathlib import Path
 from typing import Any, Protocol
 
-import numpy as np
-
 from .config import DatasetConfig
-from .jsonutil import dumps as json_dumps
+from .lifecycle import missing_entity_impact
 
 CAUSE_VALUES: tuple[str, ...] = (
     "MISSING_STORES",
@@ -158,211 +148,6 @@ class DecisionProvider(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Feature encoder
-# ---------------------------------------------------------------------------
-
-FEATURE_VERSION = 3
-
-
-def feature_version() -> int:
-    """Current feature-encoding version for artifacts and label stores."""
-    return FEATURE_VERSION
-
-EVENT_CLASSES: tuple[str, ...] = (
-    "NEW_ENTITY_HISTORICAL_BACKFILL",
-    "NEW_ENTITY_RECENT",
-    "ENTITY_REMOVED",
-    "ENTITY_HISTORY_EXTENDED",
-    "ENTITY_HISTORY_TRUNCATED",
-    "LATEST_WEEK_MISSING",
-    "POSSIBLE_RECLASSIFICATION",
-)
-DIVERGENCE_STAGES: tuple[str, ...] = ("source", "coded", "warehouse", "report")
-TEMPORAL_FLAGS: tuple[str, ...] = (
-    "forecast_lower",
-    "forecast_upper",
-    "robust_z",
-    "seasonal_z",
-    "ewma",
-    "change_point",
-)
-STATUS_VALUES: tuple[str, ...] = (
-    "PASS",
-    "PASS_WITH_EXPLANATION",
-    "INVESTIGATE",
-    "DATA_CONTRACT_FAILURE",
-)
-
-
-class FeatureEncoder:
-    """Versioned numeric encoding of a QC run for learned providers."""
-
-    feature_version = FEATURE_VERSION
-
-    def __init__(self, config: DatasetConfig | None = None):
-        self.config = config or DatasetConfig()
-        self._names = self._build_names()
-
-    def _build_names(self) -> list[str]:
-        names = [
-            "contract_failed",
-            "raw_delta_relative",
-            "unexplained_relative",
-            "explained_fraction",
-            "material",
-            "breadth",
-            "reconciliation_failures",
-            "temporal_min_percentile",
-            "temporal_max_relative_residual",
-            "cross_metric_flags",
-            "evidence_failed_contracts",
-            "evidence_unavailable_required",
-            "evidence_contradictions",
-            "ledger_explained_fraction",
-            "ledger_net_unexplained_relative",
-            "interval_width_relative",
-            "calibration_coverage",
-            "provenance_synthetic",
-        ]
-        names += [f"event:{value}" for value in EVENT_CLASSES]
-        names += [f"divergence:{value}" for value in DIVERGENCE_STAGES]
-        names += ["divergence:none"]
-        names += [f"temporal_flag:{value}" for value in TEMPORAL_FLAGS]
-        return names
-
-    @property
-    def feature_names(self) -> list[str]:
-        return list(self._names)
-
-    def encode(self, result: Any) -> np.ndarray:
-        recorded = getattr(result, "recorded_features", None)
-        if recorded is not None:
-            if len(recorded) != len(self._names) or not np.isfinite(recorded).all():
-                raise ValueError("invalid recorded feature evidence")
-            return np.asarray(recorded, dtype=float)
-        values: dict[str, float] = {name: 0.0 for name in self._names}
-        contracts = getattr(result, "contracts", None)
-        if contracts is not None and contracts.status == "DATA_CONTRACT_FAILURE":
-            values["contract_failed"] = 1.0
-
-        attribution = getattr(result, "attribution", None)
-        previous_total = 0.0
-        if attribution is not None:
-            previous_total = float(attribution.previous_total)
-            denominator = previous_total if abs(previous_total) > 1e-12 else 1.0
-            values["raw_delta_relative"] = float(attribution.raw_delta) / denominator
-            values["unexplained_relative"] = (
-                float(attribution.unexplained_delta) / denominator
-            )
-            values["explained_fraction"] = float(attribution.explained_fraction)
-            values["material"] = 1.0 if attribution.material else 0.0
-            values["breadth"] = float(attribution.breadth)
-            if attribution.cross_metric_flags:
-                values["cross_metric_flags"] = float(
-                    len(attribution.cross_metric_flags)
-                )
-
-        reconciliation = getattr(result, "reconciliation", None)
-        if reconciliation is not None:
-            values["reconciliation_failures"] = float(len(reconciliation.failed))
-
-        event_counts: dict[str, int] = {}
-        for event in getattr(result, "events", ()) or ():
-            event_counts[event.classification] = (
-                event_counts.get(event.classification, 0) + 1
-            )
-        for name, count in event_counts.items():
-            key = f"event:{name}"
-            if key in values:
-                values[key] = float(count)
-
-        lineage = getattr(result, "lineage", None)
-        first = lineage.first_divergence if lineage is not None else None
-        if first in DIVERGENCE_STAGES:
-            values[f"divergence:{first}"] = 1.0
-        else:
-            values["divergence:none"] = 1.0
-
-        temporal = getattr(result, "temporal", None)
-        if temporal is not None:
-            # Derived anomaly verdicts are policy outputs and never enter a
-            # learned feature; detector statistics and flags remain evidence.
-            percentiles = [
-                item.calibrated_percentile
-                for item in temporal.series
-                if item.calibrated_percentile is not None
-            ]
-            values["temporal_min_percentile"] = (
-                float(min(percentiles)) if percentiles else 0.5
-            )
-            residuals = [
-                abs(float(item.relative_residual)) for item in temporal.series
-            ]
-            values["temporal_max_relative_residual"] = (
-                float(max(residuals)) if residuals else 0.0
-            )
-            for item in temporal.series:
-                for flag in item.flags:
-                    key = f"temporal_flag:{flag}"
-                    if key in values:
-                        values[key] += 1.0
-
-        machine = getattr(result, "machine", None)
-        package = getattr(result, "evidence_package", None)
-        if package is not None:
-            package_contracts = list(getattr(package, "contracts", ()) or ())
-            values["evidence_failed_contracts"] = float(
-                sum(
-                    1
-                    for check in package_contracts
-                    if str((check or {}).get("status", "")) != "PASS"
-                )
-            )
-            values["evidence_contradictions"] = float(
-                len(getattr(package, "contradictions", ()) or ())
-            )
-            predictions = list(getattr(package, "predictions", ()) or ())
-            if isinstance(machine, dict):
-                values["evidence_unavailable_required"] = float(
-                    sum(
-                        1
-                        for finding in machine.get("findings", [])
-                        if finding.get("outcome") == "UNAVAILABLE"
-                        and finding.get("required")
-                    )
-                )
-            coverages = [
-                float(item.interval_coverage)
-                for item in predictions
-                if item.interval_coverage is not None
-            ]
-            values["calibration_coverage"] = min(coverages) if coverages else 0.0
-            width_ratios = [
-                float(item.interval_width) / max(abs(float(item.expected)), 1e-9)
-                for item in predictions
-                if item.interval_width is not None
-            ]
-            values["interval_width_relative"] = (
-                max(width_ratios) if width_ratios else 0.0
-            )
-            ledger = getattr(package, "ledger", None) or {}
-            movement = abs(float(ledger.get("raw_movement", 0.0)))
-            values["ledger_net_unexplained_relative"] = (
-                float(getattr(package, "net_unexplained", 0.0)) / movement
-                if movement > 1e-12
-                else 0.0
-            )
-            values["ledger_explained_fraction"] = float(
-                getattr(package, "explained_fraction", 0.0)
-            )
-            values["provenance_synthetic"] = (
-                1.0 if getattr(package, "provenance", "") == "synthetic" else 0.0
-            )
-
-        return np.asarray([values[name] for name in self._names], dtype=float)
-
-
-# ---------------------------------------------------------------------------
 # Rule provider
 # ---------------------------------------------------------------------------
 
@@ -393,10 +178,8 @@ def _stage_origin(stage: str) -> str:
 class RuleDecisionProvider:
     """Evidence-rule decisions with heuristic probabilities.
 
-    The rules mirror the deterministic semantics: registered structural changes
-    do not require investigation, unregistered ones do, material unexplained
-    changes escalate, and unexplained temporal-only movements require review
-    with UNKNOWN cause.
+    The first matching rule names the cause; ``requires_investigation`` is
+    copied from the policy status computed before the provider runs.
     """
 
     name = "rule"
@@ -404,24 +187,12 @@ class RuleDecisionProvider:
     def __init__(self, config: DatasetConfig | None = None):
         self.config = config or DatasetConfig()
 
-    def to_dict(self) -> dict:
-        from .cohort import code_sha256
-        return {"provider": self.name, "config": self.config.to_dict(), "engine_hash": code_sha256()}
-
     def decide(self, result: Any) -> DecisionSet:
-        if not hasattr(result, "contracts"):
-            from types import SimpleNamespace
-            recorded = result.machine.get("rule_evidence")
-            if recorded is None:
-                raise ValueError("recorded rule evidence is unavailable")
-            def restore(value):
-                if isinstance(value, dict):
-                    return SimpleNamespace(**{k: restore(v) for k, v in value.items()})
-                if isinstance(value, list):
-                    return [restore(v) for v in value]
-                return value
-            result = SimpleNamespace(run_id=result.run_id, **{k: restore(v) for k, v in recorded.items()})
-        cause, origin, severity, requires, strength, evidence = self._infer(result)
+        cause, origin, severity, _, strength, evidence = self._infer(result)
+        requires = str(getattr(result, "status", "")) not in (
+            "PASS",
+            "PASS_WITH_EXPLANATION",
+        )
         distributions = {
             "likely_cause": _heuristic_distribution(cause, CAUSE_VALUES, strength),
             "likely_origin": _heuristic_distribution(origin, ORIGIN_VALUES, strength),
@@ -508,7 +279,18 @@ class RuleDecisionProvider:
             # A merge candidate always needs confirmation.
             return "ENTITY_MERGE", "SOURCE", "MEDIUM", True, 0.6, evidence
 
-        latest_missing = by_class.get("LATEST_WEEK_MISSING", [])
+        # Only entity types whose absence is material name the cause; an
+        # immaterial absence stays in the evidence without driving the label.
+        material_types = {
+            entity_type
+            for entity_type, impact in missing_entity_impact(events, config).items()
+            if impact["material"]
+        }
+        latest_missing = [
+            e
+            for e in by_class.get("LATEST_WEEK_MISSING", [])
+            if e.entity_type in material_types
+        ]
         stores_missing = [e for e in latest_missing if e.entity_type == "store"]
         products_missing = [e for e in latest_missing if e.entity_type == "product"]
         if stores_missing:
@@ -579,153 +361,3 @@ class RuleDecisionProvider:
         if magnitude >= 0.02:
             return "MEDIUM"
         return "LOW"
-
-
-# ---------------------------------------------------------------------------
-# Trained provider
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class LinearHead:
-    field: str
-    classes: tuple[str, ...]
-    weights: np.ndarray
-    bias: np.ndarray
-    temperature: float = 1.0
-
-    def probabilities(self, features: np.ndarray) -> np.ndarray:
-        logits = features @ self.weights + self.bias
-        scaled = logits / max(self.temperature, 1e-6)
-        scaled = scaled - scaled.max(axis=-1, keepdims=True)
-        exponentials = np.exp(scaled)
-        return exponentials / exponentials.sum(axis=-1, keepdims=True)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "field": self.field,
-            "classes": list(self.classes),
-            "weights": self.weights.tolist(),
-            "bias": self.bias.tolist(),
-            "temperature": float(self.temperature),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> LinearHead:
-        return cls(
-            field=str(data["field"]),
-            classes=tuple(str(c) for c in data["classes"]),
-            weights=np.asarray(data["weights"], dtype=float),
-            bias=np.asarray(data["bias"], dtype=float),
-            temperature=float(data.get("temperature", 1.0)),
-        )
-
-
-@dataclass
-class TrainedDecisionProvider:
-    encoder: FeatureEncoder
-    heads: dict[str, LinearHead]
-    feature_mean: np.ndarray
-    feature_std: np.ndarray
-    metadata: dict[str, Any] = dc_field(default_factory=dict)
-    name: str = "trained"
-
-    def _standardize(self, features: np.ndarray) -> np.ndarray:
-        safe_std = np.where(self.feature_std > 1e-12, self.feature_std, 1.0)
-        return (features - self.feature_mean) / safe_std
-
-    def decide(self, result: Any) -> DecisionSet:
-        raw = self.encoder.encode(result)
-        if isinstance(getattr(result, "machine", None), dict):
-            from .evidence_package import evidence_digest
-
-            result.machine["provider_payload_digest"] = evidence_digest(
-                {
-                    "provider": self.name,
-                    "feature_version": self.encoder.feature_version,
-                    "features": [float(value) for value in raw],
-                }
-            )
-        features = self._standardize(raw.reshape(1, -1))
-        specs = field_index()
-        values: dict[str, DecisionValue] = {}
-        requires = False
-        for field_name, head in self.heads.items():
-            probabilities = head.probabilities(features)[0]
-            best = int(np.argmax(probabilities))
-            label = head.classes[best]
-            value: Any = label
-            spec = specs.get(field_name)
-            kind = spec.kind if spec is not None else "choice"
-            if kind == "boolean":
-                value = label == "True"
-                requires = bool(value)
-            distribution = {
-                class_name: float(probability)
-                for class_name, probability in zip(head.classes, probabilities, strict=True)
-            }
-            values[field_name] = DecisionValue(
-                field=field_name,
-                kind=kind,
-                value=value,
-                probabilities=distribution,
-                strategy=self.name,
-                probability_kind="temperature_scaled",
-                evidence=[],
-                index=(
-                    score_index(distribution, head.classes)
-                    if kind == "score"
-                    else None
-                ),
-            )
-        return DecisionSet(
-            run_id=getattr(result, "run_id", ""),
-            provider=self.name,
-            values=values,
-            requires_investigation=requires,
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "provider": self.name,
-            "feature_version": self.encoder.feature_version,
-            "feature_names": self.encoder.feature_names,
-            "feature_mean": self.feature_mean.tolist(),
-            "feature_std": self.feature_std.tolist(),
-            "heads": {name: head.to_dict() for name, head in self.heads.items()},
-            "metadata": self.metadata,
-        }
-
-    def save(self, directory: str | Path) -> Path:
-        path = Path(directory)
-        path.mkdir(parents=True, exist_ok=True)
-        target = path / "provider.json"
-        target.write_text(json_dumps(self.to_dict(), indent=2, sort_keys=True))
-        return target
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TrainedDecisionProvider:
-        encoder = FeatureEncoder()
-        if int(data.get("feature_version", -1)) != encoder.feature_version:
-            raise ValueError(
-                f"feature version mismatch: artifact {data.get('feature_version')} "
-                f"vs runtime {encoder.feature_version}"
-            )
-        if list(data.get("feature_names", [])) != encoder.feature_names:
-            raise ValueError("feature names do not match the runtime encoder")
-        heads = {
-            name: LinearHead.from_dict(payload)
-            for name, payload in data["heads"].items()
-        }
-        return cls(
-            encoder=encoder,
-            heads=heads,
-            feature_mean=np.asarray(data["feature_mean"], dtype=float),
-            feature_std=np.asarray(data["feature_std"], dtype=float),
-            metadata=dict(data.get("metadata", {})),
-        )
-
-    @classmethod
-    def load(cls, directory: str | Path) -> TrainedDecisionProvider:
-        path = Path(directory) / "provider.json"
-        return cls.from_dict(json.loads(path.read_text()))

@@ -7,12 +7,10 @@ import pandas as pd
 import pytest
 
 from qc.config import DatasetConfig
-from qc.decisions import DecisionSet
-from qc.prequential import CalibrationPool, CalibrationRecord
 from qc.reference import ReferenceSpec, compare_reference
 from qc.run import run_qc
 from qc.source import MappedSource
-from qc.store import SqliteStore, import_outcomes
+from qc.store import SqliteStore
 from qc.versions import select_versions
 
 
@@ -54,20 +52,14 @@ class HandSource:
 CONFIG = DatasetConfig(report_grain=(), temporal_enabled=False)
 
 
-def test_doubled_report_never_passes_even_with_model_clear():
+def test_doubled_report_never_passes():
     source = HandSource()
     source.frames["v2", "report"]["dollar"] *= 2
 
-    class Clear:
-        name = "clear"
-
-        def decide(self, result):
-            return DecisionSet(result.run_id, "clear", {}, False)
-
-    result = run_qc(source, "v2", "v1", CONFIG, decision_provider=Clear())
+    result = run_qc(source, "v2", "v1", CONFIG)
     assert result.status == "INVESTIGATE"
     assert result.machine["requires_investigation"] is True
-    assert result.machine["provider_recommendation"]["requires_investigation"] is False
+    assert result.decisions.requires_investigation is True
     assert any(
         f["outcome"] == "FAIL" and "mass_balance" in f["check"]
         for f in result.machine["findings"]
@@ -132,32 +124,6 @@ def test_mapping_collision_and_config_validation():
             DatasetConfig(**kwargs)
 
 
-def test_calibration_revision_does_not_change_history():
-    pool = CalibrationPool()
-    pool.add(CalibrationRecord("n", 1, 2, 1.0))
-    pool.add(CalibrationRecord("n", 1, 5, 9.0))
-    assert pool.usable(4, 4)[0].residual == 1.0
-    assert pool.usable(6, 6)[0].residual == 9.0
-
-
-def test_migration_and_dry_run_preserve_records(tmp_path):
-    path = tmp_path / "old.sqlite"
-    with SqliteStore(path) as store:
-        store.record_run("r", "demo", "PASS", {})
-        store.record_outcome("r", "UNKNOWN", provenance="analyst", analyst="a")
-        store.connection.execute("PRAGMA user_version=2")
-    with SqliteStore(path) as store:
-        assert store.latest_outcome("r")["analyst"] == "a"
-        row = {"run_id": "r", "root_cause": "UNKNOWN", "provenance": "bad"}
-        dry = import_outcomes(store, [row], dry_run=True)
-        actual = import_outcomes(store, [row])
-        assert dry["errors"] == actual["errors"]
-        assert (
-            store.connection.execute("SELECT count(*) FROM outcomes").fetchone()[0] == 1
-        )
-    assert list(tmp_path.glob("*.backup-*"))
-
-
 def test_weekly_recovers_committed_artifacts_and_changes_identity(
     tmp_path, monkeypatch
 ):
@@ -196,52 +162,6 @@ def test_weekly_recovers_committed_artifacts_and_changes_identity(
     report.write_text("corrupted")
     run_weekly(str(path), CONFIG, out_root=out)
     assert json.loads(report.read_text())["status"] == recovered.status
-
-
-def test_store_cohort_freezes_revisions_and_requires_independent_groups(tmp_path):
-    from qc.store_cohort import freeze_store_cohort
-
-    path = tmp_path / "feedback.sqlite"
-    with SqliteStore(path) as store:
-        store.record_run(
-            "r",
-            "demo",
-            "INVESTIGATE",
-            {"snapshot_manifest": {"source": "fixture"}},
-            created="2026-01-01T00:00:00+00:00",
-        )
-        store.record_outcome(
-            "r",
-            "CODING",
-            confirmed=True,
-            analyst="analyst",
-            provenance="analyst",
-            created="2026-01-02T00:00:00+00:00",
-        )
-        store.record_outcome(
-            "r",
-            "WAREHOUSE",
-            confirmed=True,
-            analyst="analyst",
-            provenance="analyst",
-            created="2026-02-02T00:00:00+00:00",
-        )
-    frozen = freeze_store_cohort(str(path), "2026-01-03T00:00:00+00:00")
-    assert frozen["status"] == "INSUFFICIENT_EVIDENCE"
-    assert frozen["cases"][0]["labels"]["root_cause"] == "CODING"
-    assert not frozen["production_eligible"]
-
-
-def test_provider_failure_retains_completed_rules():
-    class Unavailable:
-        name = "unavailable"
-
-        def decide(self, result):
-            raise TimeoutError("deadline")
-
-    result = run_qc(HandSource(), "v2", "v1", CONFIG, decision_provider=Unavailable())
-    assert result.status == "PASS"
-    assert result.machine["provider_availability"]["status"] == "UNAVAILABLE"
 
 
 @pytest.mark.parametrize(
@@ -317,17 +237,6 @@ def test_parquet_manifest_weekly_flow(tmp_path):
     result = run_weekly(str(path), CONFIG, out_root=tmp_path / "out")
     assert result.status == "PASS"
     assert run_weekly(str(path), CONFIG, out_root=tmp_path / "out").skipped
-
-
-def test_future_outcomes_do_not_affect_historical_retrieval(tmp_path):
-    with SqliteStore(tmp_path / "store.sqlite") as store:
-        store.record_run(
-            "r", "demo", "INVESTIGATE", {}, features=[1.0], created="2026-01-01"
-        )
-        store.record_outcome("r", "CODING", confirmed=True, created="2026-01-02")
-        store.record_outcome("r", "WAREHOUSE", confirmed=True, created="2026-02-02")
-        assert store.retrieve([1.0], as_of="2026-01-03")[0]["root_cause"] == "CODING"
-        assert store.retrieve([1.0], as_of="2026-02-03")[0]["root_cause"] == "WAREHOUSE"
 
 
 def test_missing_configured_reference_and_temporal_failure_need_review(monkeypatch):
@@ -503,26 +412,3 @@ def test_missing_all_required_stages_is_incomplete():
     result = run_qc(EmptyStages(), "v2", "v1", CONFIG)
     assert result.status == "INCOMPLETE"
     assert result.machine["requires_investigation"]
-
-
-def test_source_provenance_fails_closed(tmp_path):
-    # Regression: only DeltaSource counted as real, so a production Parquet
-    # manifest was labelled synthetic and could accept synthetic artifacts.
-    import json
-
-    from qc.run import _source_provenance
-    from qc.source import CachedSource, ParquetManifestSource, mapped
-    from qcgen.sources import ScenarioSource
-
-    frame = pd.DataFrame({"week": [1], "store_id": ["S1"], "dollar": [1.0]})
-    frame.to_parquet(tmp_path / "fact.parquet")
-    (tmp_path / "manifest.json").write_text(json.dumps({
-        "schema_version": 1, "source_id": "prod.fact",
-        "snapshots": [{"version": "1", "observed_at": "2026-01-01T00:00:00+00:00",
-                       "stages": {"warehouse": "fact.parquet"}}],
-    }))
-    manifest = CachedSource(mapped(ParquetManifestSource(tmp_path / "manifest.json"), None), CONFIG)
-    assert _source_provenance(manifest) == "real"
-    assert _source_provenance(HandSource()) == "real"
-    scenario = CachedSource(mapped(ScenarioSource(tmp_path), None), CONFIG)
-    assert _source_provenance(scenario) == "synthetic"

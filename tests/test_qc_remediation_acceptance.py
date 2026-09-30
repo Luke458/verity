@@ -1,17 +1,14 @@
-"""Regression acceptance for the review-remediation plan.
+"""Regression acceptance for demonstrated failures.
 
-Each test converts a demonstrated failure or required acceptance scenario from
-``docs/qc-review-remediation-plan.md`` into a regression guard.
+Each test converts a previously demonstrated defect or required acceptance
+scenario into a regression guard.
 """
 
 from __future__ import annotations
 
 import json
 import math
-import sqlite3
-import threading
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pandas as pd
@@ -20,18 +17,9 @@ import pytest
 from qc.config import DatasetConfig
 from qc.conformal import minimum_samples
 from qc.evaluation import EvaluationCase, evaluation_gates, group_metrics
-from qc.evidence_package import (
-    AssessmentEvidence,
-    PredictionEvidence,
-    evidence_digest,
-    verify_explanations,
-)
-from qc.policy import finding
-from qc.qualification import QualificationArtifact, QualifiedCombination
 from qc.reference import ReferenceSpec
 from qc.run import run_qc
 from qc.store import SqliteStore
-from qc.systemone import ProviderAbstention, build_provider_state
 from qc.temporal import (
     NAIVE_KIND,
     CandidateSpec,
@@ -116,114 +104,7 @@ def _single_week_source(first_factor: float = 0.4) -> FrameSource:
     return FrameSource(frames)
 
 
-def _temporal_finding(period: int, *, series: str = "national", materiality: float = 1.0):
-    return finding(
-        "temporal",
-        series,
-        "FAIL",
-        scope_type="temporal_series",
-        metric="dollar",
-        level="national" if series == "national" else series.split(":", 1)[0],
-        period=period,
-        impact=1.0,
-        materiality=materiality,
-    )
-
-
-def _prediction(**overrides) -> PredictionEvidence:
-    base = dict(
-        series_id="national",
-        metric="dollar",
-        level="national",
-        target_week=121,
-        actual=100.0,
-        expected=100.0,
-        residual=0.0,
-        relative_residual=0.0,
-        standardized_residual=0.0,
-        nominal_percentile=0.5,
-        calibrated_percentile=0.5,
-        interval_lower=90.0,
-        interval_upper=110.0,
-        interval_alpha=0.1,
-        interval_width=20.0,
-        interval_coverage=0.9,
-        calibration_status="OK",
-        calibration_pool="dollar|national|ridge:trend_only:p1|h1",
-        calibration_n=20,
-        forecast_error=3.0,
-        history_weeks=120,
-        history_observed=120,
-        history_missing=0,
-        missing_weeks=(),
-        selected_model="ridge:trend_only:p1",
-        anomaly=False,
-        flags=(),
-        horizon=1,
-        support="model",
-        materiality=10.0,
-        training_endpoint_week=120,
-        forecast_origin_week=120,
-    )
-    base.update(overrides)
-    return PredictionEvidence(**base)
-
-
-def _qualification(prediction: PredictionEvidence, **overrides) -> QualificationArtifact:
-    kwargs = dict(
-        provenance="synthetic",
-        required_coverage=0.0,
-        max_width_ratio=1e9,
-        minimum_groups=1,
-        combinations=(
-            QualifiedCombination(
-                model=prediction.selected_model,
-                metric=prediction.metric,
-                level=prediction.level,
-                horizon=prediction.horizon,
-                development_groups=100,
-                test_groups=100,
-                development_coverage=1.0,
-                test_coverage=1.0,
-                development_lower_bound=1.0,
-                test_lower_bound=1.0,
-                width_ratio=0.01,
-                qualified=True,
-            ),
-        ),
-        development_digest="dev",
-        test_digest="test",
-        status="QUALIFIED",
-    )
-    kwargs.update(overrides)
-    return QualificationArtifact(**kwargs)
-
-
-def _package(prediction: PredictionEvidence, **overrides) -> AssessmentEvidence:
-    base = dict(
-        assessment_id="assessment-1",
-        run_id="run-1",
-        dataset="ds",
-        observation_cutoff="2026-01-01T00:00:00+00:00",
-        snapshot_identity={},
-        calendar_identity={},
-        model_identity={},
-        config_identity={},
-        predictions=(prediction,),
-        contracts=({"name": "keys", "status": "PASS", "detail": ""},),
-        materiality_threshold=100.0,
-        provenance="synthetic",
-    )
-    base.update(overrides)
-    return AssessmentEvidence(**base)
-
-
-# ---------------------------------------------------------------------------
-# 1. Doubled reference totals named national
-# ---------------------------------------------------------------------------
-
-
-def test_doubled_reference_totals_force_review_and_no_statistical_clearance():
+def test_doubled_reference_totals_force_review():
     source = _two_week_source()
     reference = source.read_fact("V0002", "report").copy()
     reference["dollar"] = reference["dollar"] * 2.0
@@ -244,16 +125,7 @@ def test_doubled_reference_totals_force_review_and_no_statistical_clearance():
         and item["outcome"] == "FAIL"
     ]
     assert reference_findings
-    assert all(
-        item["disposition"] != "STATISTICALLY_EXPLAINED"
-        for item in reference_findings
-    )
-    assert all(
-        item["finding_id"] not in {
-            entry["finding_id"] for entry in result.machine["clearance"]
-        }
-        for item in reference_findings
-    )
+    assert all(not item["approval_ids"] for item in reference_findings)
     assert result.status in ("INVESTIGATE", "DATA_CONTRACT_FAILURE")
     assert result.machine["requires_investigation"] is True
 
@@ -298,91 +170,7 @@ def test_first_of_two_appended_weeks_is_detected_and_both_assessed():
 
 
 # ---------------------------------------------------------------------------
-# 3. Certificate rejection with explicit reasons
-# ---------------------------------------------------------------------------
-
-
-def test_certificate_rejected_for_short_history():
-    prediction = _prediction(
-        history_observed=30,
-        selected_model="ridge:fourier1:p1",
-    )
-    certificates = verify_explanations(
-        _package(prediction),
-        CONFIG,
-        materiality_threshold=100.0,
-        findings=(_temporal_finding(121, materiality=100.0),),
-        qualification=_qualification(prediction),
-    )
-    certificate = next(item for item in certificates if item.scope == "national")
-    assert certificate.status == "REJECTED"
-    assert any("history" in reason for reason in certificate.reasons)
-
-
-def test_certificate_rejected_for_missing_mandatory_evidence():
-    prediction = _prediction()
-    certificates = verify_explanations(
-        _package(prediction, contracts=()),
-        CONFIG,
-        materiality_threshold=100.0,
-        findings=(_temporal_finding(121, materiality=100.0),),
-        qualification=_qualification(prediction),
-    )
-    certificate = next(item for item in certificates if item.scope == "national")
-    assert certificate.status == "REJECTED"
-    assert any("mandatory" in reason for reason in certificate.reasons)
-
-
-def test_certificate_rejected_for_huge_interval():
-    prediction = _prediction(interval_lower=-1000.0, interval_upper=2000.0, interval_width=3000.0)
-    certificates = verify_explanations(
-        _package(prediction),
-        CONFIG,
-        materiality_threshold=100.0,
-        findings=(_temporal_finding(121, materiality=100.0),),
-        qualification=_qualification(prediction, max_width_ratio=0.01),
-    )
-    certificate = next(item for item in certificates if item.scope == "national")
-    assert certificate.status == "REJECTED"
-    assert any("width" in reason for reason in certificate.reasons)
-
-
-def test_certificate_rejected_for_failed_integrity():
-    prediction = _prediction()
-    certificates = verify_explanations(
-        _package(
-            prediction,
-            contracts=({"name": "keys", "status": "CONTRACT_FAILURE", "detail": "dup"},),
-        ),
-        CONFIG,
-        materiality_threshold=100.0,
-        findings=(_temporal_finding(121, materiality=100.0),),
-        qualification=_qualification(prediction),
-    )
-    certificate = next(item for item in certificates if item.scope == "national")
-    assert certificate.status == "REJECTED"
-    assert any("integrity" in reason for reason in certificate.reasons)
-
-
-def test_certificate_requires_evidence_digest_and_assessment_binding():
-    prediction = _prediction()
-    package = _package(prediction)
-    certificates = verify_explanations(
-        package,
-        CONFIG,
-        materiality_threshold=100.0,
-        findings=(_temporal_finding(121, materiality=100.0),),
-        qualification=_qualification(prediction),
-    )
-    certificate = next(item for item in certificates if item.scope == "national")
-    assert certificate.status == "VERIFIED"
-    assert certificate.evidence_digest == package.digest
-    assert certificate.assessment_id == package.assessment_id
-    assert certificate.finding_ids
-
-
-# ---------------------------------------------------------------------------
-# 4. Sibling units/scale cannot inflate a target interval
+# 3. Interval isolation
 # ---------------------------------------------------------------------------
 
 
@@ -630,141 +418,6 @@ def test_selection_and_calibration_partitions_are_disjoint_with_exact_horizons()
     assert len(selection_errors) == len(selection)
     assert len(calibration_errors) == len(calibration)
     assert len(calibration_errors) >= minimum_samples(0.1) - 3
-
-
-# ---------------------------------------------------------------------------
-# 9/10. Provider request capture and explicit abstention
-# ---------------------------------------------------------------------------
-
-
-class _CaptureHandler(BaseHTTPRequestHandler):
-    captured: list[dict] = []
-    response = {
-        "model": "test",
-        "answers": {
-            "requires_investigation": {"type": "noul", "noul": 0.5},
-        },
-    }
-
-    def do_POST(self):
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
-        self.captured.append(json.loads(body))
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(self.response).encode())
-
-    def log_message(self, *args):  # silence test server
-        return
-
-
-@pytest.fixture()
-def capture_endpoint():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _CaptureHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    _CaptureHandler.captured = []
-    yield f"http://127.0.0.1:{server.server_address[1]}/v1/systemone"
-    server.shutdown()
-
-
-def test_provider_state_has_required_evidence_and_no_policy_answers(capture_endpoint):
-    source = _single_week_source()
-    result = run_qc(source, "V0002", "V0001", CONFIG)
-    provider = _systemone_provider(capture_endpoint, fields=())
-    provider.decide(result)
-    payload = _CaptureHandler.captured[-1]
-    state = json.loads(payload["state"])
-    assert "contracts" in state
-    assert "predictions" in state
-    assert "run_id" in state
-    for leaked in (
-        "status",
-        "findings",
-        "clearance",
-        "decision",
-        "provider_recommendation",
-    ):
-        assert leaked not in state, leaked
-    assert result.machine["provider_payload_digest"] == evidence_digest(payload)
-
-
-def test_mandatory_evidence_over_budget_abstains(capture_endpoint):
-    source = _single_week_source()
-    result = run_qc(source, "V0002", "V0001", CONFIG)
-    with pytest.raises(ProviderAbstention):
-        build_provider_state(result, max_chars=64)
-    provider = _systemone_provider(capture_endpoint, state_limit=64)
-    deterministic_status = result.status
-    result = run_qc(source, "V0002", "V0001", CONFIG, decision_provider=provider)
-    assert result.machine["provider_availability"]["status"] == "ABSTAINED"
-    assert result.status == deterministic_status
-    assert result.machine["findings"]
-
-
-def _systemone_provider(endpoint: str, **overrides):
-    from qc.systemone import SystemOneDecisionProvider
-
-    options = dict(url=endpoint, timeout=5.0)
-    options.update(overrides)
-    return SystemOneDecisionProvider(**options)
-
-
-# ---------------------------------------------------------------------------
-# 11. Legacy-store migration preserves labels and provenance
-# ---------------------------------------------------------------------------
-
-
-def test_legacy_store_migration_preserves_labels_without_duplicate_assessments(tmp_path):
-    path = tmp_path / "legacy.db"
-    store = SqliteStore(path)
-    store.record_run(
-        "run-1",
-        "ds",
-        "INVESTIGATE",
-        {"run_id": "run-1", "status": "INVESTIGATE"},
-        created="2026-01-01T00:00:00+00:00",
-    )
-    store.record_outcome(
-        "run-1",
-        "MISSING_STORES",
-        confirmed=True,
-        analyst="analyst-1",
-        provenance="analyst",
-        created="2026-01-02T00:00:00+00:00",
-        requires_investigation=True,
-    )
-    store.close()
-    with sqlite3.connect(path) as connection:
-        connection.execute("PRAGMA user_version=2")
-    migrated = SqliteStore(path)
-    assert migrated.connection.execute("PRAGMA user_version").fetchone()[0] == 6
-    assert list(tmp_path.glob("*.backup-*"))
-    runs = migrated.list_runs()
-    assert len(runs) == 1
-    assert runs[0]["root_cause"] == "MISSING_STORES"
-    assert runs[0]["confirmed"] == 1
-    migrated.close()
-
-
-# ---------------------------------------------------------------------------
-# Qualification provenance, insufficient partitions, cold start, tampering
-# ---------------------------------------------------------------------------
-
-
-def test_synthetic_qualification_cannot_clear_a_real_assessment():
-    prediction = _prediction()
-    certificates = verify_explanations(
-        _package(prediction, provenance="real"),
-        CONFIG,
-        materiality_threshold=100.0,
-        findings=(_temporal_finding(121, materiality=100.0),),
-        qualification=_qualification(prediction, provenance="synthetic"),
-    )
-    certificate = next(item for item in certificates if item.scope == "national")
-    assert certificate.status == "REJECTED"
-    assert any("provenance" in reason for reason in certificate.reasons)
 
 
 def test_insufficient_partitions_return_insufficient_evidence():

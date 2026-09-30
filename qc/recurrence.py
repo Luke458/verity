@@ -85,8 +85,6 @@ def eligible_unexplained(item: dict[str, Any]) -> bool:
         return False
     if item.get("approval_ids"):
         return False
-    if item.get("clearance_basis") == "statistical":
-        return False
     return str(item.get("disposition", "")) in ESCALATE_DISPOSITIONS
 
 

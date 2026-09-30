@@ -1,25 +1,22 @@
-"""Entity relationship graph (architecture section 12).
+"""Entity replacement candidates.
 
-Known identifier relationships - superseded, remapped, merged, split, alias,
-replaced - explain why an entity disappears while another appears. Confirmed
-relationships are loaded from a store; unconfirmed candidates are detected
+When an entity disappears while another appears, a replacement (merge,
+supersession, remap) is a likely explanation. Candidates are detected
 conservatively from correlated weekly series between a removed entity and a
-newly appearing entity with comparable volume.
+newly appearing entity with comparable volume, with Benjamini-Hochberg control
+over the tested pairs. Candidates are evidence only and always need review.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
-from .jsonutil import dumps as json_dumps
 from .versions import VersionPair
 
 RELATIONSHIP_TYPES: tuple[str, ...] = (
@@ -69,41 +66,6 @@ class EntityRelationship:
             confirmed=bool(data.get("confirmed", False)),
             evidence=dict(data.get("evidence", {})),
         )
-
-
-class RelationshipStore:
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
-
-    def add(self, relationship: EntityRelationship) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as handle:
-            handle.write(
-                json_dumps(relationship.to_dict(), sort_keys=True) + "\n"
-            )
-
-    def load(self) -> list[EntityRelationship]:
-        if not self.path.exists():
-            return []
-        return [
-            EntityRelationship.from_dict(json.loads(line))
-            for line in self.path.read_text().splitlines()
-            if line.strip()
-        ]
-
-    def for_entity(
-        self, entity_type: str, entity_ids: Sequence[str]
-    ) -> list[EntityRelationship]:
-        wanted = {str(entity) for entity in entity_ids}
-        return [
-            relationship
-            for relationship in self.load()
-            if relationship.entity_type == entity_type
-            and (
-                relationship.source_id in wanted
-                or relationship.target_id in wanted
-            )
-        ]
 
 
 def _correlation(left: Sequence[float], right: Sequence[float]) -> float:

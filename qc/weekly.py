@@ -10,7 +10,7 @@ from __future__ import annotations
 import fcntl
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -31,8 +31,6 @@ class WeeklyResult:
     report_dir: str | None = None
     artifacts: dict[str, str] = field(default_factory=dict)
     decision: dict[str, Any] | None = None
-    drift: dict[str, Any] | None = None
-    prequential_records: int = 0
     expectations: dict[str, Any] | None = None
     reference: dict[str, Any] | None = None
     recorded: bool = False
@@ -45,6 +43,12 @@ class WeeklyResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WeeklyResult:
+        # Journals written by older engines may carry retired fields.
+        known = {item.name for item in fields(cls)}
+        return cls(**{key: value for key, value in data.items() if key in known})
 
 
 def _decision_summary(result: Any) -> dict[str, Any] | None:
@@ -93,7 +97,6 @@ def run_weekly(
     uri: str,
     config: DatasetConfig | None = None,
     store_path: str | Path | None = None,
-    calibration_path: str | Path | None = None,
     out_root: str | Path = "reports/weekly",
     stage: str = "warehouse",
     current: str | None = None,
@@ -104,8 +107,6 @@ def run_weekly(
     reference_stage: str | None = None,
     reference_version: str | None = None,
     storage_options: dict[str, str] | None = None,
-    min_samples: int = 9,
-    decision_provider: Any | None = None,
     force: bool = False,
     stage_tables: dict[str, str] | None = None,
     dim_tables: dict[str, str] | None = None,
@@ -119,7 +120,6 @@ def run_weekly(
     from .assessment import artifact_checksums, digest, publish, snapshot_manifest
     from .delta import DeltaSource
     from .expectations import load_expectations
-    from .prequential import records_from_result
     from .recurrence import RECURRENCE_INPUT_SCHEMA
     from .reference import ReferenceSpec
     from .reporting import render_markdown
@@ -140,53 +140,13 @@ def run_weekly(
     assessment_cutoff = datetime.fromtimestamp(committed / 1000, UTC).isoformat() if committed else datetime.now(UTC).isoformat()
     identity["observation_cutoff"] = assessment_cutoff
     from .calendar import calendar_identity
-    from .evidence_package import EVIDENCE_POLICY_VERSION
+    from .policy import FINDING_SCHEMA_VERSION, MACHINE_SCHEMA_VERSION
     identity.update(engine=code_sha256(), config=config.to_dict(),
                     reference_uri=reference_uri, reference_version=reference_version,
-                    reference_stage=reference_stage, min_samples=min_samples,
+                    reference_stage=reference_stage,
                     calendar=calendar_identity(config),
-                    evidence_policy=EVIDENCE_POLICY_VERSION,
-                    finding_schema=4, machine_schema=5)
-    # Resolve and validate the qualification artifact once, before assessment
-    # identity: its content digest, policy, provenance and availability state
-    # are frozen into the identity so replacing, revoking or losing the
-    # artifact produces a new assessment instead of reusing a stale one.
-    qualification = None
-    qualification_state: dict[str, Any] = {
-        "status": "NOT_PINNED",
-        "provenance": "",
-        "digest": "",
-        "error": "",
-    }
-    qualification_path = str(getattr(config, "qualification_path", "") or "")
-    if qualification_path:
-        from .qualification import load_qualification
-        try:
-            qualification = load_qualification(qualification_path)
-            if (
-                qualification.created
-                and qualification.created > assessment_cutoff
-            ):
-                # An artifact published after the observation cutoff is not
-                # available to this historical assessment.
-                qualification = None
-                raise ValueError(
-                    "qualification was published after the observation cutoff"
-                )
-            qualification_state = {
-                "status": qualification.status,
-                "provenance": qualification.provenance,
-                "digest": qualification.digest,
-                "error": "",
-            }
-        except Exception as error:  # noqa: BLE001 - clearance stays disabled
-            qualification_state = {
-                "status": "UNAVAILABLE",
-                "provenance": "",
-                "digest": "",
-                "error": f"{type(error).__name__}: {error}",
-            }
-    identity["qualification"] = qualification_state
+                    finding_schema=FINDING_SCHEMA_VERSION,
+                    machine_schema=MACHINE_SCHEMA_VERSION)
     expectations = load_expectations(expectations_path) if expectations_path else []
     identity["expectations"] = [item.to_dict() for item in expectations]
     reference_frame, reference_spec = None, None
@@ -208,17 +168,6 @@ def run_weekly(
             reference_frame = pd.DataFrame()
         from .assessment import frame_digest
         identity["reference"] = {"spec": reference_spec.to_dict(), "content": frame_digest(reference_frame)}
-    if decision_provider is not None:
-        serializer = getattr(decision_provider, "to_dict", None)
-        artifact = serializer() if serializer else getattr(decision_provider, "artifact_identity", None)
-        if artifact is None:
-            raise ValueError("weekly providers require pinned artifact_identity or to_dict()")
-        identity["provider"] = {"artifact": artifact,
-                                "endpoint": getattr(decision_provider, "url", None),
-                                "timeout": getattr(decision_provider, "timeout", None),
-                                "state_limit": getattr(decision_provider, "state_limit", None)}
-    else:
-        identity["provider"] = "rule"
     out = Path(out_root)
     out.mkdir(parents=True, exist_ok=True)
     lock_handle = (out / f".{config.name}.lock").open("w")
@@ -265,7 +214,7 @@ def run_weekly(
             publish(report_dir, artifacts, checksums)
             connection.execute("UPDATE attempts SET state = 'PUBLISHED' WHERE attempt_id = ?", (attempt_id,))
             connection.commit()
-            cached = WeeklyResult(**json.loads(row["result"]))
+            cached = WeeklyResult.from_dict(json.loads(row["result"]))
             cached.skipped = True
             cached.notes.append("reused immutable assessment; verified/regenerated journal artifacts")
             if force:
@@ -276,59 +225,21 @@ def run_weekly(
             return cached
         prior_refreshes = store.recurrence_refreshes(recurrence_entries)
         result = run_qc(source, current, previous, config, run_id=run_id,
-                        decision_provider=decision_provider, reference_frame=reference_frame,
+                        reference_frame=reference_frame,
                         reference_spec=reference_spec, expectations=expectations,
                         observed_at=assessment_cutoff, prior_refreshes=prior_refreshes,
-                        assessment_id=assessment_id, qualification=qualification)
+                        assessment_id=assessment_id)
         result.machine["snapshot_manifest"] = identity
         result.machine["observed_at"] = observed_at
-        records = records_from_result(result, scope=config.name)
-        drift_report = None
-        if result.temporal is not None:
-            from .drift import monitor_drift
-            from .prequential import CalibrationPool, CalibrationRecord
-            pool = CalibrationPool(min_samples=min_samples)
-            for prior in connection.execute("SELECT payload FROM calibration_revisions WHERE observed_at < ? ORDER BY observed_at", (assessment_cutoff,)):
-                pool.add(CalibrationRecord.from_dict(json.loads(prior["payload"])))
-            target = result.temporal.target_week
-            drift_report = monitor_drift(pool, target, target, scope=config.name).to_dict()
-            drift_report["observation_cutoff"] = assessment_cutoff
         artifacts = {"report.md": render_markdown(result),
                      "report.json": json_dumps(result.machine, indent=2, sort_keys=True, default=str)}
-        if result.evidence_packages:
-            from .evidence_package import EVIDENCE_PACKAGE_SCHEMA
-            periods = []
-            for package in result.evidence_packages:
-                payload = package.to_dict()
-                payload["certificates"] = [
-                    certificate.to_dict()
-                    for certificate in result.certificates
-                    if certificate.evidence_digest == package.digest
-                    and certificate.assessment_id == package.assessment_id
-                ]
-                periods.append(payload)
-            artifacts["evidence.json"] = json_dumps(
-                {
-                    "schema_version": EVIDENCE_PACKAGE_SCHEMA,
-                    "assessment_id": result.assessment_id or run_id,
-                    "periods": periods,
-                },
-                indent=2,
-                sort_keys=True,
-                default=str,
-            )
-        if result.decisions is not None and result.decisions.requires_investigation:
-            from .agent import build_investigation_brief
-            artifacts["brief.json"] = json_dumps(build_investigation_brief(result, result.decisions, []).to_dict(), default=str)
         manifest = WeeklyResult(config.name, current, previous, stage, result.status,
             run_id=run_id, report_dir=str(report_dir),
             artifacts={name: str(report_dir / name) for name in artifacts},
-            decision=_decision_summary(result), prequential_records=len(records), drift=drift_report,
+            decision=_decision_summary(result),
             expectations=result.machine.get("expectations"), reference=result.reference,
             recorded=True, elapsed_seconds=time.time() - started, code_sha256=identity["engine"],
             assessment_id=assessment_id, attempt_id=attempt_id)
-        if calibration_path:
-            manifest.notes.append("calibration revisions are authoritative in SQLite; legacy JSONL is not appended")
         artifacts["weekly.json"] = json_dumps(manifest.to_dict(), indent=2, default=str)
         checksums = artifact_checksums(artifacts)
         _checkpoint("before_commit")
@@ -337,9 +248,6 @@ def run_weekly(
             connection.execute("INSERT INTO assessments VALUES (?, ?, ?, ?, ?, ?)",
                 (assessment_id, json_dumps(identity, default=str), result.status,
                  json_dumps(artifacts), json_dumps(checksums), json_dumps(manifest.to_dict())))
-            for record in records:
-                connection.execute("INSERT INTO calibration_revisions VALUES (?, ?, ?, ?, ?)",
-                    (assessment_id, record.series_id, record.target_week, assessment_cutoff, json_dumps(record.to_dict())))
             connection.execute("UPDATE attempts SET state = 'COMMITTED' WHERE attempt_id = ?", (attempt_id,))
         _checkpoint("after_commit")
         _checkpoint("before_publish")

@@ -13,9 +13,6 @@ from deltalake import write_deltalake
 
 from qc.cli import main
 from qc.config import DatasetConfig
-from qc.delta import DeltaSource
-from qc.prequential import records_from_result
-from qc.run import run_qc
 from qc.weekly import run_weekly
 
 
@@ -60,12 +57,10 @@ def test_weekly_pass_artifacts_and_idempotency(tmp_path):
         str(path),
         config=config,
         store_path=tmp_path / "store.db",
-        calibration_path=tmp_path / "calibration.jsonl",
         out_root=tmp_path / "weekly",
     )
     assert result.status == "INCOMPLETE", result.notes
     assert result.recorded is True
-    assert result.prequential_records >= 1
     assert result.current_version == "2"
     assert result.previous_version == "1"
     for name in ("report.md", "report.json", "weekly.json"):
@@ -88,7 +83,6 @@ def test_weekly_investigate_and_exit_codes(tmp_path):
     assert result.status == "INVESTIGATE"
     assert result.decision is not None
     assert result.decision["requires_investigation"] is True
-    assert (Path(result.report_dir) / "brief.json").exists()
 
     assert (
         main(
@@ -110,7 +104,6 @@ def test_weekly_investigate_and_exit_codes(tmp_path):
                 str(path),
                 "--out",
                 str(tmp_path / "cli-allow"),
-                "--allow-investigate",
             ]
         )
         == 2
@@ -241,18 +234,6 @@ def test_incomplete_report_directory_is_reprocessed(tmp_path):
     assert Path(result.report_dir) != report_dir
     assert (report_dir / "report.md").read_text() == "stale partial output"
     assert (Path(result.report_dir) / "weekly.json").exists()
-
-
-def test_records_from_result_match_temporal_series(tmp_path):
-    path = tmp_path / "fact"
-    _write_versions(path, (30, 31))
-    source = DeltaSource(uri=str(path))
-    result = run_qc(source, "1", "0", run_id="series-check")
-    records = records_from_result(result, scope="check")
-    assert result.temporal is not None
-    assert len(records) == len(result.temporal.series)
-    assert all(record.scope == "check" for record in records)
-    assert all(record.available_on == record.target_week for record in records)
 
 
 def test_weekly_early_store_failure_surfaces_original_error(tmp_path, monkeypatch):

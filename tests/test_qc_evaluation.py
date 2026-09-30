@@ -4,8 +4,6 @@ import pytest
 
 from qc.evaluation import (
     EvaluationCase,
-    ablate_evidence,
-    evaluate_materiality_candidates,
     evaluation_gates,
     evaluation_metrics,
     false_clearance_upper_bound,
@@ -101,48 +99,3 @@ def test_gates_are_insufficient_without_controls_or_labels():
     gates = evaluation_gates(unlabelled)
     assert gates["gates"]["deterministic_fixture_errors"]["status"] == "INSUFFICIENT_EVIDENCE"
     assert gates["status"] == "INSUFFICIENT_EVIDENCE"
-
-
-def test_ablation_reports_review_volume_per_level():
-    cases = [
-        {
-            "case_id": "a",
-            "actionable": True,
-            "levels": {
-                "summary": False,
-                "forecast": True,
-                "hierarchy": True,
-                "complete": True,
-            },
-        },
-        {
-            "case_id": "b",
-            "actionable": False,
-            "levels": {
-                "summary": False,
-                "forecast": False,
-                "hierarchy": True,
-                "complete": True,
-            },
-        },
-    ]
-    ablation = ablate_evidence(cases)
-    assert ablation["results"]["summary"]["review_rate"] == 0.0
-    assert ablation["results"]["forecast"]["review_rate"] == 0.5
-    assert ablation["results"]["forecast"]["false_clearance_rate"] == 0.0
-
-
-def test_materiality_selection_prefers_low_review_volume_when_safe():
-    def outcomes(clear_actionable: bool):
-        cases = [_case(index, actionable=True, review=True) for index in range(400)]
-        if clear_actionable:
-            cases[0] = _case(0, actionable=True, review=False)
-        cases += [_case(500 + index, actionable=False, review=False) for index in range(8)]
-        return cases
-
-    selection = evaluate_materiality_candidates(
-        {0.0005: outcomes(False), 0.001: outcomes(False), 0.002: outcomes(True)},
-        (0.0005, 0.001, 0.002),
-    )
-    assert selection["selected"]["materiality_ratio"] == 0.0005
-    assert selection["candidates"][2]["safe"] is False

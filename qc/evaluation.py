@@ -1,24 +1,15 @@
-"""Evidence-quality evaluation, ablation and statistical gates (schema 2).
+"""Confidence-bound gates over independent incident groups.
 
-Model quality and evidence quality are measured separately. Raw challenger
-decisions are scored as model predictions; deterministic verifier decisions and
-effective operational decisions are scored separately, and a policy override is
-never counted as a correct model prediction. Final decisions, approval outcomes
-and oracle labels are excluded from challenger inputs.
-
-Statistical qualification computes confidence bounds over independent incident
-groups: detection uses the 95% lower bound, false-positive rate the 95% upper
-bound and false clearance the agreed 95% upper bound of 1% (a group fails when
-any actionable member is falsely cleared). Missing controls, required classes
-or sufficient independent groups yield ``INSUFFICIENT_EVIDENCE``, never a pass.
-Deterministic fixtures are compared against independent oracle labels, not
-agreement between two implementation outputs.
+Detection is gated on the 95% Wilson lower bound over actionable groups and the
+false-positive rate on the 95% upper bound over control groups; too few groups
+yield ``INSUFFICIENT_EVIDENCE``, never a pass. The false-clearance bound and
+oracle disagreements are computed for reporting.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from statistics import median
 from typing import Any
@@ -414,159 +405,4 @@ def evaluation_gates(
         "status": "PASS" if overall else ("INSUFFICIENT_EVIDENCE" if insufficient else "FAIL"),
         "gates": gates,
         "metrics": metrics,
-    }
-
-
-ABLATION_LEVELS = ("summary", "forecast", "hierarchy", "complete")
-
-
-def _ablation_summary(
-    cases: Sequence[dict[str, Any]],
-    level: str,
-    decide: Callable[[Any], bool],
-) -> dict[str, Any] | None:
-    selected: list[dict[str, Any]] = []
-    review_flags: list[bool] = []
-    for case in cases:
-        views = case.get("views") or {}
-        if level not in views:
-            continue
-        selected.append(case)
-        review_flags.append(bool(decide(views[level])))
-    if not selected:
-        return None
-    actionable = [case for case in selected if case.get("actionable")]
-    reviews = sum(1 for flag in review_flags if flag)
-    cleared = sum(
-        1
-        for case, flag in zip(selected, review_flags, strict=True)
-        if case.get("actionable") and not flag
-    )
-    return {
-        "cases": len(selected),
-        "review_rate": _rate(reviews, len(selected)),
-        "false_clearance_rate": _rate(cleared, len(actionable)),
-    }
-
-
-def ablate_evidence(
-    cases: Sequence[dict[str, Any]],
-    decide: Callable[[Any], bool] | None = None,
-    baseline_decide: Callable[[Any], bool] | None = None,
-) -> dict[str, Any]:
-    """Compare review decisions under independently constructed evidence views.
-
-    With ``decide`` the cases carry a ``views`` mapping for each level and the
-    actual provider adapter is rerun on the view; otherwise precomputed boolean
-    levels are summarized. A ``baseline_decide`` is reported separately and
-    explicitly labelled ``rule_baseline``: a bespoke rule is never presented as
-    a provider result. Case membership, actionable labels and measurement
-    conditions stay fixed across levels.
-    """
-    results: dict[str, Any] = {}
-    baseline: dict[str, Any] = {}
-    for level in ABLATION_LEVELS:
-        if decide is not None:
-            summary = _ablation_summary(cases, level, decide)
-            if summary is not None:
-                results[level] = summary
-        else:
-            selected: list[dict[str, Any]] = []
-            review_flags: list[bool] = []
-            for case in cases:
-                levels = case.get("levels") or {}
-                if levels.get(level) is None:
-                    continue
-                selected.append(case)
-                review_flags.append(bool(levels[level]))
-            if selected:
-                actionable = [
-                    case for case in selected if case.get("actionable")
-                ]
-                results[level] = {
-                    "cases": len(selected),
-                    "review_rate": _rate(
-                        sum(1 for flag in review_flags if flag), len(selected)
-                    ),
-                    "false_clearance_rate": _rate(
-                        sum(
-                            1
-                            for case, flag in zip(selected, review_flags, strict=True)
-                            if case.get("actionable") and not flag
-                        ),
-                        len(actionable),
-                    ),
-                }
-        if baseline_decide is not None:
-            baseline_summary = _ablation_summary(
-                cases, level, baseline_decide
-            )
-            if baseline_summary is not None:
-                baseline[level] = baseline_summary
-    payload: dict[str, Any] = {
-        "schema_version": EVALUATION_SCHEMA,
-        "levels": list(ABLATION_LEVELS),
-        "results": results,
-        "mode": "provider_rerun" if decide is not None else "precomputed",
-    }
-    if baseline_decide is not None:
-        payload["baseline"] = {
-            "label": "rule_baseline",
-            "results": baseline,
-        }
-    return payload
-
-
-def evaluate_materiality_candidates(
-    outcomes: Mapping[float, Sequence[EvaluationCase]],
-    candidates: Sequence[float],
-) -> dict[str, Any]:
-    """Choose the candidate minimizing review volume while passing safety gates.
-
-    ``outcomes`` maps each candidate ratio to the evaluated cases under that
-    frozen configuration. A candidate is safe only when no actionable incident
-    is cleared, the false-clearance confidence bound passes, and detection
-    confidence bounds are not insufficient.
-    """
-    evaluated: list[dict[str, Any]] = []
-    for candidate in candidates:
-        cases = outcomes.get(candidate, ())
-        metrics = evaluation_metrics(cases)
-        bounds = confidence_gates(cases)
-        bound = metrics["false_clearance_upper_bound"]
-        detection_ok = bounds["detection_rate"]["status"] == "PASS"
-        safe = (
-            not any(
-                case.actionable and not case.effective_review for case in cases
-            )
-            and bound["passes"]
-            and detection_ok
-        )
-        evaluated.append(
-            {
-                "materiality_ratio": candidate,
-                "safe": safe,
-                "detection_gate": bounds["detection_rate"],
-                "review_rate": metrics["review_rate"],
-                "detection_rate": metrics["detection_rate"],
-                "false_clearance_rate": metrics["false_clearance_rate"],
-                "false_clearance_upper_bound": bound,
-            }
-        )
-    safe = [item for item in evaluated if item["safe"]]
-    selected = (
-        min(
-            safe,
-            key=lambda item: (
-                item["review_rate"] if item["review_rate"] is not None else math.inf,
-                item["materiality_ratio"],
-            ),
-        )
-        if safe
-        else None
-    )
-    return {
-        "schema_version": EVALUATION_SCHEMA,
-        "candidates": evaluated,
-        "selected": selected,
     }

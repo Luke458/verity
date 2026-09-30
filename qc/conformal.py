@@ -1,4 +1,4 @@
-"""Finite-sample conformal intervals (architecture section 28).
+"""Finite-sample conformal intervals.
 
 The interval uses the ``ceil((n + 1) * (1 - alpha))``-th smallest absolute
 residual, which gives finite-sample marginal coverage when residuals are

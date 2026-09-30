@@ -1,11 +1,13 @@
 """QC run orchestration.
 
-``run_qc`` ties the deterministic layers together:
+``run_qc`` ties the layers together:
 
     contracts -> version pair -> revision cubes -> lifecycle -> attribution
+    -> counterfactual / reconciliation / lineage / reference -> temporal
 
-and returns a machine-readable result following section 77 of the architecture
-document. It never falls back to a model: semantic decisions are Milestone D.
+then materializes findings and computes the final status exactly once
+(``policy.apply_policy``). Cause labels from ``RuleDecisionProvider`` are
+attached afterwards and cannot change the status.
 """
 
 from __future__ import annotations
@@ -21,14 +23,8 @@ from .attribution import AttributionResult, classify_run, explain_revision
 from .config import DatasetConfig
 from .contracts import ContractCheck, ContractResult, validate_contracts
 from .counterfactual import CounterfactualResult, reconstruct_counterfactual
-from .decisions import DecisionProvider, DecisionSet, RuleDecisionProvider
-from .distribution_drift import (
-    DistributionDriftResult,
-    assess_distribution_drift,
-)
-from .evidence import EvidenceGraph, build_evidence_graph
+from .decisions import DecisionSet, RuleDecisionProvider
 from .hierarchy import HierarchyCheck, hierarchy_checks
-from .ledger import ExplanationLedger, build_explanation_ledger
 from .lifecycle import (
     LifecycleEvent,
     classify_entity_changes,
@@ -69,8 +65,6 @@ class QCRunResult:
     reconciliation: ReconciliationResult | None = None
     lineage: LineageResult | None = None
     temporal: TemporalResult | None = None
-    distribution_drift: DistributionDriftResult | None = None
-    evidence: EvidenceGraph | None = None
     decisions: DecisionSet | None = None
     relationships: list[EntityRelationship] = field(default_factory=list)
     reference: dict[str, Any] | None = None
@@ -81,15 +75,6 @@ class QCRunResult:
     snapshot_manifest: dict[str, Any] | None = None
     reasons: list[str] = field(default_factory=list)
     hierarchy: list[HierarchyCheck] = field(default_factory=list)
-    ledger: ExplanationLedger | None = None
-    period_ledgers: dict[int, ExplanationLedger] = field(default_factory=dict)
-    metric_ledgers: dict[str, ExplanationLedger] = field(default_factory=dict)
-    period_metric_ledgers: dict[str, ExplanationLedger] = field(
-        default_factory=dict
-    )
-    evidence_package: Any | None = None
-    evidence_packages: list[Any] = field(default_factory=list)
-    certificates: tuple[Any, ...] = ()
     assessment_id: str | None = None
     machine: dict[str, Any] = field(default_factory=dict)
 
@@ -101,39 +86,6 @@ def _read_dim(
     if reader is None:
         return None
     return reader(version, name)
-
-
-class _TemporalPeriod:
-    """Minimal single-metric/period view for the period explanation ledger."""
-
-    def __init__(self, temporal: Any, target: int, metric: str | None = None):
-        self.target_week = int(target)
-        self.series = [
-            item
-            for item in getattr(temporal, "series", ())
-            if int(item.target_week) == int(target)
-            and (metric is None or getattr(item, "metric", "") == metric)
-        ]
-
-
-def _source_provenance(source: VersionSource) -> str:
-    """Fail closed: every source is real unless it declares itself synthetic.
-
-    Only a source that sets ``provenance = "synthetic"`` (the generator's
-    ``ScenarioSource`` does) is treated as synthetic. A Parquet manifest, an
-    in-memory frame or any new adapter is real data by default, so synthetic
-    artifacts can never authorize anything on it.
-    """
-    raw: Any = source
-    for _ in range(8):
-        declared = getattr(type(raw), "provenance", None)
-        if declared is not None:
-            return "synthetic" if declared == "synthetic" else "real"
-        inner = getattr(raw, "source", None) or getattr(raw, "inner", None)
-        if inner is None:
-            break
-        raw = inner
-    return "real"
 
 
 def _resolve_common_stage(
@@ -222,11 +174,8 @@ def _machine(
     lineage: LineageResult | None = None,
     historical_status: str | None = None,
     temporal: TemporalResult | None = None,
-    evidence: EvidenceGraph | None = None,
     relationships: Sequence[EntityRelationship] = (),
     reference: dict[str, Any] | None = None,
-    drift: DistributionDriftResult | None = None,
-    drift_error: str = "",
 ) -> dict[str, Any]:
     historical: dict[str, Any] | None = None
     if attribution is not None:
@@ -247,11 +196,6 @@ def _machine(
         "run_id": run_id,
         "dataset": dataset,
         "status": status,
-        "distribution_drift": (
-            drift.to_dict()
-            if drift is not None
-            else ({"status": "UNAVAILABLE", "error": drift_error} if drift_error else None)
-        ),
         "historical_revision": historical,
         "latest_week": temporal.to_dict() if temporal is not None else None,
         "counterfactual": (
@@ -261,7 +205,6 @@ def _machine(
             reconciliation.to_dict() if reconciliation is not None else None
         ),
         "lineage": lineage.to_dict() if lineage is not None else None,
-        "evidence_graph": evidence.to_dict() if evidence is not None else None,
         "relationships": [
             relationship.to_dict() for relationship in relationships
         ],
@@ -274,215 +217,48 @@ def _machine(
     }
 
 
-def _certificate_periods(
-    result: Any, findings: list[Any]
-) -> Sequence[int | None]:
-    """Periods that need their own evidence package and certificates."""
-    from .policy import CLEARABLE_CHECKS
-
-    targets: Sequence[int | None] = sorted(
-        {
-            int(item.period)
-            for item in findings
-            if item.period is not None
-            and item.check in CLEARABLE_CHECKS
-            and item.outcome == "FAIL"
-        }
-    )
-    if targets:
-        return targets
-    temporal = getattr(result, "temporal", None)
-    if temporal is None:
-        return [None]
-    temporal_targets = getattr(temporal, "targets", None)
-    if temporal_targets:
-        return sorted({int(value) for value in temporal_targets})
-    return [int(temporal.target_week)]
-
-
-def _attach_decisions(
+def _finalize(
     result: QCRunResult,
-    provider: DecisionProvider | None,
     config: DatasetConfig,
     prior_refreshes: Sequence[dict[str, Any]] = (),
     assessment_id: str | None = None,
-    provenance: str = "synthetic",
-    qualification: Any | None = None,
 ) -> QCRunResult:
+    """Materialize findings, compute the one final status, attach labels."""
+    from .calendar import calendar_identity
+    from .policy import apply_policy, collect_findings
+
     if result.snapshot_manifest is not None:
         result.machine["snapshot_manifest"] = result.snapshot_manifest
         result.machine["observed_at"] = result.observed_at
-    from .calendar import calendar_identity
     result.machine["calendar"] = calendar_identity(config)
     result.machine["hierarchy"] = {
         "schema_version": 1,
         "checks": [check.to_dict() for check in result.hierarchy],
     }
-    result.machine["ledger"] = result.ledger.to_dict() if result.ledger else None
     result.machine["statistical"] = {
         "forecaster": config.forecaster,
-        "selection": "frozen_grid_v2",
         "min_annual_history": config.temporal_min_annual_history,
         "interval_alpha": config.temporal_interval_alpha,
         "calibration_origins": config.temporal_calibration_origins,
+        "fdr_q": config.temporal_fdr_q,
     }
     result.machine["materiality_threshold"] = max(
         config.materiality_abs,
         config.materiality_ratio * abs(result.attribution.previous_total),
     ) if result.attribution else config.materiality_abs
-    result.machine["assessment_provenance"] = provenance
     result.assessment_id = assessment_id or result.run_id
 
-    from .policy import apply_policy, collect_findings
     findings = collect_findings(result, config, tuple(prior_refreshes))
-    if getattr(config, "recurrence_enabled", True):
+    if config.recurrence_enabled:
         # An initial assessment with no eligible predecessor history is a
         # recorded cold start, not an implicit clean recurrence history.
         result.machine["recurrence_status"] = (
             "ASSESSED" if prior_refreshes else "COLD_START"
         )
-
-    qualification_error = ""
-    qualification_path = str(getattr(config, "qualification_path", "") or "")
-    if qualification is None and qualification_path:
-        # Direct callers may load the artifact here; orchestrated weekly runs
-        # resolve and validate it once, before assessment identity, and pass
-        # the frozen artifact through so a replaced path cannot change replay.
-        from .qualification import load_qualification
-        try:
-            qualification = load_qualification(qualification_path)
-        except Exception as error:  # noqa: BLE001 - clearance stays disabled
-            qualification_error = f"{type(error).__name__}: {error}"
-    if qualification is not None:
-        result.machine["qualification"] = {
-            "status": qualification.status,
-            "provenance": qualification.provenance,
-            "digest": qualification.digest,
-        }
-    elif qualification_error:
-        result.machine["qualification"] = {
-            "status": "UNAVAILABLE",
-            "error": qualification_error,
-        }
-    else:
-        result.machine["qualification"] = {"status": "NOT_PINNED"}
-
-    packages: list[Any] = []
-    certificates: tuple[Any, ...] = ()
-    if getattr(config, "decision_enabled", True) or result.temporal is not None:
-        from .evidence_package import (
-            build_assessment_evidence,
-            verify_explanations,
-        )
-
-        for target in _certificate_periods(result, findings):
-            period_findings = [
-                item
-                for item in findings
-                if item.period is None or target is None or item.period == target
-            ]
-            ledger_override = (
-                result.period_ledgers.get(int(target))
-                if target is not None
-                else None
-            )
-            metric_ledger_override: dict[str, Any] = {}
-            if target is not None:
-                for metric in config.temporal_metrics() or (
-                    config.primary_metric,
-                ):
-                    built = result.period_metric_ledgers.get(
-                        f"{metric}|{int(target)}"
-                    )
-                    if built is not None:
-                        metric_ledger_override[metric] = built
-            try:
-                package = build_assessment_evidence(
-                    result,
-                    config,
-                    assessment_id=result.assessment_id,
-                    observation_cutoff=result.observed_at,
-                    findings=findings,
-                    target_week=target,
-                    ledger_override=ledger_override,
-                    metric_ledgers=metric_ledger_override,
-                    qualification=qualification,
-                )
-            except Exception as error:  # noqa: BLE001 - keep deterministic results
-                result.machine["certificate_availability"] = {
-                    "status": "UNAVAILABLE",
-                    "error": f"{type(error).__name__}: {error}",
-                }
-                packages = []
-                certificates = ()
-                break
-            packages.append(package)
-            if getattr(config, "statistical_clearance_enabled", True):
-                certificates = certificates + verify_explanations(
-                    package,
-                    config,
-                    materiality_threshold=result.machine["materiality_threshold"],
-                    findings=period_findings,
-                    qualification=qualification,
-                    provenance=provenance,
-                )
-    result.evidence_packages = packages
-    result.evidence_package = packages[0] if packages else None
-    result.certificates = certificates
-    result.machine["evidence_digests"] = [item.digest for item in packages]
-    if "certificate_availability" not in result.machine:
-        result.machine["certificate_availability"] = {
-            "status": "AVAILABLE",
-            "verified": sum(
-                1 for item in certificates if item.status == "VERIFIED"
-            ),
-            "rejected": sum(
-                1 for item in certificates if item.status == "REJECTED"
-            ),
-        }
-    apply_policy(result, findings, certificates, config.optional_checks)
-    from dataclasses import asdict
-    result.machine["rule_evidence"] = {
-        "contracts": {"status": result.contracts.status, "failed": [asdict(c) for c in result.contracts.failed]},
-        "events": [asdict(e) for e in result.events],
-        "attribution": asdict(result.attribution) if result.attribution else None,
-        "lineage": asdict(result.lineage) if result.lineage else None,
-        "temporal": asdict(result.temporal) if result.temporal else None,
-        "relationships": [asdict(r) for r in result.relationships],
-    }
-    from .systemone import build_evidence_state
-    result.machine["recorded_evidence_state"] = build_evidence_state(result, 128 * 1024)
-    if not config.decision_enabled:
-        return result
-    active = provider or RuleDecisionProvider(config)
-    try:
-        result.decisions = active.decide(result)
-        result.machine["provider_availability"] = {"status": "AVAILABLE", "provider": active.name}
-    except Exception as error:
-        if provider is None:
-            raise
-        from .systemone import ProviderAbstention
-        abstained = isinstance(error, ProviderAbstention)
-        result.machine["provider_availability"] = {
-            "status": "ABSTAINED" if abstained else "UNAVAILABLE",
-            "provider": active.name,
-            "error": str(error),
-        }
+    apply_policy(result, findings, config.optional_checks)
+    if config.decision_enabled:
         result.decisions = RuleDecisionProvider(config).decide(result)
-    result.machine["provider_recommendation"] = result.decisions.to_dict()
-    result.machine["policy_required_review"] = result.machine["requires_investigation"]
-    if result.machine["policy_required_review"]:
-        from .decisions import DecisionValue
-        result.decisions.values["requires_investigation"] = DecisionValue(
-            field="requires_investigation", kind="boolean", value=True,
-            probabilities={"False": 0.0, "True": 1.0}, strategy="deterministic_policy",
-            probability_kind="deterministic_policy", evidence=[f["finding_id"] for f in result.machine["findings"]
-                if f["outcome"] in ("FAIL", "CONTRACT_FAILURE", "UNAVAILABLE") and f["required"]])
-    result.decisions.requires_investigation = (
-        result.decisions.requires_investigation or result.machine["requires_investigation"]
-    )
-    result.machine["requires_investigation"] = result.decisions.requires_investigation
-    result.machine["decision"] = result.decisions.to_dict()
+        result.machine["decision"] = result.decisions.to_dict()
     return result
 
 
@@ -493,14 +269,12 @@ def run_qc(
     config: DatasetConfig | None = None,
     registry: RegistryStore | list[dict[str, Any]] | None = None,
     run_id: str | None = None,
-    decision_provider: DecisionProvider | None = None,
     reference_frame: pd.DataFrame | None = None,
     reference_spec: ReferenceSpec | None = None,
     expectations: Sequence[Any] = (),
     observed_at: str | None = None,
     prior_refreshes: Sequence[dict[str, Any]] = (),
     assessment_id: str | None = None,
-    qualification: Any | None = None,
 ) -> QCRunResult:
     config = config or DatasetConfig()
     from .store import observation_time
@@ -508,7 +282,6 @@ def run_qc(
     from .source import CachedSource
     if not isinstance(source, CachedSource):
         source = CachedSource(source, config)
-    provenance = _source_provenance(source)
     from .versions import select_versions
     current_id, previous_id = select_versions(source.list_versions(), current_id, previous_id)
     if hasattr(source, "snapshot_metadata"):
@@ -541,15 +314,7 @@ def run_qc(
         result = QCRunResult(run_id=run_id, dataset=config.name, status="INCOMPLETE", contracts=contracts,
                              version_pair=None, input_findings=input_findings, snapshot_manifest=snapshots, observed_at=observed_at,
                              machine=_machine(run_id, config.name, "INCOMPLETE", contracts, None, [], None, []))
-        return _attach_decisions(
-            result,
-            decision_provider,
-            config,
-            prior_refreshes,
-            assessment_id=assessment_id,
-            provenance=provenance,
-            qualification=qualification,
-        )
+        return _finalize(result, config, prior_refreshes, assessment_id)
     checks: list[ContractCheck] = []
     contract_current_fact: pd.DataFrame | None = None
     for stage in common_stages:
@@ -585,15 +350,7 @@ def run_qc(
                 run_id, config.name, contracts.status, contracts, None, [], None, reasons
             ),
         )
-        return _attach_decisions(
-            result,
-            decision_provider,
-            config,
-            prior_refreshes,
-            assessment_id=assessment_id,
-            provenance=provenance,
-            qualification=qualification,
-        )
+        return _finalize(result, config, prior_refreshes, assessment_id)
 
     analysis_stage = _resolve_common_stage(
         source, previous_id, current_id, config.analysis_stages()
@@ -686,79 +443,16 @@ def run_qc(
             calibration={"unavailable_reason": f"{type(exc).__name__}: {exc}"},
             series=[], unavailable_series=["provider_execution"],
         )
-    drift = None
-    drift_error = ""
-    if config.distribution_drift_enabled and pair.new_periods:
-        target_period = max(pair.new_periods)
-        # An opted-in check that errors is required evidence that is missing,
-        # never a silent pass.
-        try:
-            drift = assess_distribution_drift(
-                current,
-                config,
-                target_period,
-                bins=config.distribution_drift_bins,
-                reference_weeks=config.distribution_drift_reference_weeks,
-                abs_floor=config.distribution_drift_abs_floor,
-                threshold_quantile=config.distribution_drift_quantile,
-            )
-        except Exception as error:  # noqa: BLE001 - recorded as unavailable evidence
-            input_findings.append({"check": "distribution_drift", "scope": config.name,
-                                   "outcome": "UNAVAILABLE", "required": True})
-            drift_error = f"{type(error).__name__}: {error}"
     # The final status is computed exactly once, from findings, by
     # ``apply_policy``. Every check that can escalate must emit a finding; the
     # historical status here is only the provisional value until then.
     status = historical_status
-    from .calendar import build_calendar
-    calendar = build_calendar(config)
     try:
         hierarchy = hierarchy_checks(current, config)
     except ValueError:
         input_findings.append({"check": "hierarchy", "scope": config.name,
                                "outcome": "UNAVAILABLE", "required": False})
         hierarchy = []
-    configured_metrics = config.temporal_metrics() or (config.primary_metric,)
-    metric_ledgers: dict[str, ExplanationLedger] = {}
-    for metric in configured_metrics:
-        try:
-            metric_ledgers[metric] = build_explanation_ledger(
-                previous,
-                current,
-                pair,
-                config,
-                events=events,
-                temporal=temporal,
-                calendar=calendar,
-                approved_event_ids=tuple(attribution.matched_event_ids),
-                metric=metric,
-            )
-        except ValueError:
-            continue
-    ledger = metric_ledgers.get(config.primary_metric)
-    period_ledgers: dict[int, ExplanationLedger] = {}
-    period_metric_ledgers: dict[str, ExplanationLedger] = {}
-    if temporal is not None:
-        for target in getattr(temporal, "targets", ()) or (temporal.target_week,):
-            for metric in configured_metrics:
-                try:
-                    built = build_explanation_ledger(
-                        previous,
-                        current,
-                        pair,
-                        config,
-                        events=events,
-                        temporal=_TemporalPeriod(temporal, int(target), metric),
-                        calendar=calendar,
-                        approved_event_ids=tuple(attribution.matched_event_ids),
-                        new_periods=(int(target),),
-                        metric=metric,
-                    )
-                except ValueError:
-                    continue
-                period_metric_ledgers[f"{metric}|{int(target)}"] = built
-                if metric == config.primary_metric:
-                    period_ledgers[int(target)] = built
     reasons = _reasons(
         contracts, events, attribution, config, historical_status, relationships
     )
@@ -770,23 +464,7 @@ def run_qc(
         for item in temporal.series:
             if item.anomaly:
                 reasons.append(f"latest_week_anomaly:{item.series_id}")
-    if drift is not None and drift.any_drift:
-        for scope in drift.drifted:
-            reasons.append(f"latest_week_drift:{scope.scope}")
-    evidence = build_evidence_graph(
-        run_id=run_id,
-        pair=pair,
-        contracts=contracts,
-        events=events,
-        attribution=attribution,
-        counterfactual=counterfactual,
-        reconciliation=reconciliation,
-        lineage=lineage,
-        temporal=temporal,
-        relationships=relationships,
-    )
-
-    return _attach_decisions(
+    return _finalize(
         QCRunResult(
             run_id=run_id,
             dataset=config.name,
@@ -799,18 +477,12 @@ def run_qc(
             attribution=attribution,
             counterfactual=counterfactual,
             reconciliation=reconciliation,
-            distribution_drift=drift,
             lineage=lineage,
             temporal=temporal,
-            evidence=evidence,
             relationships=relationships,
             reference=reference_report,
             expectations=expectations,
             hierarchy=hierarchy,
-            ledger=ledger,
-            period_ledgers=period_ledgers,
-            metric_ledgers=metric_ledgers,
-            period_metric_ledgers=period_metric_ledgers,
             observed_at=observed_at,
             temporal_required=config.temporal_enabled and config.temporal_required and bool(pair.new_periods),
             input_findings=input_findings,
@@ -829,17 +501,11 @@ def run_qc(
                 lineage,
                 historical_status,
                 temporal,
-                evidence,
                 relationships,
                 reference_report,
-                drift,
-                drift_error,
             ),
         ),
-        decision_provider,
         config,
         prior_refreshes,
-        assessment_id=assessment_id,
-        provenance=provenance,
-        qualification=qualification,
+        assessment_id,
     )

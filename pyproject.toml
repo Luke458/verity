@@ -17,12 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-spark = ["pyspark>=3.5", "delta-spark>=3.2"]
-forecast = ["chronos-forecasting>=2.3"]
-classical = ["statsmodels>=0.14"]
-tspulse = ["granite-tsfm>=0.3"]
 delta = ["deltalake>=1,<2"]
-text = ["transformers>=5.6,<6", "torch>=2.6"]
 
 [project.scripts]
 qcgen = "qcgen.cli:main"
@@ -38,7 +33,6 @@ markers = [
     "unit: fast pure-logic tests",
     "integration: end-to-end runs over generated scenarios",
     "slow: tests that take more than a few seconds",
-    "model: tests requiring optional model extras (chronos, tspulse, text)",
 ]
 
 [tool.ruff]

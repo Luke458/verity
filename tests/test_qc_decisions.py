@@ -4,14 +4,7 @@ import json
 
 import pytest
 
-from qc.decisions import (
-    FEATURE_VERSION,
-    SEVERITY_VALUES,
-    FeatureEncoder,
-    feature_version,
-    field_index,
-)
-from qc.labels import CAUSE_BY_ORACLE
+from qc.decisions import SEVERITY_VALUES, field_index
 from qc.registry import StaticRegistry
 from qc.run import run_qc
 from qcgen.config import suite_config
@@ -78,14 +71,6 @@ def family_results(tmp_path_factory):
     return results
 
 
-def test_feature_encoder_shape_and_version():
-    encoder = FeatureEncoder()
-    assert feature_version() == FEATURE_VERSION
-    names = encoder.feature_names
-    assert len(names) == len(set(names))
-    assert names[0] == "contract_failed"
-
-
 @pytest.mark.parametrize("family", FAMILIES)
 def test_rule_decision_matches_family(family, family_results):
     result = family_results[family]
@@ -93,11 +78,8 @@ def test_rule_decision_matches_family(family, family_results):
     cause, requires = EXPECTED[family]
     assert result.decisions.get("likely_cause").value == cause
     assert result.decisions.requires_investigation is requires
-
-    encoder = FeatureEncoder()
-    vector = encoder.encode(result)
-    assert vector.shape == (len(encoder.feature_names),)
-    assert all(isinstance(value, float) for value in vector.tolist())
+    # Review follows the policy status; a label can neither clear nor escalate.
+    assert requires is (result.status not in ("PASS", "PASS_WITH_EXPLANATION"))
 
     payload = result.decisions.to_dict()
     json.dumps(payload)
@@ -122,10 +104,3 @@ def test_rule_decisions_carry_evidence(family_results):
     assert cause.probability_kind == "heuristic"
     probabilities = cause.probabilities
     assert probabilities[cause.value] == max(probabilities.values())
-
-
-def test_oracle_cause_vocabulary_is_complete():
-    from qc.decisions import CAUSE_VALUES
-
-    for mapped in CAUSE_BY_ORACLE.values():
-        assert mapped in CAUSE_VALUES

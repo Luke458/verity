@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from qc.agent import build_investigation_brief
 from qc.reporting import render_markdown, write_report
 from qc.run import run_qc
 from qcgen.config import suite_config
@@ -21,14 +20,12 @@ def case(tmp_path_factory):
         "missing_stores",
         ("source", "coded", "warehouse", "report"),
     )
-    result = run_qc(ScenarioSource(built.directory), "V0002", "V0001")
-    brief = build_investigation_brief(result, result.decisions)
-    return result, brief
+    return run_qc(ScenarioSource(built.directory), "V0002", "V0001")
 
 
 def test_render_markdown_contains_sections(case):
-    result, brief = case
-    markdown = render_markdown(result, brief)
+    result = case
+    markdown = render_markdown(result)
     for heading in (
         f"# QC RUN {result.run_id}",
         "**STATUS INVESTIGATE**",
@@ -37,8 +34,6 @@ def test_render_markdown_contains_sections(case):
         "## Latest week",
         "## Decision",
         "## Reasons",
-        "## Investigation brief",
-        "## Evidence graph",
     ):
         assert heading in markdown
     assert "MISSING_STORES" in markdown
@@ -46,9 +41,9 @@ def test_render_markdown_contains_sections(case):
 
 
 def test_write_report_creates_files_and_refuses_overwrite(case, tmp_path):
-    result, brief = case
+    result = case
     directory = tmp_path / "run-1"
-    paths = write_report(result, directory, brief)
+    paths = write_report(result, directory)
     assert paths["markdown"].exists()
     assert paths["machine"].exists()
 
@@ -60,4 +55,4 @@ def test_write_report_creates_files_and_refuses_overwrite(case, tmp_path):
     ].read_text()
 
     with pytest.raises(FileExistsError):
-        write_report(result, directory, brief)
+        write_report(result, directory)

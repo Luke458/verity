@@ -218,13 +218,13 @@ def test_shrink_drops_as_many_sections_as_needed() -> None:
     # and then refuse, losing the alert entirely.
     result = _result(
         decision={"x": "a" * 3000},
-        drift={"y": "b" * 3000},
+        expectations={"y": "b" * 3000},
         artifacts={"c": "c" * 3000},
     )
     payload = build_payload(result, max_bytes=5000)
     assert len(json.dumps(payload, sort_keys=True)) <= 5000
     assert {"artifacts", "decision"} <= set(payload["omitted"])
-    assert "drift" in payload and "drift" not in payload["omitted"]
+    assert "expectations" in payload and "expectations" not in payload["omitted"]
 
 
 def test_webhook_refuses_redirects(monkeypatch: pytest.MonkeyPatch) -> None:

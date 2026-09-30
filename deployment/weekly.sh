@@ -7,9 +7,11 @@
 # on the command line where `ps` could see them.
 #
 # Exit codes (from `qc weekly`):
-#   0  PASS / PASS_WITH_EXPLANATION / ALREADY_PROCESSED / LOCKED
+#   0  PASS / PASS_WITH_EXPLANATION
 #   2  INVESTIGATE  (alert-worthy)
 #   3  DATA_CONTRACT_FAILURE
+#   4  INCOMPLETE   (required evidence unavailable)
+#   75 LOCKED       (another run holds the lock)
 #   1  execution error
 set -euo pipefail
 umask 077
@@ -18,7 +20,6 @@ umask 077
 QC_BIN="${QC_BIN:-qc}"
 QC_OUT="${QC_OUT:-$(pwd)/reports/weekly}"
 QC_STAGE="${QC_STAGE:-warehouse}"
-QC_MIN_SAMPLES="${QC_MIN_SAMPLES:-9}"
 QC_LOG_DIR="${QC_LOG_DIR:-$QC_OUT/logs}"
 QC_LOCK="${QC_LOCK:-$QC_OUT/.weekly.lock}"
 
@@ -33,18 +34,16 @@ if ! flock -n 9; then
     exit 75
 fi
 
-args=(weekly --uri "$QC_URI" --stage "$QC_STAGE" --out "$QC_OUT"
-      --min-samples "$QC_MIN_SAMPLES")
+args=(weekly --uri "$QC_URI" --stage "$QC_STAGE" --out "$QC_OUT")
 
 [[ -n "${QC_CONFIG:-}" ]] && args+=(--config "$QC_CONFIG")
 [[ -n "${QC_STORE:-}" ]] && args+=(--store "$QC_STORE")
-[[ -n "${QC_CALIBRATION_STORE:-}" ]] && args+=(--calibration-store "$QC_CALIBRATION_STORE")
 [[ -n "${QC_EXPECTATIONS:-}" ]] && args+=(--expectations "$QC_EXPECTATIONS")
 [[ -n "${QC_REFERENCE_URI:-}" ]] && args+=(--reference-uri "$QC_REFERENCE_URI")
 [[ -n "${QC_REFERENCE_SPEC:-}" ]] && args+=(--reference-spec "$QC_REFERENCE_SPEC")
 [[ -n "${QC_REFERENCE_VERSION:-}" ]] && args+=(--reference-version "$QC_REFERENCE_VERSION")
 [[ -n "${QC_REFERENCE_STAGE:-}" ]] && args+=(--reference-stage "$QC_REFERENCE_STAGE")
-[[ "${QC_ALLOW_INVESTIGATE:-0}" == "1" ]] && args+=(--allow-investigate)
+[[ -n "${QC_NOTIFY:-}" ]] && args+=(--notify "$QC_NOTIFY")
 
 set +e
 "$QC_BIN" "${args[@]}" "$@" 2>&1 | tee -a "$LOG_FILE"

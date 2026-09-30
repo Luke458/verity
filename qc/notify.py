@@ -52,13 +52,11 @@ DEFAULT_MAX_PAYLOAD_BYTES = 16_384
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
 # Ordered by how much a human needs them; ``_shrink`` drops from the end of the
-# tuple first, so ``run_id`` goes before ``decision`` and ``drift`` goes last.
+# tuple first, so ``run_id`` goes before ``decision`` and ``expectations`` last.
 _OPTIONAL_SECTIONS: tuple[str, ...] = (
-    "drift",
     "expectations",
     "reference",
     "decision",
-    "prequential_records",
     "artifacts",
     "report_dir",
     "run_id",

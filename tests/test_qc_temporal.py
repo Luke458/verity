@@ -405,23 +405,3 @@ def test_sparse_leaf_uses_labelled_parent_share_fallback():
     assert parent_share[0]["share"] == pytest.approx(1.0 / 3.0)
     assert parent_share[0]["basis"] == "historical_share"
 
-
-def test_sarimax_forecaster_is_available():
-    pytest.importorskip("statsmodels")
-    from qc.temporal import SarimaxForecaster
-
-    values = list(_noisy_values(60, seed=4, sigma=1.0).values())
-    forecaster = SarimaxForecaster(order=(1, 0, 0), seasonal_order=(0, 0, 0, 0))
-    predictions = forecaster.predict(values, 1, (0.01, 0.5, 0.99))
-    assert predictions.shape == (1, 3)
-    assert predictions[0][0] <= predictions[0][1] <= predictions[0][2]
-
-
-def test_get_forecaster_selects_sarimax():
-    pytest.importorskip("statsmodels")
-    from dataclasses import replace
-
-    from qc.temporal import SarimaxForecaster, get_forecaster
-
-    config = replace(CONFIG, forecaster="sarimax")
-    assert isinstance(get_forecaster(config), SarimaxForecaster)

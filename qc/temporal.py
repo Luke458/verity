@@ -1,12 +1,10 @@
-"""Temporal intelligence: latest-week forecasting, robust statistics and
-forecast calibration (Milestone C).
+"""Latest-week temporal QC: forecasting, calibration and anomaly decisions.
 
-The engine consumes forecast quantiles, residual percentile and independent
-statistical detectors as evidence. Chronos is an optional adapter; the default
-seasonal-difference baseline keeps tests and local runs dependency-free and
-doubles as the champion/challenger reference. Calibration is fitted on rolling
-origins from the previous version only, so the target week is never used to
-score itself.
+Each configured measure and appended period is forecast from the previous
+version only (``forecaster: auto`` selects from a fixed grid; ``baseline`` is
+seasonal-naive), intervals are calibrated on reserved rolling origins, and
+``decide_anomalies`` decides every series of a refresh in one BH family: the
+forecast p-value for national series, the share-of-parent p-value for leaves.
 """
 
 from __future__ import annotations
@@ -106,108 +104,10 @@ class BaselineForecaster:
         return predictions
 
 
-class ChronosForecaster:
-    """Optional Chronos adapter; imports and weights load lazily."""
-
-    name = "chronos"
-
-    def __init__(self, model_id: str = "amazon/chronos-2", device: str = "cpu"):
-        self.model_id = model_id
-        self.device = device
-        self._pipeline = None
-
-    def _load(self):
-        if self._pipeline is None:
-            # BaseChronosPipeline dispatches to the checkpoint architecture
-            # (Chronos-2, Chronos-Bolt, Chronos-T5).
-            from chronos import BaseChronosPipeline  # type: ignore
-
-            self._pipeline = BaseChronosPipeline.from_pretrained(
-                self.model_id, device_map=self.device
-            )
-        return self._pipeline
-
-    def predict(
-        self,
-        history: Sequence[float],
-        horizon: int,
-        quantiles: Sequence[float],
-    ) -> np.ndarray:
-        import torch  # type: ignore
-
-        pipeline = self._load()
-        context = torch.tensor(np.asarray(history, dtype=np.float32))
-        predictions, _ = pipeline.predict_quantiles(
-            context,
-            prediction_length=horizon,
-            quantile_levels=list(quantiles),
-        )
-        return np.asarray(predictions[0].cpu().numpy(), dtype=float)
-
-
 def get_forecaster(config: DatasetConfig) -> Forecaster:
     if config.forecaster == "baseline":
         return BaselineForecaster(season=config.temporal_season)
-    if config.forecaster == "chronos":
-        return ChronosForecaster(config.chronos_model)
-    if config.forecaster == "sarimax":
-        return SarimaxForecaster(
-            order=tuple(config.sarimax_order),
-            seasonal_order=tuple(config.sarimax_seasonal_order),
-        )
     raise ValueError(f"unknown forecaster: {config.forecaster!r}")
-
-
-class SarimaxForecaster:
-    """Optional classical challenger; imports statsmodels lazily.
-
-    ARIMA/seasonal ARIMA with covariate support is a useful independent
-    comparator for stable, low-count series where a foundation model may
-    overfit. It is not a default: order selection is per series and fits are
-    slow, so it belongs behind the same Forecaster protocol.
-    """
-
-    name = "sarimax"
-
-    def __init__(
-        self,
-        order: tuple[int, ...] = (1, 0, 1),
-        seasonal_order: tuple[int, ...] = (1, 0, 1, 52),
-        trend: str = "c",
-        max_history: int = 520,
-    ):
-        self.order = tuple(int(value) for value in order)
-        self.seasonal_order = tuple(int(value) for value in seasonal_order)
-        self.trend = trend
-        self.max_history = max_history
-
-    def predict(
-        self,
-        history: Sequence[float],
-        horizon: int,
-        quantiles: Sequence[float],
-    ) -> np.ndarray:
-        from statsmodels.tsa.statespace.sarimax import SARIMAX  # type: ignore
-
-        values = np.asarray(history, dtype=float)
-        if len(values) > self.max_history:
-            values = values[-self.max_history :]
-        model = SARIMAX(
-            values,
-            order=self.order,
-            seasonal_order=self.seasonal_order,
-            trend=self.trend,
-            enforce_stationarity=False,
-            enforce_invertibility=False,
-        )
-        fitted = model.fit(disp=False)
-        forecast = fitted.get_forecast(steps=horizon)
-        mean = np.asarray(forecast.predicted_mean, dtype=float)
-        standard_error = np.sqrt(
-            np.asarray(forecast.var_pred_mean, dtype=float)
-        )
-        z = np.array([_NORMAL.inv_cdf(float(level)) for level in quantiles])
-        return mean[:, None] + standard_error[:, None] * z
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +341,8 @@ class CandidateSpec:
 
     ``seasonal_naive`` is the existing dependency-free baseline. ``ridge`` is
     trend plus annual Fourier terms plus declared-calendar event indicators,
-    fitted with a standardized-feature ridge penalty. ``fixed`` preserves a
-    configured external forecaster (Chronos/SARIMAX) that has no selectable
+    fitted with a standardized-feature ridge penalty. ``fixed`` wraps the
+    configured forecaster (``baseline``), which has no selectable
     grid and therefore cannot be model-selected.
     """
 

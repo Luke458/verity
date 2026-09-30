@@ -2,8 +2,7 @@
 
 Runs the engine over every scenario in a suite, persists one record per
 scenario, and (for synthetic suites with a manifest) scores engine outcomes
-against the fault oracle. On real data the oracle fields are absent and the
-records become the analyst-feedback and calibration store.
+against the fault oracle.
 
 The scenario adapter is imported lazily; the engine package remains free of
 generator dependencies.
@@ -19,8 +18,6 @@ from typing import Any
 
 from .config import DatasetConfig
 from .jsonutil import dumps as json_dumps
-from .labels import LabelStore, oracle_labels_for_result
-from .prequential import CalibrationRecord, PrequentialStore
 from .registry import FileRegistry, RegistryStore, StaticRegistry
 from .run import run_qc
 
@@ -167,8 +164,6 @@ def run_shadow(
     registry_path: str | Path | None = None,
     out_dir: str | Path | None = None,
     source_factory: Callable[[Path], Any] | None = None,
-    labels_out: str | Path | None = None,
-    prequential_store: str | Path | None = None,
     oracle_dir: str | Path | None = None,
     with_registry: bool = False,
 ) -> dict[str, Any]:
@@ -197,30 +192,6 @@ def run_shadow(
         registry_mode = "plumbing"
     else:
         registry_mode = "blind"
-    label_store = LabelStore(labels_out) if labels_out else None
-    if label_store is not None:
-        # --labels-out writes records with provenance "oracle". Synthesising
-        # them from an absent vault would tag placeholders as ground truth and
-        # let `qc train` fit a provider to noise, so require the payload up
-        # front rather than after every scenario has been scored.
-        missing = [
-            entry["scenario_id"]
-            for entry in suite["scenarios"]
-            if not vault.exists(str(entry["scenario_id"]))
-        ]
-        if missing:
-            shown = ", ".join(missing[:5]) + ("..." if len(missing) > 5 else "")
-            raise ValueError(
-                f"--labels-out needs an oracle payload for every scenario, but "
-                f"{len(missing)} are missing under {vault.root}: {shown}. "
-                "Without one the labels would be placeholders carrying "
-                'provenance "oracle". Generate the vault (qcgen generate) or '
-                "drop --labels-out."
-            )
-    calibration_store = (
-        PrequentialStore(prequential_store) if prequential_store else None
-    )
-
     if source_factory is None:
         from qcgen.sources import ScenarioSource
 
@@ -246,24 +217,6 @@ def run_shadow(
             config,
             registry=registry,
         )
-        if label_store is not None:
-            label_record = oracle_labels_for_result(result, oracle)
-            label_record.metadata["suite_id"] = suite.get("suite_id")
-            label_store.append([label_record])
-        if calibration_store is not None and result.temporal is not None:
-            calibration_store.add(
-                [
-                    CalibrationRecord(
-                        series_id=item.series_id,
-                        target_week=item.target_week,
-                        available_on=item.target_week,
-                        residual=item.standardized_residual,
-                        run_id=result.run_id,
-                        scope=str(suite.get("suite_id", "default")),
-                    )
-                    for item in result.temporal.series
-                ]
-            )
         records.append(
             ShadowRecord(
                 scenario_id=entry["scenario_id"],

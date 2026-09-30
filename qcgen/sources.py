@@ -16,9 +16,6 @@ from .snapshots import SnapshotStore
 
 
 class ScenarioSource:
-    # Generated suites are synthetic; every other source is real by default.
-    provenance = "synthetic"
-
     def __init__(
         self,
         scenario_dir: str | Path,

@@ -1,6 +1,6 @@
 """Engine configuration.
 
-Defaults match the synthetic retail world so Milestone A can be developed and
+Defaults match the synthetic retail world so the engine can be developed and
 tested without configuration; YAML files override any field for real datasets.
 """
 
@@ -220,7 +220,7 @@ class DatasetConfig:
             for canonical, production in self.column_map_dict().items()
         }
 
-    # Milestone C: latest-week temporal intelligence.
+    # Latest-week temporal QC.
     temporal_enabled: bool = True
     temporal_entity_columns: tuple[str, ...] = ("banner_id", "commodity_id")
     temporal_min_history: int = 26
@@ -229,17 +229,6 @@ class DatasetConfig:
     temporal_z_threshold: float = 3.0
     temporal_change_point_threshold: float = 5.0
     temporal_min_relative_residual: float = 0.02
-    # Distribution drift over the appended period. Off by default: the gate in
-    # config/drift-gate.json passed on synthetic data only, and enabling a
-    # detector before it has real-data calibration is how false-positive
-    # generators get promoted. The threshold is derived per scope from that
-    # scope's own consecutive-week PSI distribution, never from a global
-    # constant, because PSI is sample-size dependent.
-    distribution_drift_enabled: bool = False
-    distribution_drift_bins: int = 10
-    distribution_drift_reference_weeks: int = 8
-    distribution_drift_abs_floor: float = 0.01
-    distribution_drift_quantile: float = 0.95
     # Entity presence reliability. An entity absent from the appended period is
     # only evidence of a coverage regression if it traded in at least this
     # fraction of its own trailing window: on a sparse transactional source a
@@ -259,14 +248,9 @@ class DatasetConfig:
     temporal_min_annual_history: int = 104
     # Reported prediction intervals use the held-out residual quantiles.
     temporal_interval_alpha: float = 0.1
-    # Sparse leaves fall back to parent expectation x historical child share;
-    # the fallback is labelled and cannot support statistical clearance.
+    # Sparse leaves fall back to parent expectation x historical child share
+    # and are labelled ``parent_share``.
     temporal_sparse_fallback: bool = True
-    # Verified certificates may clear their specific finding without a new
-    # human approval; integrity failures still always require review. A pinned
-    # qualification artifact is required before any automatic clearance.
-    statistical_clearance_enabled: bool = True
-    qualification_path: str = ""
     # Leaf anomaly screening controls false discoveries before escalation.
     temporal_fdr_enabled: bool = True
     # One BH family per refresh (temporal.decide_anomalies): ~q is the chance
@@ -294,14 +278,11 @@ class DatasetConfig:
         0.99,
     )
     forecaster: str = "baseline"
-    chronos_model: str = "amazon/chronos-2"
-    sarimax_order: tuple[int, ...] = (1, 0, 1)
-    sarimax_seasonal_order: tuple[int, ...] = (1, 0, 1, 52)
 
-    # Milestone D: semantic decisions.
+    # Attach rule-based cause labels (they never change the status).
     decision_enabled: bool = True
 
-    # Entity relationship detection (section 12): conservative candidates.
+    # Entity replacement candidates: conservative detection thresholds.
     relationship_correlation_threshold: float = 0.9
     relationship_min_weeks: int = 4
     relationship_ratio_bounds: tuple[float, float] = (0.5, 2.0)

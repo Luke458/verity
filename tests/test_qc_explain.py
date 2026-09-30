@@ -21,42 +21,20 @@ def _report(tmp_path):
     directory = tmp_path / "report"
     directory.mkdir()
     (directory / "report.json").write_text(json.dumps(result.machine, default=str))
-    periods = []
-    for package in result.evidence_packages:
-        payload = package.to_dict()
-        payload["certificates"] = [
-            certificate.to_dict()
-            for certificate in result.certificates
-            if certificate.evidence_digest == package.digest
-        ]
-        periods.append(payload)
-    (directory / "evidence.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "assessment_id": result.assessment_id,
-                "periods": periods,
-            },
-            default=str,
-        )
-    )
     return directory, result
 
 
 def test_explain_reads_report_directory(tmp_path, capsys):
     directory, result = _report(tmp_path)
-    assert (
-        main(["explain", "--report", str(directory), "--json"]) == 0
-    )
+    assert main(["explain", "--report", str(directory), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["machine"]["run_id"] == result.run_id
-    assert payload["evidence"]["schema_version"] == 2
-    assert payload["evidence"]["periods"]
 
     assert main(["explain", "--report", str(directory)]) == 0
     output = capsys.readouterr().out
-    assert "status:" in output
-    assert "ledger:" in output
+    assert f"status: {result.status}" in output
+    # Only non-passing findings are listed, each with its disposition.
+    assert "-> UNEXPLAINED_ANOMALY" in output
 
 
 def test_explain_reads_sqlite_journal(tmp_path, capsys):
@@ -69,47 +47,21 @@ def test_explain_reads_sqlite_journal(tmp_path, capsys):
                 "assessment-1",
                 json.dumps({"config": {"name": result.dataset}}),
                 result.status,
-                json.dumps(
-                    {"evidence.json": (directory / "evidence.json").read_text()}
-                ),
+                json.dumps({"report.json": (directory / "report.json").read_text()}),
                 json.dumps({}),
-                json.dumps(result.machine, default=str),
+                json.dumps({"dataset": result.dataset, "status": result.status}),
             ),
         )
         store.connection.commit()
-
-    assert (
-        main(
-            [
-                "explain",
-                "--store",
-                str(store_path),
-                "--assessment",
-                "assessment-1",
-                "--json",
-            ]
-        )
-        == 0
-    )
+    assert main(["explain", "--store", str(store_path), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["assessment_id"] == "assessment-1"
-    assert payload["evidence"]["periods"]
+    assert payload["machine"]["status"] == result.status
+    assert payload["machine"]["findings"]
 
 
-def test_explain_reports_missing_assessment(tmp_path, capsys):
-    store_path = tmp_path / "assessments.sqlite"
+def test_explain_without_a_match_fails_cleanly(tmp_path, capsys):
+    store_path = tmp_path / "empty.sqlite"
     SqliteStore(store_path).close()
-    assert (
-        main(
-            [
-                "explain",
-                "--store",
-                str(store_path),
-                "--dataset",
-                "unknown",
-                "--json",
-            ]
-        )
-        == 2
-    )
+    assert main(["explain", "--store", str(store_path)]) == 2
     assert "no matching assessment" in capsys.readouterr().err

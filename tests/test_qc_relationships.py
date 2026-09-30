@@ -5,7 +5,6 @@ import pytest
 from qc.config import DatasetConfig
 from qc.relationships import (
     EntityRelationship,
-    RelationshipStore,
     detect_relationships,
 )
 from qc.versions import build_version_pair
@@ -60,25 +59,6 @@ def test_detect_ignores_uncorrelated_new_entity():
         _series("C", {week: float((week * 7) % 3) for week in range(1, 7)})
     )
     assert detect_relationships(previous, current, _pair(previous, current), CONFIG) == []
-
-
-def test_relationship_store_roundtrip_and_lookup(tmp_path):
-    store = RelationshipStore(tmp_path / "relationships.jsonl")
-    relationship = EntityRelationship(
-        source_id="A",
-        target_id="C",
-        entity_type="store",
-        relationship="replaced_by",
-        effective_week=30,
-        confidence=0.95,
-        confirmed=True,
-        evidence={"weeks": 6},
-    )
-    store.add(relationship)
-    loaded = store.load()
-    assert loaded == [relationship]
-    assert store.for_entity("store", ["A"]) == [relationship]
-    assert store.for_entity("store", ["Z"]) == []
 
 
 def test_unknown_relationship_type_rejected():

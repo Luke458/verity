@@ -1,19 +1,14 @@
-"""Versioned deterministic findings and the effective analyst review policy.
+"""Versioned findings and the one final review status.
 
 Findings carry an explicit disposition so the review decision can distinguish a
 hard failure, missing required evidence, an unexplained actionable anomaly, a
-statistically explained movement, a human-approved exception and an
-informational finding below escalation thresholds. Statistical clearance is
-granted only through a verified explanation certificate bound to the exact
-finding, assessment identity, evidence digest and policy version; no model can
-override the verifier.
-
-The policy runs in two phases so certificates can bind to immutable findings:
+human-approved exception and an informational finding below escalation
+thresholds. Only a registered, approved expectation or expected event can
+explain a failure; nothing is cleared automatically.
 
 1. ``collect_findings`` runs every check and materializes findings (including
    period-specific temporal findings and recurrence escalations).
-2. ``apply_policy`` verifies certificate binding and computes the final status
-   exactly once.
+2. ``apply_policy`` computes the final status exactly once from them.
 """
 
 from __future__ import annotations
@@ -24,42 +19,21 @@ from typing import Any
 
 from .jsonutil import dumps as json_dumps
 
-FINDING_SCHEMA_VERSION = 4
-MACHINE_SCHEMA_VERSION = 5
+FINDING_SCHEMA_VERSION = 5
+MACHINE_SCHEMA_VERSION = 6
 
 HARD_FAILURE = "HARD_FAILURE"
 UNAVAILABLE_EVIDENCE = "UNAVAILABLE_EVIDENCE"
 UNEXPLAINED_ANOMALY = "UNEXPLAINED_ANOMALY"
-STATISTICALLY_EXPLAINED = "STATISTICALLY_EXPLAINED"
 HUMAN_APPROVED = "HUMAN_APPROVED"
 INFORMATIONAL = "INFORMATIONAL"
 PASSING = "PASS"
-
-# Only these checks may ever receive automatic statistical clearance: an
-# explicitly eligible temporal anomaly scoped to one series and period.
-CLEARABLE_CHECKS = frozenset({"temporal"})
 
 # Outcomes a check may report. Unknown outcomes are rejected when findings are
 # materialized and treated as failures if they somehow reach the policy.
 KNOWN_OUTCOMES = frozenset(
     {"PASS", "FAIL", "UNAVAILABLE", "CONTRACT_FAILURE", "SKIPPED"}
 )
-# Scope kinds whose failures can never be cleared by a certificate.
-BLOCKING_SCOPE_KINDS = frozenset(
-    {
-        "contract",
-        "input",
-        "reference",
-        "reconciliation",
-        "lineage",
-        "hierarchy",
-        "historical_revision",
-        "revision",
-        "approval",
-        "counterfactual",
-    }
-)
-
 # Structured scope kinds. Reference identifiers are never interchangeable with
 # hierarchy scopes and each finding declares which namespace its scope uses.
 SCOPE_CONTRACT = "contract"
@@ -112,8 +86,6 @@ class Finding:
     evidence_refs: tuple[str, ...]
     approval_ids: tuple[str, ...] = ()
     disposition: str = ""
-    clearance_basis: str = ""
-    certificate_id: str = ""
     scope_type: str = ""
     metric: str = ""
     level: str = ""
@@ -156,8 +128,6 @@ def finding(
     required: bool = True,
     approvals: tuple[str, ...] = (),
     disposition: str | None = None,
-    clearance_basis: str = "",
-    certificate_id: str = "",
     scope_type: str | None = None,
     metric: str = "",
     level: str = "",
@@ -190,8 +160,6 @@ def finding(
         (check,),
         approvals,
         resolved,
-        clearance_basis,
-        certificate_id,
         resolved_kind,
         metric,
         level,
@@ -203,7 +171,7 @@ def finding(
 
 
 def _explained(item: Finding) -> bool:
-    return bool(item.approval_ids) or item.clearance_basis == "statistical"
+    return bool(item.approval_ids)
 
 
 def status_for(findings: list[Finding]) -> str:
@@ -218,62 +186,6 @@ def status_for(findings: list[Finding]) -> str:
     return "PASS"
 
 
-def certificate_covers(certificate: Any, item: Finding) -> bool:
-    """Exact certificate binding.
-
-    The certificate must be verified, statistical, carry nonempty assessment,
-    evidence and qualification identities, cover the exact finding ID in both
-    its coverage record and its explicit finding list, report no rejection
-    reasons and match the finding's scope kind, metric, level, series and
-    period exactly. Missing fields are never treated as current.
-    """
-    if getattr(certificate, "status", None) != "VERIFIED":
-        return False
-    if getattr(certificate, "clearance_basis", "") != "statistical":
-        return False
-    if not getattr(certificate, "assessment_id", ""):
-        return False
-    if not getattr(certificate, "evidence_digest", ""):
-        return False
-    if not getattr(certificate, "qualification_digest", ""):
-        return False
-    finding_ids = getattr(certificate, "finding_ids", ())
-    if not finding_ids or item.finding_id not in finding_ids:
-        return False
-    coverage = getattr(certificate, "coverage", None) or {}
-    covered = coverage.get("finding_ids")
-    if not covered or item.finding_id not in covered:
-        return False
-    if getattr(certificate, "reasons", ()):
-        return False
-    if getattr(certificate, "scope", "") != item.scope:
-        return False
-    if getattr(certificate, "scope_type", "") != item.scope_type:
-        return False
-    if getattr(certificate, "metric", "") != item.metric:
-        return False
-    if getattr(certificate, "level", "") != item.level:
-        return False
-    if getattr(certificate, "period", None) != item.period:
-        return False
-    return True
-
-
-def _clearance_for_finding(
-    item: Finding, certificates: tuple[Any, ...]
-) -> Any | None:
-    if item.outcome != "FAIL" or item.approval_ids or item.clearance_basis:
-        return None
-    if item.check not in CLEARABLE_CHECKS:
-        return None
-    if item.scope_type != SCOPE_TEMPORAL:
-        return None
-    for certificate in certificates:
-        if certificate_covers(certificate, item):
-            return certificate
-    return None
-
-
 def _temporal_materiality(series: Any, config: Any) -> float:
     relative = float(getattr(config, "temporal_min_relative_residual", 0.02))
     absolute = float(getattr(config, "temporal_materiality_abs", 0.0))
@@ -286,7 +198,7 @@ def collect_findings(
     config: Any | None = None,
     prior_refreshes: tuple[dict[str, Any], ...] = (),
 ) -> list[Finding]:
-    """Run checks into immutable findings; never grants clearance here."""
+    """Run every check into immutable findings."""
     findings = [
         finding(
             f"contracts:{c.name}",
@@ -353,28 +265,10 @@ def collect_findings(
         if outcome is None:
             raise ValueError(f"unknown hierarchy status {check.status!r}")
         findings.append(finding(check.name, check.level, outcome))
-    drift = getattr(result, "distribution_drift", None)
-    if drift is not None:
-        # Opt-in check: when it ran, each drifted scope escalates; a scope with
-        # too little history to estimate its own threshold is informational.
-        for scope in drift.scopes:
-            findings.append(
-                finding(
-                    "distribution_drift",
-                    scope.scope,
-                    "FAIL" if scope.drifted else ("PASS" if scope.psi is not None else "UNAVAILABLE"),
-                    required=False,
-                    metric=scope.metric,
-                    level=scope.scope_type,
-                    period=int(scope.period),
-                    impact=float(scope.psi or 0.0),
-                    materiality=float(scope.threshold or 0.0),
-                )
-            )
     lineage = getattr(result, "lineage", None)
     if lineage is not None:
         # A first divergence is expected refresh evidence (attribution explains
-        # it), so it is recorded as passing rather than blocking clearance.
+        # it), so it is recorded as passing.
         outcome = {
             "PASS": "PASS",
             "FIRST_DIVERGENCE": "PASS",
@@ -545,93 +439,24 @@ def _series_level(series_id: str) -> str:
 def apply_policy(
     result: Any,
     findings: list[Finding],
-    certificates: tuple[Any, ...] = (),
     optional_checks: tuple[str, ...] = (),
 ) -> None:
-    """Resolve certificate clearances once and compute the final status.
-
-    Only certificates bound to this assessment identity, one of its evidence
-    digests, the supported certificate schema and the current policy version
-    can clear anything; any other artifact is ignored.
-    """
-    from .evidence_package import (
-        CERTIFICATE_SCHEMA,
-        EVIDENCE_POLICY_VERSION,
-    )
-
-    expected_id = getattr(result, "assessment_id", None) or result.run_id
-    digests = set(getattr(result, "machine", {}).get("evidence_digests", ()) or ())
-    compatible = tuple(
-        certificate
-        for certificate in certificates
-        if expected_id
-        and getattr(certificate, "assessment_id", "") == expected_id
-        and getattr(certificate, "evidence_digest", "") in digests
-        and getattr(certificate, "schema_version", 0) == CERTIFICATE_SCHEMA
-        and getattr(certificate, "policy_version", "") == EVIDENCE_POLICY_VERSION
-        and getattr(certificate, "qualification_digest", "")
-    )
+    """Compute the final status once from the findings."""
     findings = [
         replace(f, required=False)
         if f.check in optional_checks and not f.check.startswith("contracts:")
         else f
         for f in findings
     ]
-    cleared: list[dict[str, Any]] = []
-    resolved: list[Finding] = []
-    for item in findings:
-        certificate = _clearance_for_finding(item, compatible)
-        if certificate is None:
-            resolved.append(item)
-            continue
-        item = replace(
-            item,
-            disposition=STATISTICALLY_EXPLAINED,
-            clearance_basis="statistical",
-            certificate_id=certificate.certificate_id,
-        )
-        resolved.append(item)
-        cleared.append(
-            {
-                "finding_id": item.finding_id,
-                "scope": item.scope,
-                "period": item.period,
-                "certificate_id": certificate.certificate_id,
-                "basis": "statistical",
-                "reasons": list(certificate.reasons),
-            }
-        )
-    findings = resolved
     result.status = status_for(findings)
-    clearance_bases = {
-        f.finding_id: (
-            f.clearance_basis or ("human_approval" if f.approval_ids else "")
-        )
-        for f in findings
-        if f.outcome == "FAIL"
-    }
     result.machine.update(
         schema_version=MACHINE_SCHEMA_VERSION,
         findings=[asdict(f) for f in findings],
         status=result.status,
         requires_investigation=result.status not in ("PASS", "PASS_WITH_EXPLANATION"),
-        clearance=cleared,
-        clearance_bases=clearance_bases,
+        explained_by={
+            f.finding_id: list(f.approval_ids)
+            for f in findings
+            if f.outcome == "FAIL" and f.approval_ids
+        },
     )
-
-
-def finalize_policy(
-    result: Any,
-    optional_checks: tuple[str, ...] = (),
-    certificates: tuple[Any, ...] = (),
-    config: Any | None = None,
-    prior_refreshes: tuple[dict[str, Any], ...] = (),
-    findings: list[Finding] | None = None,
-) -> None:
-    """Never let an integrity failure disappear behind attribution or a model."""
-    collected = (
-        findings
-        if findings is not None
-        else collect_findings(result, config, prior_refreshes)
-    )
-    apply_policy(result, collected, certificates, optional_checks)

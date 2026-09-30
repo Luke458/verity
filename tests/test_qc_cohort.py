@@ -43,7 +43,6 @@ def test_small_cohort_end_to_end(tmp_path):
     assert result.metrics["contract_failure_rate"] is None
     assert len(result.code_sha256) == 64
     assert result.plan_sha256
-    assert result.production_eligible is False
     # Detection, FPR and lineage gates; FPR is INSUFFICIENT_EVIDENCE without
     # controls, so two faults and no controls cannot qualify.
     assert [check["gate"] for check in result.gate_results] == [

@@ -1,4 +1,4 @@
-"""Independent reference controls (ported from Verity's spine).
+"""Independent reference controls.
 
 A pinned control snapshot answers one question: do this version's totals match
 an independently produced reference? Status is explicit - ``MATCH``,

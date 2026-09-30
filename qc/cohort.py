@@ -1,10 +1,9 @@
-"""Frozen cohort evaluation with pre-registered gates (architecture §65-68).
+"""Frozen cohort evaluation with pre-registered gates.
 
 Dev and held-out seeds are disjoint and declared before the run; gates are
-evaluated on the held-out split only. Every case is written to JSONL, the plan
-and the engine source are hashed, and ``production_eligible`` is always False
-for synthetic cohorts: this harness exists so real-label cohorts can be run and
-judged honestly, not to certify synthetic accuracy.
+evaluated on the held-out split only, on the engine's final status. Every case
+is written to JSONL and the plan, the engine source and the evaluated config
+are hashed or recorded, so a result is evidence for exactly one configuration.
 """
 
 from __future__ import annotations
@@ -169,7 +168,6 @@ class CohortResult:
     # The engine configuration that was evaluated: a gate result is only
     # evidence for exactly this configuration.
     config: dict[str, Any] = field(default_factory=dict)
-    production_eligible: bool = False
     limitations: list[str] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
 

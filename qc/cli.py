@@ -1,11 +1,9 @@
 """CLI for the QC engine.
 
     qc run --scenario-dir data/suites/demo/scenario-0000
-    qc decide --scenario-dir ... --json
-    qc train --suite-dir data/suites/demo --out artifacts/decision-v1
-    qc investigate --scenario-dir ... --agent-cmd "my-llm-agent"
-    qc shadow --suite-dir data/suites/demo --labels-out data/labels.jsonl
-    qc incidents list --store data/incidents.jsonl
+    qc shadow --suite-dir data/suites/demo --out reports/shadow/demo
+    qc cohort --plan config/cohort.json --out reports/cohort/v1
+    qc weekly --uri ./lake/fact --store data/qc.db --out reports/weekly
 
 The scenario adapter lives in ``qcgen`` and is imported lazily so the engine
 package itself has no dependency on the generator.
@@ -22,50 +20,17 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import yaml
 
-from .agent import CommandAgent, NullAgent, build_investigation_brief
-from .champion import (
-    EvalItem,
-    eval_cases_from_suite,
-    run_champion,
-    write_champion_report,
-)
 from .cohort import CohortPlan, run_cohort
 from .config import DatasetConfig, load_dataset_config
-from .decisions import (
-    DecisionSet,
-    FeatureEncoder,
-    RuleDecisionProvider,
-)
-from .drift import monitor_drift
-from .evidence_query import ALLOWED_QUERIES, query_evidence
+from .decisions import DecisionSet
 from .expectations import apply_expectations, load_expectations
-from .incidents import IncidentStore, build_incident_record, symptom_tags_for
 from .jsonutil import dumps as _json_dumps
-from .labels import LabelStore, build_oracle_labels, records_from_store
-from .pilot import pilot_readiness
-from .prequential import PrequentialStore, prequential_sequence
-from .rca import investigate
-from .reconciliation import run_reconciliation  # noqa: F401  (public surface)
-from .relationships import RelationshipStore
-from .replay import ReplayPlan, replay
 from .reporting import write_report
 from .run import QCRunResult, run_qc
 from .shadow import run_shadow
 from .source import mapped
-from .store import SqliteStore, import_outcomes
-from .synthetic_analyst import PROFILES as ANALYST_PROFILES
-from .synthetic_analyst import simulate_analyst
-from .systemone import FallbackDecisionProvider, SystemOneDecisionProvider
-from .text_provider import (
-    ModernBertEmbedder,
-    load_decision_provider,
-    train_text_provider,
-)
-from .training import save_training_run, train_decision_provider
-from .tspulse_benchmark import run_tspulse_benchmark
 from .weekly import run_weekly
 
 
@@ -79,33 +44,6 @@ def _json_default(value):
     if isinstance(value, (set, tuple)):
         return list(value)
     raise TypeError(f"not JSON serializable: {type(value)!r}")
-
-
-def _load_provider(path: str | None):
-    if path and path.startswith("systemone-config:"):
-        config = json.loads(Path(path.split(":", 1)[1]).read_text())
-        artifact = config.get("artifact")
-        if config.get("schema_version") != 1 or not isinstance(artifact, dict):
-            raise ValueError("remote provider config requires schema_version=1 and artifact")
-        if not artifact.get("revision") or not isinstance(artifact.get("weights_sha256"), str) or len(artifact["weights_sha256"]) != 64:
-            raise ValueError("remote provider requires pinned revision and weights_sha256")
-        return SystemOneDecisionProvider(url=config["url"], model=config["model"],
-                                         timeout=config.get("timeout", 60),
-                                         artifact_identity={"model": config["model"], **artifact})
-    if path == "laya" or (path and path.startswith("laya:")):
-        from .laya import LayaDecisionProvider
-        return LayaDecisionProvider(url=path.split(":", 1)[1]) if path != "laya" else LayaDecisionProvider()
-    if path in (None, "", "rule"):
-        return None
-    if path.startswith("systemone:"):
-        return SystemOneDecisionProvider(url=path.split(":", 1)[1])
-    if path.startswith("hybrid:"):
-        url = path.split(":", 1)[1]
-        return FallbackDecisionProvider(
-            local=RuleDecisionProvider(),
-            remote=SystemOneDecisionProvider(url=url),
-        )
-    return load_decision_provider(path)
 
 
 def _print_decisions(decisions: DecisionSet | None) -> None:
@@ -197,11 +135,6 @@ def _print_human(result: QCRunResult) -> None:
                 f"median={item.forecast_median:,.0f} "
                 f"pct={percentile_text} flags={item.flags}"
             )
-    if result.evidence is not None:
-        print(
-            f"EVIDENCE nodes={len(result.evidence.nodes)} "
-            f"edges={len(result.evidence.edges)}"
-        )
     _print_decisions(result.decisions)
     if result.reasons:
         print("REASONS")
@@ -209,14 +142,7 @@ def _print_human(result: QCRunResult) -> None:
             print(f"  {reason}")
 
 
-def _scenario_versions(source):
-    versions = source.list_versions()
-    current = versions[-1] if versions else None
-    previous = versions[-2] if len(versions) > 1 else None
-    return current, previous
-
-
-def _run_scenario(args, config, provider, registry=None):
+def _run_scenario(args, config, registry=None):
     from qcgen.sources import ScenarioSource
 
     scenario_dir = Path(args.scenario_dir)
@@ -240,7 +166,6 @@ def _run_scenario(args, config, provider, registry=None):
         config,
         registry=registry,
         run_id=getattr(args, "run_id", None),
-        decision_provider=provider,
     )
 
 
@@ -248,259 +173,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     if args.no_decisions:
         config = replace(config, decision_enabled=False)
-    result = _run_scenario(args, config, _load_provider(args.provider))
+    result = _run_scenario(args, config)
     if args.json:
         print(_json_dumps(result.machine, indent=2, default=_json_default))
     else:
         _print_human(result)
-    return 0
-
-
-def _cmd_decide(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-    if args.json:
-        print(
-            _json_dumps(
-                {
-                    "run_id": result.run_id,
-                    "status": result.status,
-                    "decision": (
-                        result.decisions.to_dict() if result.decisions else None
-                    ),
-                },
-                indent=2,
-                default=_json_default,
-            )
-        )
-    else:
-        print(f"QC RUN {result.run_id}")
-        print(f"STATUS {result.status}")
-        _print_decisions(result.decisions)
-    return 0
-
-
-def _fmt(value: Any, precision: int = 3) -> str:
-    """Format a possibly-absent metric without inventing a number."""
-    return "n/a" if value is None else f"{float(value):.{precision}f}"
-
-
-def _cmd_train(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    if args.cohort:
-        from .store_cohort import training_records_from_cohort
-        records = training_records_from_cohort(json.loads(Path(args.cohort).read_text()))
-    elif args.labels:
-        records = LabelStore(args.labels).load()
-        if not records:
-            print(f"no label records in {args.labels}", file=sys.stderr)
-            return 2
-    else:
-        records = build_oracle_labels(
-            args.suite_dir, config, oracle_dir=getattr(args, "oracle_dir", None)
-        )
-    if args.text_embedder:
-        embedder = ModernBertEmbedder(
-            model_id=args.text_embedder,
-            revision=args.text_revision,
-            max_length=args.text_max_length,
-        )
-        text_provider, metrics = train_text_provider(
-            records,
-            embedder,
-            config,
-            validation_fraction=args.validation_fraction,
-            seed=args.seed,
-        )
-        text_provider.save(args.out)
-        (Path(args.out) / "metrics.json").write_text(
-            _json_dumps(metrics, indent=2, sort_keys=True)
-        )
-        trained: Any = text_provider
-    else:
-        feature_provider, metrics = train_decision_provider(
-            records,
-            config,
-            validation_fraction=args.validation_fraction,
-            seed=args.seed,
-        )
-        save_training_run(feature_provider, metrics, args.out)
-        trained = feature_provider
-    if args.json:
-        print(_json_dumps(metrics, indent=2, sort_keys=True))
-        return 0
-    print(
-        f"trained decision provider on {len(records)} records -> {args.out}"
-    )
-    for split in ("train", "validation", "test"):
-        split_metrics = metrics[split]
-        if split_metrics.get("status") == "DEFERRED":
-            print(f"  {split}: deferred until frozen challenger selection")
-            continue
-        print(
-            f"  {split:<11} n={split_metrics['n']:<4} "
-            f"overall_accuracy={split_metrics['overall_accuracy']:.3f}"
-        )
-        for field, field_metrics in split_metrics["fields"].items():
-            print(
-                f"    {field:<24} acc={field_metrics['accuracy']:.3f} "
-                f"brier={field_metrics['brier']:.3f} ece={field_metrics['ece']:.3f}"
-            )
-            # Imbalance-aware surface: accuracy flatters a head that never
-            # finds a rare class, and cost records what each miss is worth.
-            print(
-                f"    {'':<24} macro_f1={_fmt(field_metrics['macro_f1'])} "
-                f"mcc={_fmt(field_metrics['mcc'])} "
-                f"g_mean={_fmt(field_metrics['g_mean'])} "
-                f"cost_score={_fmt(field_metrics['cost_score'])} "
-                f"unmapped={field_metrics['n_unmapped']}"
-            )
-    print("  warning:", trained.metadata.get("warning", ""))
-    return 0
-
-
-def _cmd_investigate(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-    decisions = result.decisions
-    if decisions is None:
-        print("decisions are disabled for this run", file=sys.stderr)
-        return 2
-
-    encoder = FeatureEncoder(config)
-    incidents: list = []
-    store = IncidentStore(args.incident_store) if args.incident_store else None
-    if store is not None:
-        incidents = store.retrieve(
-            encoder.encode(result),
-            k=args.incidents,
-            tags=symptom_tags_for(result, decisions),
-        )
-    brief = build_investigation_brief(result, decisions, incidents)
-    agent = CommandAgent(args.agent_cmd) if args.agent_cmd else NullAgent()
-    investigation = agent.investigate(brief)
-
-    if store is not None and args.save_draft:
-        store.add(
-            build_incident_record(
-                result,
-                decisions,
-                feedback={
-                    "root_cause": investigation.root_cause,
-                    "resolution": "",
-                    "analyst_summary": investigation.summary,
-                    "confirmed": False,
-                },
-                encoder=encoder,
-            )
-        )
-
-    if args.json:
-        print(
-            _json_dumps(
-                {
-                    "brief": brief.to_dict(),
-                    "investigation": investigation.to_dict(),
-                },
-                indent=2,
-                default=_json_default,
-            )
-        )
-        return 0
-
-    print(f"INVESTIGATION {investigation.run_id} agent={investigation.agent}")
-    print(f"  root_cause  {investigation.root_cause}")
-    print(f"  confidence  {investigation.confidence:.3f}")
-    print(f"  summary     {investigation.summary}")
-    if investigation.recommended_actions:
-        print("  recommended actions")
-        for action in investigation.recommended_actions:
-            print(f"    {action}")
-    if investigation.follow_up_questions:
-        print("  follow-up questions")
-        for question in investigation.follow_up_questions:
-            print(f"    {question}")
-    return 0
-
-
-def _cmd_tspulse_bench(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    gate_path = args.gate
-    if gate_path is None and Path("config/tspulse-gate.json").exists():
-        gate_path = "config/tspulse-gate.json"
-    result = run_tspulse_benchmark(
-        args.suite_dir,
-        config,
-        allow_resample=not args.strict_length,
-        max_scenarios=args.max_scenarios,
-        oracle_dir=getattr(args, "oracle_dir", None),
-        gate_path=gate_path,
-    )
-    payload = result.to_dict()
-    if args.out:
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            _json_dumps(payload, indent=2, sort_keys=True, default=_json_default)
-        )
-    if args.json:
-        print(_json_dumps(payload, indent=2, default=_json_default))
-        return 0
-    print(
-        f"tspulse benchmark suite={result.suite_id} "
-        f"scenarios={result.n_scenarios} series={result.n_series} "
-        f"embedded={result.embedded_series}"
-    )
-    print(
-        f"  nearest_centroid_accuracy={result.nearest_centroid_accuracy:.3f} "
-        f"scenario_holdout_accuracy="
-        f"{result.scenario_holdout_accuracy if result.scenario_holdout_accuracy is not None else 'n/a'}"
-    )
-    if result.gate:
-        print(
-            f"  gate metric={result.gate['metric']} "
-            f"actual={result.gate['actual']} "
-            f"threshold={result.gate['threshold']} "
-            f"passed={result.gate['passed']}"
-        )
-    print(
-        f"  control_mean_norm={result.control_mean_embedding_norm:.3f} "
-        f"fault_mean_norm={result.fault_mean_embedding_norm:.3f}"
-    )
-    print(
-        f"  intra_family_similarity={result.mean_intra_family_similarity:.3f} "
-        f"inter_family_similarity={result.mean_inter_family_similarity:.3f}"
-    )
-    print(
-        f"  transformations={result.transformations} "
-        f"production_eligible={result.production_eligible}"
-    )
-    for limitation in result.limitations:
-        print(f"  limitation: {limitation}")
-    if args.out:
-        print(f"  output: {args.out}")
-    return 0
-
-
-def _cmd_incidents(args: argparse.Namespace) -> int:
-    store = IncidentStore(args.store)
-    records = store.load()
-    if args.json:
-        print(
-            _json_dumps(
-                [record.to_dict() for record in records],
-                indent=2,
-                default=_json_default,
-            )
-        )
-        return 0
-    print(f"incidents={len(records)} store={args.store}")
-    for record in records:
-        state = "confirmed" if record.confirmed else "draft"
-        print(
-            f"  {record.incident_id} [{state}] {record.root_cause} "
-            f"({record.likely_origin}) {record.analyst_summary}"
-        )
     return 0
 
 
@@ -511,8 +188,6 @@ def _cmd_shadow(args: argparse.Namespace) -> int:
         config=config,
         registry_path=args.registry,
         out_dir=args.out,
-        labels_out=args.labels_out,
-        prequential_store=args.prequential_store,
         oracle_dir=getattr(args, "oracle_dir", None),
         with_registry=getattr(args, "with_registry", False),
     )
@@ -542,8 +217,6 @@ def _cmd_shadow(args: argparse.Namespace) -> int:
     )
     if args.out:
         print(f"  output: {args.out}")
-    if args.labels_out:
-        print(f"  labels: {args.labels_out}")
     return 0
 
 
@@ -555,46 +228,10 @@ def _add_scenario_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--registry", default=None, help="expected-event registry JSON")
 
 
-def _cmd_relationships(args: argparse.Namespace) -> int:
-    store = RelationshipStore(args.store)
-    records = store.load()
-    if args.json:
-        print(
-            _json_dumps(
-                [record.to_dict() for record in records],
-                indent=2,
-                default=_json_default,
-            )
-        )
-        return 0
-    print(f"relationships={len(records)} store={args.store}")
-    for record in records:
-        state = "confirmed" if record.confirmed else "candidate"
-        print(
-            f"  {record.source_id} -{record.relationship}-> {record.target_id} "
-            f"({record.entity_type}, {state})"
-        )
-    return 0
-
-
 def _cmd_report(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-
-    brief = None
-    if not args.no_brief and result.decisions is not None:
-        incidents: list = []
-        if args.incident_store:
-            encoder = FeatureEncoder(config)
-            store = IncidentStore(args.incident_store)
-            incidents = store.retrieve(
-                encoder.encode(result),
-                k=3,
-                tags=symptom_tags_for(result, result.decisions),
-            )
-        brief = build_investigation_brief(result, result.decisions, incidents)
-
-    paths = write_report(result, args.out, brief)
+    result = _run_scenario(args, config)
+    paths = write_report(result, args.out)
     print(f"report written: {paths['markdown']}")
     print(f"machine output: {paths['machine']}")
     return 0
@@ -652,7 +289,6 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
         previous,
         config,
         run_id=args.run_id,
-        decision_provider=_load_provider(args.provider),
     )
     if args.json:
         print(_json_dumps(result.machine, indent=2, default=_json_default))
@@ -663,80 +299,7 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_evidence(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-    filters: dict[str, str] = {}
-    for item in args.filter or []:
-        key, separator, value = item.partition("=")
-        if not key or not separator:
-            print(f"invalid --filter {item!r}; expected KEY=VALUE", file=sys.stderr)
-            return 2
-        filters[key] = value
-    outcome = query_evidence(result, args.query, limit=args.limit, **filters)
-    if args.json:
-        print(_json_dumps(outcome.to_dict(), indent=2, default=_json_default))
-        return 0
-    print(
-        f"query={outcome.query} rows={len(outcome.rows)}/{outcome.total_rows} "
-        f"truncated={outcome.truncated}"
-    )
-    for row in outcome.rows:
-        print("  " + _json_dumps(row, default=_json_default, sort_keys=True))
-    return 0
-
-
-def _cmd_prequential(args: argparse.Namespace) -> int:
-    scope = getattr(args, "scope", None)
-    pool = PrequentialStore(args.store).pool()
-    usable = (
-        pool.usable(args.as_of, args.target_week, scope=scope)
-        if args.as_of is not None and args.target_week is not None
-        else []
-    )
-    print(
-        f"prequential store={args.store} scope={scope or 'all'} "
-        f"records={len(pool.records)} usable={len(usable)}"
-    )
-    if (
-        args.z is not None
-        and args.as_of is not None
-        and args.target_week is not None
-    ):
-        percentile = pool.percentile(
-            args.z, args.as_of, args.target_week, scope=scope
-        )
-        lower_p = pool.p_value(
-            args.z, args.as_of, args.target_week, tail="lower", scope=scope
-        )
-        interval = pool.interval(
-            0.0, args.as_of, args.target_week, alpha=args.alpha, scope=scope
-        )
-        print(f"  percentile={percentile}")
-        print(f"  lower_p_value={lower_p}")
-        print(f"  interval={_json_dumps(interval.to_dict(), default=_json_default)}")
-    return 0
-
-
 def _cmd_cohort(args: argparse.Namespace) -> int:
-    if args.source == "store":
-        from .store_cohort import freeze_store_cohort
-        if not args.store or not args.cutoff:
-            raise ValueError("--source store requires --store and --cutoff")
-        report = freeze_store_cohort(args.store, args.cutoff, args.out)
-        if args.provider:
-            from .store_cohort import evaluate_frozen_cohort
-            selection = json.loads(Path(args.selection).read_text()) if args.selection else None
-            if args.out and (Path(args.out) / f"{args.split}-evaluation.json").exists():
-                raise ValueError("evaluation already exists; choose development work before accessing test")
-            report = evaluate_frozen_cohort(report, _load_provider(args.provider) or RuleDecisionProvider(), args.split, selection)
-            if args.out:
-                target = Path(args.out) / f"{args.split}-evaluation.json"
-                if target.exists():
-                    raise ValueError("evaluation already exists; do not repeatedly inspect the test set")
-                target.write_text(_json_dumps(report, indent=2, default=_json_default))
-        print(_json_dumps(report, indent=2, default=_json_default))
-        return 0 if report["status"] in ("FROZEN", "EVALUATED") else 4
     if args.plan:
         plan = CohortPlan.from_json(args.plan)
     else:
@@ -781,7 +344,6 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
         )
     print(
         f"  gates_passed={result.gates_passed} "
-        f"production_eligible={result.production_eligible} "
         f"plan_hash_verified={result.plan_hash_verified} "
         f"git_dirty={result.git_dirty} "
         f"code_sha256={result.code_sha256[:12]}"
@@ -789,252 +351,6 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
     if args.out:
         print(f"  output: {args.out}")
     return code
-
-
-def _cmd_store_add_run(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-    with SqliteStore(args.store) as store:
-        try:
-            store.record_result(result, created=args.created)
-        except ValueError as error:
-            print(str(error), file=sys.stderr)
-            return 2
-        if args.root_cause:
-            origin = args.origin
-            severity = args.severity
-            if result.decisions is not None:
-                origin_decision = result.decisions.get("likely_origin")
-                severity_decision = result.decisions.get("severity")
-                if origin is None and origin_decision is not None:
-                    origin = str(origin_decision.value)
-                if severity is None and severity_decision is not None:
-                    severity = str(severity_decision.value)
-            store.record_outcome(
-                result.run_id,
-                root_cause=args.root_cause,
-                confirmed=args.confirmed,
-                likely_origin=origin or "UNKNOWN",
-                severity=severity or "MEDIUM",
-                resolution=args.resolution or "",
-                summary=args.summary or "",
-                analyst=args.analyst,
-                symptom_tags=(
-                    symptom_tags_for(result, result.decisions)
-                    if result.decisions is not None
-                    else []
-                ),
-                created=args.created,
-            )
-    print(f"recorded run {result.run_id} in {args.store}")
-    return 0
-
-
-def _cmd_store_add_outcome(args: argparse.Namespace) -> int:
-    with SqliteStore(args.store) as store:
-        try:
-            outcome_id = store.record_outcome(
-                args.run_id,
-                root_cause=args.root_cause,
-                confirmed=args.confirmed,
-                likely_origin=args.origin or "UNKNOWN",
-                severity=args.severity or "MEDIUM",
-                resolution=args.resolution or "",
-                summary=args.summary or "",
-                analyst=args.analyst,
-                created=args.created,
-            )
-        except ValueError as error:
-            print(str(error), file=sys.stderr)
-            return 2
-    print(f"recorded outcome {outcome_id} for {args.run_id}")
-    return 0
-
-
-def _cmd_store_list(args: argparse.Namespace) -> int:
-    with SqliteStore(args.store) as store:
-        rows = store.list_runs()
-    if args.confirmed_only:
-        rows = [row for row in rows if row.get("confirmed")]
-    if args.json:
-        print(_json_dumps(rows, indent=2, default=_json_default))
-        return 0
-    print(f"runs={len(rows)} store={args.store}")
-    for row in rows:
-        state = (
-            "confirmed"
-            if row.get("confirmed")
-            else "candidate"
-            if row.get("root_cause")
-            else "unconfirmed"
-        )
-        print(
-            f"  {row['run_id']} {row['status']:<24} "
-            f"{row.get('root_cause') or '-':<24} {state}"
-        )
-    return 0
-
-
-def _cmd_store_incidents(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-    encoder = FeatureEncoder()
-    with SqliteStore(args.store) as store:
-        hits = store.retrieve(
-            encoder.encode(result),
-            k=args.k,
-            tags=(
-                symptom_tags_for(result, result.decisions)
-                if result.decisions is not None
-                else []
-            ),
-        )
-    if args.json:
-        print(_json_dumps(hits, indent=2, default=_json_default))
-        return 0
-    print(f"confirmed incidents matching {result.run_id}: {len(hits)}")
-    for hit in hits:
-        print(
-            f"  {hit['run_id']} {hit['root_cause']} "
-            f"({hit['likely_origin']}) similarity={hit['similarity']:.3f}"
-        )
-        if hit["resolution"]:
-            print(f"    resolution: {hit['resolution']}")
-    return 0
-
-
-def _cmd_drift(args: argparse.Namespace) -> int:
-    pool = PrequentialStore(args.store).pool(max_records=args.max_records)
-    report = monitor_drift(
-        pool,
-        as_of=args.as_of,
-        target_week=args.target_week,
-        alpha=args.alpha,
-        ratio_threshold=args.ratio_threshold,
-        coverage_margin=args.coverage_margin,
-        scope=getattr(args, "scope", None),
-    )
-    if args.json:
-        print(_json_dumps(report.to_dict(), indent=2, default=_json_default))
-        return 0
-    print(
-        f"drift status={report.status} usable={report.usable} "
-        f"baseline={report.baseline_n} recent={report.recent_n}"
-    )
-    print(
-        f"  scale_ratio={report.scale_ratio} "
-        f"coverage={report.recent_coverage} "
-        f"ci=[{report.coverage_ci_low}, {report.coverage_ci_high}] "
-        f"expected={report.expected_coverage} "
-        f"common_series={report.common_series}"
-    )
-    print(f"  flags={report.flags} detail={report.detail}")
-    return 0
-
-
-def _cmd_champion(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    if args.train_labels:
-        train_records = LabelStore(args.train_labels).load()
-    else:
-        train_records = records_from_store(args.store)
-    if not train_records:
-        print("no training records found", file=sys.stderr)
-        return 2
-
-    eval_items = eval_cases_from_suite(
-        args.suite_dir, config, oracle_dir=getattr(args, "oracle_dir", None)
-    )
-    if args.eval_store:
-        for record in records_from_store(args.eval_store):
-            eval_items.append(
-                EvalItem(
-                    case_id=record.run_id,
-                    family=record.family,
-                    labels=record.labels,
-                    record=record,
-                )
-            )
-
-    embedder = (
-        ModernBertEmbedder(
-            model_id=args.text_embedder, revision=args.text_revision
-        )
-        if args.text_embedder
-        else None
-    )
-    remote = (
-        SystemOneDecisionProvider(url=args.systemone_url)
-        if args.systemone_url
-        else None
-    )
-    gates: dict[str, float] = {}
-    if args.min_overall_accuracy is not None:
-        gates["min_overall_accuracy"] = args.min_overall_accuracy
-    if args.min_cause_accuracy is not None:
-        gates["min_cause_accuracy"] = args.min_cause_accuracy
-
-    result = run_champion(
-        train_records,
-        eval_items,
-        config,
-        text_embedder=embedder,
-        remote_provider=remote,
-        gates=gates or None,
-        validation_fraction=args.validation_fraction,
-        seed=args.seed,
-    )
-    paths = write_champion_report(result, args.out) if args.out else {}
-
-    if args.json:
-        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
-        return 0
-    print(
-        f"champion={result.champion or 'none'} "
-        f"production_eligible={result.production_eligible} "
-        f"labels={result.provenance['labels']} "
-        f"train={result.provenance['train_records']} "
-        f"eval={result.provenance['eval_cases']}"
-    )
-    for score in result.scores:
-        state = "available" if score.available else "unavailable"
-        print(
-            f"  {score.provider:<14} {state:<11} "
-            f"overall={score.overall_accuracy:.3f} "
-            f"cause={score.cause_accuracy:.3f} "
-            f"cases={score.cases} {score.note}"
-        )
-    print(
-        "  gates: "
-        + ", ".join(f"{name}>={value}" for name, value in sorted(result.gates.items()))
-    )
-    for path in paths.values():
-        print(f"  output: {path}")
-    return 0
-
-
-def _cmd_store_import(args: argparse.Namespace) -> int:
-    if args.csv:
-        rows = pd.read_csv(args.csv, dtype=str).fillna("").to_dict("records")
-    else:
-        from .delta import _delta_table
-
-        options = (
-            json.loads(args.storage_options) if args.storage_options else None
-        )
-        rows = _delta_table(args.delta, options, None).to_pandas().to_dict("records")
-    with SqliteStore(args.store) as store:
-        report = import_outcomes(store, rows, dry_run=args.dry_run)
-    if args.json:
-        print(_json_dumps(report, indent=2, default=_json_default))
-    else:
-        print(
-            f"imported={report['imported']} errors={len(report['errors'])} "
-            f"dry_run={report['dry_run']}"
-        )
-        for error in report["errors"][:10]:
-            print(f"  row {error['row']}: {error['error']}")
-    return 0 if not report["errors"] else 2
 
 
 def _cmd_onboard(args: argparse.Namespace) -> int:
@@ -1123,79 +439,9 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_simulate_analyst(args: argparse.Namespace) -> int:
-    summary = simulate_analyst(
-        args.suite_dir,
-        args.store,
-        profile=args.profile,
-        seed=args.seed,
-        oracle_dir=getattr(args, "oracle_dir", None),
-    )
-    if args.json:
-        print(_json_dumps(summary, indent=2, default=_json_default))
-        return 0
-    print(
-        f"simulated analyst profile={summary['profile']} runs={summary['runs']} "
-        f"confirmed={summary['confirmed']} drafts={summary['drafts']} "
-        f"corrections={summary['corrections']} unknown={summary['unknown']} "
-        f"investigation_flips={summary['investigation_flips']}"
-    )
-    print(f"  store: {summary['store']}")
-    print("  provenance: synthetic (champion stays production-ineligible)")
-    return 0
-
-
-def _cmd_replay(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    plan = ReplayPlan.from_json(args.plan)
-    options = json.loads(args.storage_options) if args.storage_options else None
-    report = replay(
-        plan,
-        args.out,
-        default_uri=args.uri,
-        config=config,
-        storage_options=options,
-    )
-    if args.json:
-        print(_json_dumps(report.to_dict(), indent=2, default=_json_default))
-        return 0 if report.passed else 2
-    print(
-        f"replay cases={len(report.cases)} failed={len(report.failed)} "
-        f"plan={report.plan_sha256[:12]}"
-    )
-    for case in report.cases:
-        print(
-            f"  {case['case_id']} {case['status']} "
-            f"{case['previous_version']}->{case['current_version']} "
-            f"as_of={case['as_of']}"
-        )
-    for failure in report.failed:
-        print(f"  FAILED {failure['case_id']}: {failure['error']}")
-    return 0 if report.passed else 2
-
-
-def _cmd_rca(args: argparse.Namespace) -> int:
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
-    investigation = investigate(result, max_steps=args.steps, limit=args.limit)
-    if args.json:
-        print(_json_dumps(investigation.to_dict(), indent=2, default=_json_default))
-        return 0
-    print(
-        f"RCA {investigation.run_id} steps={len(investigation.steps)} "
-        f"stop={investigation.stop_reason} confirmed={investigation.confirmed}"
-    )
-    for step in investigation.steps:
-        print(
-            f"  {step.step}. {step.tool} args={step.args} "
-            f"rows={len(step.rows)}/{step.total_rows} truncated={step.truncated}"
-        )
-    return 0
-
-
 def _cmd_expectations(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    result = _run_scenario(args, config, _load_provider(args.provider))
+    result = _run_scenario(args, config)
     expectations = load_expectations(args.expectations)
     flags = [
         {
@@ -1229,89 +475,16 @@ def _cmd_expectations(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_prequential_forecast(args: argparse.Namespace) -> int:
-    from .delta import DeltaSource
-
-    config = load_dataset_config(args.config) if args.config else DatasetConfig()
-    options = json.loads(args.storage_options) if args.storage_options else None
-    versions = [value.strip() for value in args.versions.split(",") if value.strip()]
-    if not versions:
-        print("--versions is empty", file=sys.stderr)
-        return 2
-    delta_source = DeltaSource(
-        uri=args.uri, storage_options=options, stage=args.stage
-    )
-    source = mapped(delta_source, config.column_map_dict())
-    result = prequential_sequence(
-        source,
-        versions,
-        config,
-        scope=args.scope,
-        min_samples=args.min_samples,
-    )
-    if args.out:
-        PrequentialStore(args.out).add(result.pool.records)
-    if args.json:
-        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
-        return 0
-    print(
-        f"prequential scope={result.scope} loads={result.loads} "
-        f"records={result.records_committed} pool={len(result.pool.records)} "
-        f"flagged={len(result.flagged)}"
-    )
-    for item in result.evidence:
-        if item.status == "INSUFFICIENT_HISTORY":
-            continue
-        flag = f" {item.flag}" if item.flag else ""
-        percentile = (
-            f"{item.pool_percentile:.3f}"
-            if item.pool_percentile is not None
-            else "n/a"
-        )
-        print(
-            f"  {item.load_id} week={item.target_week} {item.series_id} "
-            f"actual={item.actual:,.1f} forecast={item.forecast_median:,.1f} "
-            f"z={item.standardized_residual:.2f} pct={percentile}{flag}"
-        )
-    if args.out:
-        print(f"  pool written: {args.out}")
-    return 0
-
-
-def _cmd_pilot_check(args: argparse.Namespace) -> int:
-    report = pilot_readiness(
-        args.store, args.plan, min_analyst_labels=args.min_labels
-    )
-    if args.json:
-        print(_json_dumps(report.to_dict(), indent=2, default=_json_default))
-    else:
-        print(
-            f"pilot status={report.status} analyst={report.analyst_labels} "
-            f"synthetic={report.synthetic_labels} unknown={report.unknown_labels} "
-            f"plan_hash_verified={report.plan_hash_verified}"
-        )
-        for blocker in report.blockers:
-            print(f"  blocker: {blocker}")
-    return 0 if report.ready else 1
-
-
 def _explain_payload(args: argparse.Namespace) -> dict[str, Any] | None:
-    from pathlib import Path
-
     if args.report:
         directory = Path(args.report)
         machine_path = directory / "report.json"
         if not machine_path.is_file():
             raise ValueError(f"report.json not found under {directory}")
-        payload: dict[str, Any] = {
+        return {
             "source": str(directory),
             "machine": json.loads(machine_path.read_text()),
         }
-        evidence_path = directory / "evidence.json"
-        payload["evidence"] = (
-            json.loads(evidence_path.read_text()) if evidence_path.is_file() else None
-        )
-        return payload
     from .store import SqliteStore
 
     if not args.store:
@@ -1324,17 +497,11 @@ def _explain_payload(args: argparse.Namespace) -> dict[str, Any] | None:
         )
     if assessment is None:
         return None
-    payload = {
+    return {
         "source": f"{args.store}:{assessment['assessment_id']}",
-        "machine": assessment["result"],
-        "evidence": (
-            json.loads(assessment["artifacts"]["evidence.json"])
-            if "evidence.json" in assessment["artifacts"]
-            else None
-        ),
+        "assessment_id": assessment["assessment_id"],
+        "machine": json.loads(assessment["artifacts"]["report.json"]),
     }
-    payload["assessment_id"] = assessment["assessment_id"]
-    return payload
 
 
 def _cmd_explain(args: argparse.Namespace) -> int:
@@ -1358,106 +525,13 @@ def _cmd_explain(args: argparse.Namespace) -> int:
         print(
             f"  {item.get('check')} [{item.get('scope')}] "
             f"{item.get('outcome')} -> {item.get('disposition')}"
-            + (f" basis={item.get('clearance_basis')}" if item.get("clearance_basis") else "")
-        )
-    for item in machine.get("clearance", []):
-        print(
-            f"  clearance: {item.get('finding_id')} -> {item.get('certificate_id')} "
-            f"({item.get('basis')})"
-        )
-    ledger = machine.get("ledger")
-    if ledger:
-        print(
-            "ledger: raw={:.3f} explained={:.3f} unexplained={:.3f} support={}".format(
-                ledger.get("raw_movement", 0.0),
-                ledger.get("net_explained", 0.0),
-                ledger.get("net_unexplained", 0.0),
-                ledger.get("support_level"),
+            + (
+                f" explained_by={','.join(item['approval_ids'])}"
+                if item.get("approval_ids")
+                else ""
             )
         )
-        for contribution in ledger.get("contributions", []):
-            print(
-                f"  {contribution.get('category')} [{contribution.get('scope')}] "
-                f"{contribution.get('value'):.3f} ({contribution.get('support')})"
-            )
-    evidence = payload.get("evidence")
-    if evidence:
-        periods = evidence.get("periods") or (
-            [evidence] if evidence.get("schema_version", 0) <= 1 else []
-        )
-        for period in periods:
-            for certificate in period.get("certificates", []):
-                print(
-                    f"  certificate {certificate.get('scope')}: {certificate.get('status')}"
-                    + (
-                        " reasons=" + ", ".join(certificate.get("reasons", []))
-                        if certificate.get("reasons")
-                        else ""
-                    )
-                )
     return 0
-
-
-def _cmd_evidence_bench(args: argparse.Namespace) -> int:
-    from .evidence_bench import DEFAULT_THRESHOLDS, run_evidence_bench
-
-    thresholds = (
-        tuple(float(value) for value in args.thresholds.split(","))
-        if args.thresholds
-        else DEFAULT_THRESHOLDS
-    )
-    scenario_ids = (
-        tuple(args.scenarios.split(",")) if args.scenarios else None
-    )
-    result = run_evidence_bench(
-        args.suite,
-        config=load_dataset_config(args.config) if args.config else None,
-        thresholds=thresholds,
-        minimum_detection_rate=args.min_detection_rate,
-        maximum_false_positive_rate=args.max_false_positive_rate,
-        scenario_ids=scenario_ids,
-    )
-    qualification_path = None
-    if args.out:
-        from pathlib import Path
-
-        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.out).write_text(_json_dumps(result.to_dict(), indent=2, default=_json_default))
-        if result.qualification:
-            from .qualification import QualificationArtifact, pin_qualification
-
-            qualification_path = Path(args.out).with_name(
-                Path(args.out).stem + "-qualification.json"
-            )
-            pin_qualification(
-                QualificationArtifact.from_dict(result.qualification),
-                qualification_path,
-            )
-    if args.json:
-        print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
-    else:
-        selection = result.selection.get("selected")
-        print(
-            f"evidence-bench suite={result.suite} "
-            f"selected={selection['materiality_ratio'] if selection else 'none'} "
-            f"gates={result.gates['status']} "
-            f"qualification={result.qualification.get('status', 'UNAVAILABLE')}"
-        )
-        if qualification_path is not None:
-            print(f"  qualification pinned at {qualification_path}")
-        for item in result.selection.get("candidates", []):
-            print(
-                f"  ratio={item['materiality_ratio']} safe={item['safe']} "
-                f"review={item['review_rate']} false_clearance={item['false_clearance_rate']}"
-            )
-        for level, metrics in result.ablation.get("results", {}).items():
-            print(
-                f"  ablation {level}: review={metrics['review_rate']} "
-                f"false_clearance={metrics['false_clearance_rate']}"
-            )
-    return 0 if result.gates["status"] == "PASS" else 2
-
-
 
 
 def _dispatch_notifications(
@@ -1500,7 +574,6 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
             args.uri,
             config=config,
             store_path=args.store,
-            calibration_path=args.calibration_store,
             out_root=args.out,
             stage=args.stage,
             current=args.current,
@@ -1511,8 +584,6 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
             reference_version=args.reference_version,
             reference_stage=args.reference_stage,
             storage_options=options,
-            min_samples=args.min_samples,
-            decision_provider=_load_provider(args.provider),
             force=args.force,
             stage_tables=json.loads(args.stage_tables) if args.stage_tables else None,
             dim_tables=json.loads(args.dim_tables) if args.dim_tables else None,
@@ -1540,12 +611,7 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
                 f"requires_investigation="
                 f"{result.decision['requires_investigation']}"
             )
-        if result.drift is not None:
-            print(f"  drift {result.drift['status']}")
-        print(
-            f"  records={result.prequential_records} "
-            f"store_recorded={result.recorded} skipped={result.skipped}"
-        )
+        print(f"  store_recorded={result.recorded} skipped={result.skipped}")
         for note in result.notes:
             print(f"  note: {note}")
         if result.report_dir:
@@ -1566,8 +632,6 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
             elif not args.json:
                 print(f"  notified {outcome.sink} ({outcome.bytes_sent} bytes)")
 
-    if result.status in ("PASS", "PASS_WITH_EXPLANATION") and result.decision and result.decision.get("requires_investigation"):
-        return 2
     return {
         "ALREADY_PROCESSED": 0,
         "LOCKED": 75,
@@ -1587,63 +651,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="run QC over a scenario directory")
     _add_scenario_arguments(run)
-    run.add_argument("--provider", default=None, help="rule or trained artifact dir")
     run.add_argument("--no-decisions", action="store_true")
     run.add_argument("--run-id", default=None)
     run.add_argument("--json", action="store_true")
     run.set_defaults(func=_cmd_run)
-
-    decide = subparsers.add_parser("decide", help="run QC and print typed decisions")
-    _add_scenario_arguments(decide)
-    decide.add_argument("--provider", default=None)
-    decide.add_argument("--run-id", default=None)
-    decide.add_argument("--json", action="store_true")
-    decide.set_defaults(func=_cmd_decide)
-
-    train = subparsers.add_parser(
-        "train", help="fit a learned decision provider from labels"
-    )
-    train.add_argument("--suite-dir", default=None)
-    train.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
-    train.add_argument("--labels", default=None, help="label store JSONL")
-    train.add_argument("--cohort", default=None, help="frozen store-cohort.json; test scoring deferred")
-    train.add_argument("--out", required=True)
-    train.add_argument("--config", default=None)
-    train.add_argument("--validation-fraction", type=float, default=0.3)
-    train.add_argument("--seed", type=int, default=0)
-    train.add_argument(
-        "--text-embedder",
-        default=None,
-        help="HF encoder id for a frozen-encoder text probe (e.g. ModernBERT)",
-    )
-    train.add_argument("--text-revision", default=None)
-    train.add_argument("--text-max-length", type=int, default=4096)
-    train.add_argument("--json", action="store_true")
-    train.set_defaults(func=_cmd_train)
-
-    investigate = subparsers.add_parser(
-        "investigate", help="hand a case off to an investigation agent"
-    )
-    _add_scenario_arguments(investigate)
-    investigate.add_argument("--provider", default=None)
-    investigate.add_argument("--run-id", default=None)
-    investigate.add_argument("--incident-store", default=None)
-    investigate.add_argument("--incidents", type=int, default=3)
-    investigate.add_argument(
-        "--agent-cmd",
-        default=None,
-        help="command that reads the brief JSON on stdin and returns result JSON",
-    )
-    investigate.add_argument("--save-draft", action="store_true")
-    investigate.add_argument("--json", action="store_true")
-    investigate.set_defaults(func=_cmd_investigate)
-
-    incidents = subparsers.add_parser("incidents", help="manage incident memory")
-    incidents_sub = incidents.add_subparsers(dest="incident_command", required=True)
-    incidents_list = incidents_sub.add_parser("list", help="list stored incidents")
-    incidents_list.add_argument("--store", required=True)
-    incidents_list.add_argument("--json", action="store_true")
-    incidents_list.set_defaults(func=_cmd_incidents)
 
     shadow = subparsers.add_parser(
         "shadow", help="run the engine over a suite and score outcomes"
@@ -1658,48 +669,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="load generator-declared events from the vault (plumbing only)",
     )
     shadow.add_argument("--out", default=None)
-    shadow.add_argument("--labels-out", default=None, help="append oracle labels")
-    shadow.add_argument(
-        "--prequential-store",
-        default=None,
-        help="append across-load calibration residuals",
-    )
     shadow.set_defaults(func=_cmd_shadow)
-
-    evidence = subparsers.add_parser(
-        "evidence", help="run an allowlisted evidence query over a case"
-    )
-    _add_scenario_arguments(evidence)
-    evidence.add_argument("--provider", default=None)
-    evidence.add_argument("--run-id", default=None)
-    evidence.add_argument("--query", required=True, choices=ALLOWED_QUERIES)
-    evidence.add_argument("--limit", type=int, default=50)
-    evidence.add_argument(
-        "--filter", action="append", default=None, help="KEY=VALUE, repeatable"
-    )
-    evidence.add_argument("--json", action="store_true")
-    evidence.set_defaults(func=_cmd_evidence)
-
-    prequential = subparsers.add_parser(
-        "prequential", help="inspect the across-load calibration pool"
-    )
-    prequential.add_argument("--store", required=True)
-    prequential.add_argument("--scope", default=None, help="calibration scope filter")
-    prequential.add_argument("--as-of", type=int, default=None)
-    prequential.add_argument("--target-week", type=int, default=None)
-    prequential.add_argument("--z", type=float, default=None)
-    prequential.add_argument("--alpha", type=float, default=0.05)
-    prequential.set_defaults(func=_cmd_prequential)
 
     cohort = subparsers.add_parser(
         "cohort", help="run a frozen dev/held-out cohort evaluation"
     )
-    cohort.add_argument("--provider", default=None)
-    cohort.add_argument("--split", choices=("development", "test"), default="development")
-    cohort.add_argument("--selection", default=None)
-    cohort.add_argument("--source", choices=("synthetic", "store"), default="synthetic")
-    cohort.add_argument("--store", default=None)
-    cohort.add_argument("--cutoff", default=None)
     cohort.add_argument("--plan", default=None, help="cohort plan JSON")
     cohort.add_argument(
         "--config", default=None,
@@ -1714,33 +688,12 @@ def build_parser() -> argparse.ArgumentParser:
     cohort.add_argument("--json", action="store_true")
     cohort.set_defaults(func=_cmd_cohort)
 
-    tspulse = subparsers.add_parser(
-        "tspulse-bench",
-        help="research benchmark: TSPulse embeddings of revision series",
-    )
-    tspulse.add_argument("--suite-dir", required=True)
-    tspulse.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
-    tspulse.add_argument("--gate", default=None, help="pre-registered promotion gate JSON")
-    tspulse.add_argument("--config", default=None)
-    tspulse.add_argument("--out", default=None)
-    tspulse.add_argument("--max-scenarios", type=int, default=None)
-    tspulse.add_argument(
-        "--strict-length",
-        action="store_true",
-        help="disable the 512-point linear resample (weekly series will be gated)",
-    )
-    tspulse.add_argument("--json", action="store_true")
-    tspulse.set_defaults(func=_cmd_tspulse_bench)
-
     report = subparsers.add_parser(
         "report", help="write a Markdown and machine report for a run"
     )
     _add_scenario_arguments(report)
-    report.add_argument("--provider", default=None)
     report.add_argument("--run-id", default=None)
     report.add_argument("--out", required=True)
-    report.add_argument("--incident-store", default=None)
-    report.add_argument("--no-brief", action="store_true")
     report.set_defaults(func=_cmd_report)
 
     delta_info = subparsers.add_parser(
@@ -1764,87 +717,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     delta_run.add_argument("--storage-options", default=None, help="JSON object")
     delta_run.add_argument("--config", default=None)
-    delta_run.add_argument("--provider", default=None)
     delta_run.add_argument("--run-id", default=None)
     delta_run.add_argument("--json", action="store_true")
     delta_run.set_defaults(func=_cmd_delta_run)
 
-    relationships = subparsers.add_parser(
-        "relationships", help="manage the entity relationship store"
-    )
-    relationships_sub = relationships.add_subparsers(
-        dest="relationship_command", required=True
-    )
-    relationships_list = relationships_sub.add_parser(
-        "list", help="list stored relationships"
-    )
-    relationships_list.add_argument("--store", required=True)
-    relationships_list.add_argument("--json", action="store_true")
-    relationships_list.set_defaults(func=_cmd_relationships)
-
-    def _add_outcome_arguments(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--root-cause", default=None)
-        parser.add_argument("--origin", default=None)
-        parser.add_argument("--severity", default=None)
-        parser.add_argument("--resolution", default=None)
-        parser.add_argument("--summary", default=None)
-        parser.add_argument("--analyst", default=None)
-        parser.add_argument("--confirmed", action="store_true")
-        parser.add_argument("--created", default=None)
-
-    store = subparsers.add_parser(
-        "store", help="confirmed-only run, outcome and registry store"
-    )
-    store_sub = store.add_subparsers(dest="store_command", required=True)
-
-    store_add_run = store_sub.add_parser(
-        "add-run", help="run a scenario and record it (optional outcome)"
-    )
-    _add_scenario_arguments(store_add_run)
-    store_add_run.add_argument("--store", required=True)
-    store_add_run.add_argument("--provider", default=None)
-    store_add_run.add_argument("--run-id", default=None)
-    _add_outcome_arguments(store_add_run)
-    store_add_run.set_defaults(func=_cmd_store_add_run)
-
-    store_add_outcome = store_sub.add_parser(
-        "add-outcome", help="append an analyst outcome to a recorded run"
-    )
-    store_add_outcome.add_argument("--store", required=True)
-    store_add_outcome.add_argument("--run-id", required=True)
-    _add_outcome_arguments(store_add_outcome)
-    store_add_outcome.set_defaults(func=_cmd_store_add_outcome)
-
-    store_list = store_sub.add_parser("list", help="list recorded runs")
-    store_list.add_argument("--store", required=True)
-    store_list.add_argument("--confirmed-only", action="store_true")
-    store_list.add_argument("--json", action="store_true")
-    store_list.set_defaults(func=_cmd_store_list)
-
-    store_incidents = store_sub.add_parser(
-        "incidents", help="confirmed-only similar incident retrieval"
-    )
-    _add_scenario_arguments(store_incidents)
-    store_incidents.add_argument("--store", required=True)
-    store_incidents.add_argument("--provider", default=None)
-    store_incidents.add_argument("--k", type=int, default=3)
-    store_incidents.add_argument("--json", action="store_true")
-    store_incidents.set_defaults(func=_cmd_store_incidents)
-
-    store_import = store_sub.add_parser(
-        "import", help="import analyst outcomes from CSV or a Delta table"
-    )
-    store_import.add_argument("--store", required=True)
-    source = store_import.add_mutually_exclusive_group(required=True)
-    source.add_argument("--csv", default=None)
-    source.add_argument("--delta", default=None)
-    store_import.add_argument("--storage-options", default=None, help="JSON object")
-    store_import.add_argument("--dry-run", action="store_true")
-    store_import.add_argument("--json", action="store_true")
-    store_import.set_defaults(func=_cmd_store_import)
-
     onboard = subparsers.add_parser(
-        "onboard", help="profile a Delta table and assess QC readiness"
+        "onboard", help="profile a Delta table and propose a dataset config"
     )
     onboard.add_argument("--uri", required=True)
     onboard.add_argument("--version", type=int, default=None)
@@ -1864,117 +742,14 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("--json", action="store_true")
     onboard.set_defaults(func=_cmd_onboard)
 
-    drift = subparsers.add_parser(
-        "drift", help="monitor prequential calibration for drift"
-    )
-    drift.add_argument("--store", required=True)
-    drift.add_argument("--scope", default=None, help="calibration scope filter")
-    drift.add_argument("--as-of", type=int, required=True)
-    drift.add_argument("--target-week", type=int, required=True)
-    drift.add_argument("--alpha", type=float, default=0.05)
-    drift.add_argument("--ratio-threshold", type=float, default=1.5)
-    drift.add_argument("--coverage-margin", type=float, default=0.1)
-    drift.add_argument("--max-records", type=int, default=500)
-    drift.add_argument("--json", action="store_true")
-    drift.set_defaults(func=_cmd_drift)
-
-    champion = subparsers.add_parser(
-        "champion", help="bake off decision providers on a held-out cohort"
-    )
-    champion_source = champion.add_mutually_exclusive_group(required=True)
-    champion_source.add_argument(
-        "--train-labels", default=None, help="label store JSONL (analyst or oracle)"
-    )
-    champion_source.add_argument(
-        "--store", default=None, help="SQLite store with confirmed outcomes"
-    )
-    champion.add_argument("--suite-dir", required=True, help="held-out eval suite")
-    champion.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
-    champion.add_argument(
-        "--eval-store", default=None, help="SQLite store with held-out outcomes"
-    )
-    champion.add_argument("--config", default=None)
-    champion.add_argument("--text-embedder", default=None)
-    champion.add_argument("--text-revision", default=None)
-    champion.add_argument("--systemone-url", default=None)
-    champion.add_argument("--min-overall-accuracy", type=float, default=None)
-    champion.add_argument("--min-cause-accuracy", type=float, default=None)
-    champion.add_argument("--validation-fraction", type=float, default=0.3)
-    champion.add_argument("--seed", type=int, default=0)
-    champion.add_argument("--out", default=None)
-    champion.add_argument("--json", action="store_true")
-    champion.set_defaults(func=_cmd_champion)
-
-    simulate = subparsers.add_parser(
-        "simulate-analyst",
-        help="write synthetic analyst outcomes to a store (provenance: synthetic)",
-    )
-    simulate.add_argument("--suite-dir", required=True)
-    simulate.add_argument("--oracle-dir", default=None, help="ground-truth vault root")
-    simulate.add_argument("--store", required=True)
-    simulate.add_argument(
-        "--profile", choices=sorted(ANALYST_PROFILES), default="typical"
-    )
-    simulate.add_argument("--seed", type=int, default=0)
-    simulate.add_argument("--json", action="store_true")
-    simulate.set_defaults(func=_cmd_simulate_analyst)
-
-    replay_parser = subparsers.add_parser(
-        "replay", help="replay pinned version pairs with leakage guards"
-    )
-    replay_parser.add_argument("--plan", required=True, help="replay plan JSON")
-    replay_parser.add_argument("--out", required=True)
-    replay_parser.add_argument("--uri", default=None, help="default source uri")
-    replay_parser.add_argument("--config", default=None)
-    replay_parser.add_argument("--storage-options", default=None, help="JSON object")
-    replay_parser.add_argument("--json", action="store_true")
-    replay_parser.set_defaults(func=_cmd_replay)
-
-    rca = subparsers.add_parser(
-        "rca", help="bounded RCA investigation over a completed run"
-    )
-    _add_scenario_arguments(rca)
-    rca.add_argument("--provider", default=None)
-    rca.add_argument("--steps", type=int, default=4)
-    rca.add_argument("--limit", type=int, default=50)
-    rca.add_argument("--json", action="store_true")
-    rca.set_defaults(func=_cmd_rca)
-
     expectations = subparsers.add_parser(
         "expectations", help="explain ratio alerts with scoped approvals"
     )
     _add_scenario_arguments(expectations)
-    expectations.add_argument("--provider", default=None)
     expectations.add_argument("--expectations", required=True)
     expectations.add_argument("--as-of", default=None)
     expectations.add_argument("--json", action="store_true")
     expectations.set_defaults(func=_cmd_expectations)
-
-    prequential_forecast = subparsers.add_parser(
-        "prequential-forecast",
-        help="forecast consecutive Delta versions with point-in-time calibration",
-    )
-    prequential_forecast.add_argument("--uri", required=True)
-    prequential_forecast.add_argument(
-        "--versions", required=True, help="comma-separated version ids in load order"
-    )
-    prequential_forecast.add_argument("--stage", default="warehouse")
-    prequential_forecast.add_argument("--storage-options", default=None, help="JSON object")
-    prequential_forecast.add_argument("--scope", default=None)
-    prequential_forecast.add_argument("--min-samples", type=int, default=9)
-    prequential_forecast.add_argument("--config", default=None)
-    prequential_forecast.add_argument("--out", default=None, help="append pool JSONL")
-    prequential_forecast.add_argument("--json", action="store_true")
-    prequential_forecast.set_defaults(func=_cmd_prequential_forecast)
-
-    pilot = subparsers.add_parser(
-        "pilot-check", help="check real-data pilot prerequisites"
-    )
-    pilot.add_argument("--store", required=True, help="pilot SQLite store")
-    pilot.add_argument("--plan", default="config/cohort.json")
-    pilot.add_argument("--min-labels", type=int, default=10)
-    pilot.add_argument("--json", action="store_true")
-    pilot.set_defaults(func=_cmd_pilot_check)
 
     weekly = subparsers.add_parser(
         "weekly",
@@ -1986,10 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
     weekly.add_argument("--dim-tables", default=None, help="JSON dimension to Delta URI map")
     weekly.add_argument("--version-map", default=None, help="JSON snapshot to stage/dim:name version map")
     weekly.add_argument("--config", default=None)
-    weekly.add_argument("--store", default=None, help="SQLite store for runs/outcomes")
-    weekly.add_argument(
-        "--calibration-store", default=None, help="prequential pool JSONL"
-    )
+    weekly.add_argument("--store", default=None, help="SQLite assessment journal")
     weekly.add_argument("--out", default="reports/weekly")
     weekly.add_argument("--current", default=None)
     weekly.add_argument("--previous", default=None)
@@ -1999,8 +771,6 @@ def build_parser() -> argparse.ArgumentParser:
     weekly.add_argument("--reference-version", default=None)
     weekly.add_argument("--reference-stage", default=None)
     weekly.add_argument("--storage-options", default=None, help="JSON object")
-    weekly.add_argument("--min-samples", type=int, default=9)
-    weekly.add_argument("--provider", default=None)
     weekly.add_argument("--force", action="store_true")
     weekly.add_argument(
         "--notify",
@@ -2019,17 +789,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=16384,
         help="payload byte budget; optional sections are dropped, not truncated",
     )
-    weekly.add_argument(
-        "--allow-investigate",
-        action="store_true",
-        help="deprecated compatibility flag; review exit codes remain unchanged",
-    )
     weekly.add_argument("--json", action="store_true")
     weekly.set_defaults(func=_cmd_weekly)
 
     explain = subparsers.add_parser(
-        "explain",
-        help="show an assessment's findings, ledger and clearance certificates",
+        "explain", help="show an assessment's status and non-passing findings"
     )
     explain.add_argument("--report", default=None, help="report directory")
     explain.add_argument("--store", default=None, help="SQLite journal")
@@ -2037,22 +801,6 @@ def build_parser() -> argparse.ArgumentParser:
     explain.add_argument("--dataset", default=None, help="latest assessment for dataset")
     explain.add_argument("--json", action="store_true")
     explain.set_defaults(func=_cmd_explain)
-
-    bench = subparsers.add_parser(
-        "evidence-bench",
-        help="frozen evidence benchmark: materiality selection, gates and ablation",
-    )
-    bench.add_argument("--suite", required=True, help="generated suite directory")
-    bench.add_argument("--config", default=None)
-    bench.add_argument(
-        "--thresholds", default=None, help="comma-separated materiality ratios"
-    )
-    bench.add_argument("--scenarios", default=None, help="comma-separated scenario ids")
-    bench.add_argument("--min-detection-rate", type=float, default=0.9)
-    bench.add_argument("--max-false-positive-rate", type=float, default=0.1)
-    bench.add_argument("--out", default=None)
-    bench.add_argument("--json", action="store_true")
-    bench.set_defaults(func=_cmd_evidence_bench)
 
     return parser
 

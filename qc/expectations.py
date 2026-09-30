@@ -1,4 +1,4 @@
-"""Scoped ratio expectations (ported from Verity's approval model).
+"""Scoped ratio expectations with explicit approvals.
 
 An expectation explains exactly the alert it names - one metric, one week, one
 ratio band, one validity window - and clears nothing else. Unapproved,

@@ -202,7 +202,6 @@ def test_machine_output_shape(engine_runs):
     assert machine["reconciliation"]["status"] == "PASS"
     assert machine["lineage"]["status"] == "PASS"
     assert machine["lineage"]["first_divergence"] is None
-    assert machine["evidence_graph"]["nodes"]
     assert any(
         reason.startswith("latest_week_anomaly") for reason in machine["evidence"]
     )

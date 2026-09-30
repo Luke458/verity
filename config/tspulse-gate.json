@@ -1,6 +1,0 @@
-{
-  "metric": "scenario_holdout_accuracy",
-  "min_value": 0.6,
-  "require_scenario_holdout": true,
-  "note": "Pre-registered before evaluation. TSPulse revision-series embeddings must classify fault families with scenario-level holdout (not leave-one-series-out) at >= 0.6 before the adapter may leave research status. The weekly-length question is settled only by this benchmark on real revision series."
-}

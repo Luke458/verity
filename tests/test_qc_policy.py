@@ -1,64 +1,30 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from qc.config import DatasetConfig
 from qc.conformal import benjamini_hochberg
-from qc.evidence_package import ExplanationCertificate
 from qc.policy import (
     HARD_FAILURE,
     HUMAN_APPROVED,
     INFORMATIONAL,
     PASSING,
-    STATISTICALLY_EXPLAINED,
     UNAVAILABLE_EVIDENCE,
     UNEXPLAINED_ANOMALY,
-    collect_findings,
     disposition_for,
-    finalize_policy,
     finding,
     status_for,
 )
 from qc.recurrence import assess_recurrence
 from qc.temporal import (
-    SeriesTemporalEvidence,
     share_shift_test,
     student_t_two_sided_p,
 )
 
 CONFIG = DatasetConfig()
-
-
-def _certificate_for(item, *, status="VERIFIED", assessment_id="run-1", **overrides):
-    kwargs = dict(
-        certificate_id=f"cert-{item.scope}",
-        assessment_id=assessment_id,
-        scope=item.scope,
-        finding_ids=(item.finding_id,),
-        bases=("historically_calibrated_interval",),
-        status=status,
-        reasons=() if status == "VERIFIED" else ("rejected",),
-        support={},
-        coverage={"finding_ids": [item.finding_id]},
-        net_unexplained=0.0,
-        gross_unexplained=0.0,
-        materiality_threshold=1.0,
-        evidence_ids=(),
-        approval_ids=(),
-        clearance_basis="statistical",
-        evidence_digest="evidence-1",
-        qualification_digest="qualification-1",
-        scope_type=item.scope_type,
-        period=item.period,
-        metric=item.metric,
-        level=item.level,
-    )
-    kwargs.update(overrides)
-    return ExplanationCertificate(**kwargs)
 
 
 def test_disposition_mapping():
@@ -71,17 +37,9 @@ def test_disposition_mapping():
     assert disposition_for("PASS", False, ()) == INFORMATIONAL
 
 
-def test_status_for_distinguishes_statistical_clearance():
+def test_status_precedence_and_human_approval():
     unexplained = finding("temporal", "national", "FAIL")
     assert status_for([unexplained]) == "INVESTIGATE"
-
-    cleared = replace(
-        unexplained,
-        disposition=STATISTICALLY_EXPLAINED,
-        clearance_basis="statistical",
-        certificate_id="cert-1",
-    )
-    assert status_for([cleared]) == "PASS_WITH_EXPLANATION"
 
     approved = replace(
         unexplained, disposition=HUMAN_APPROVED, approval_ids=("evt-1",)
@@ -89,166 +47,10 @@ def test_status_for_distinguishes_statistical_clearance():
     assert status_for([approved]) == "PASS_WITH_EXPLANATION"
 
     contract = finding("contracts:nulls", "ds", "CONTRACT_FAILURE")
-    assert status_for([contract, cleared]) == "DATA_CONTRACT_FAILURE"
+    assert status_for([contract, approved]) == "DATA_CONTRACT_FAILURE"
     unavailable = finding("temporal", "ds", "UNAVAILABLE")
-    assert status_for([unavailable, cleared]) == "INCOMPLETE"
-
-
-def _policy_result(**overrides):
-    base = dict(
-        run_id="run-1",
-        dataset="ds",
-        status="INVESTIGATE",
-        contracts=SimpleNamespace(checks=[]),
-        input_findings=[],
-        machine={
-            "historical_revision": {"status": "INVESTIGATE"},
-            "evidence_digests": ["evidence-1"],
-        },
-        attribution=SimpleNamespace(
-            matched_event_ids=[],
-            approval_coverage=[],
-        ),
-        reconciliation=None,
-        counterfactual=None,
-        cubes={},
-        reference=None,
-        expectations=(),
-        observed_at=None,
-        temporal_required=False,
-        temporal=None,
-        ledger=None,
-    )
-    base.update(overrides)
-    return SimpleNamespace(**base)
-
-
-def test_dataset_certificate_cannot_clear_a_historical_revision():
-    result = _policy_result()
-    findings = collect_findings(result, CONFIG)
-    historical = next(
-        item for item in findings if item.check == "historical_revision"
-    )
-    certificate = _certificate_for(
-        historical,
-        scope="dataset",
-        scope_type="dataset",
-        period=None,
-    )
-    finalize_policy(result, findings=findings, certificates=(certificate,))
-    stored = next(
-        item for item in result.machine["findings"] if item["check"] == "historical_revision"
-    )
-    assert stored["disposition"] == UNEXPLAINED_ANOMALY
-    assert result.status == "INVESTIGATE"
-    assert not result.machine["clearance"]
-
-
-def test_rejected_certificate_does_not_clear():
-    result = _policy_result()
-    findings = collect_findings(result, CONFIG)
-    historical = next(
-        item for item in findings if item.check == "historical_revision"
-    )
-    certificate = _certificate_for(
-        historical,
-        status="REJECTED",
-        scope="dataset",
-        scope_type="dataset",
-        period=None,
-    )
-    finalize_policy(result, findings=findings, certificates=(certificate,))
-    stored = next(
-        item for item in result.machine["findings"] if item["check"] == "historical_revision"
-    )
-    assert stored["disposition"] == UNEXPLAINED_ANOMALY
-    assert result.status == "INVESTIGATE"
-
-
-def test_temporal_certificate_clears_matching_series_only():
-    evidence = SeriesTemporalEvidence(
-        series_id="banner_id:B1",
-        target_week=10,
-        actual=100.0,
-        adjusted_actual=100.0,
-        adjustment=0.0,
-        forecast_median=100.0,
-        forecast_quantiles={},
-        residual=0.0,
-        relative_residual=0.0,
-        nominal_percentile=0.5,
-        calibrated_percentile=0.5,
-        standardized_residual=0.0,
-        robust_z=0.0,
-        seasonal_z=0.0,
-        ewma_z=0.0,
-        change_point_score=0.0,
-        anomaly=True,
-        flags=["forecast_lower"],
-        metric="dollar",
-        level="banner_id",
-    )
-    result = _policy_result(
-        temporal=SimpleNamespace(
-            series=[evidence],
-            unavailable_series=[],
-            coordinated=[],
-        ),
-        temporal_required=True,
-    )
-    findings = collect_findings(result, CONFIG)
-    temporal = next(item for item in findings if item.check == "temporal")
-    assert temporal.period == 10
-    certificate = _certificate_for(temporal)
-    finalize_policy(result, findings=findings, certificates=(certificate,))
-    stored = next(
-        item for item in result.machine["findings"] if item["check"] == "temporal"
-    )
-    assert stored["scope"] == "banner_id:B1"
-    assert stored["disposition"] == STATISTICALLY_EXPLAINED
-    assert result.machine["schema_version"] == 5
-    assert result.machine["clearance"][0]["period"] == 10
-    assert result.machine["clearance_bases"][stored["finding_id"]] == "statistical"
-
-
-def test_foreign_assessment_certificate_is_ignored():
-    evidence = SeriesTemporalEvidence(
-        series_id="national",
-        target_week=10,
-        actual=100.0,
-        adjusted_actual=100.0,
-        adjustment=0.0,
-        forecast_median=100.0,
-        forecast_quantiles={},
-        residual=0.0,
-        relative_residual=0.0,
-        nominal_percentile=0.5,
-        calibrated_percentile=0.5,
-        standardized_residual=0.0,
-        robust_z=0.0,
-        seasonal_z=0.0,
-        ewma_z=0.0,
-        change_point_score=0.0,
-        anomaly=True,
-        flags=["forecast_lower"],
-        metric="dollar",
-        level="national",
-    )
-    result = _policy_result(
-        temporal=SimpleNamespace(
-            series=[evidence], unavailable_series=[], coordinated=[]
-        ),
-        temporal_required=True,
-    )
-    findings = collect_findings(result, CONFIG)
-    temporal = next(item for item in findings if item.check == "temporal")
-    certificate = _certificate_for(temporal, assessment_id="other-run")
-    finalize_policy(result, findings=findings, certificates=(certificate,))
-    stored = next(
-        item for item in result.machine["findings"] if item["check"] == "temporal"
-    )
-    assert stored["disposition"] == UNEXPLAINED_ANOMALY
-    assert not result.machine["clearance"]
+    assert status_for([unavailable, approved]) == "INCOMPLETE"
+    assert status_for([unexplained, unavailable]) == "INVESTIGATE"
 
 
 def test_benjamini_hochberg_never_claims_discovery_on_empty_input():
@@ -289,7 +91,6 @@ def _recurrence_finding(finding_id, impact, materiality=50.0):
         "outcome": "FAIL",
         "disposition": UNEXPLAINED_ANOMALY,
         "approval_ids": [],
-        "clearance_basis": "",
         "impact": impact,
         "materiality": materiality,
     }
@@ -333,10 +134,14 @@ def test_recurrence_requires_repetition_and_material_cumulative_impact():
     assert repeated[0].occurrences == 2
     assert repeated[0].cumulative_impact == pytest.approx(120.0)
 
-    cleared_prior = [{"findings": [
-        {**_recurrence_finding("def", 60.0), "disposition": "STATISTICALLY_EXPLAINED"}
+    approved_prior = [{"findings": [
+        {
+            **_recurrence_finding("def", 60.0),
+            "disposition": HUMAN_APPROVED,
+            "approval_ids": ["evt-1"],
+        }
     ]}]
-    assert assess_recurrence(current, cleared_prior, config) == []
+    assert assess_recurrence(current, approved_prior, config) == []
 
     # Signed impacts that net to zero still escalate on gross persistence.
     alternating = assess_recurrence(

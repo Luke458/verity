@@ -30,15 +30,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Harnesses may read the oracle to score; engine modules may not import qcgen.
 HARNESS_ALLOWLIST = {
-    "champion.py",
     "cli.py",
     "cohort.py",
-    "evidence_bench.py",
-    "labels.py",
-    "replay.py",
     "shadow.py",
-    "synthetic_analyst.py",
-    "tspulse_benchmark.py",
 }
 
 GROUND_TRUTH_KEYS = {

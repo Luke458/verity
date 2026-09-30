@@ -1,4 +1,4 @@
-"""Human-readable reports (architecture section 78).
+"""Human-readable reports.
 
 Markdown is the human view; the machine JSON written beside it remains the
 contract for downstream code and scheduled agents. Report directories are
@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .agent import InvestigationBrief
 from .jsonutil import dumps as json_dumps
 
 
@@ -44,10 +43,7 @@ def _number(value: float | None, digits: int = 2) -> str:
     return f"{value:,.{digits}f}"
 
 
-def render_markdown(
-    result: Any,
-    brief: InvestigationBrief | None = None,
-) -> str:
+def render_markdown(result: Any) -> str:
     pair = result.version_pair
     lines: list[str] = []
     lines.append(f"# QC RUN {result.run_id}")
@@ -236,62 +232,15 @@ def render_markdown(
             lines.append(f"- {_line(reason)}")
         lines.append("")
 
-    if brief is not None:
-        lines.append("## Investigation brief")
-        if brief.open_questions:
-            lines.append("### Open questions")
-            for question in brief.open_questions:
-                lines.append(f"- {_line(question)}")
-        if brief.recommended_queries:
-            lines.append("")
-            lines.append("### Recommended first queries")
-            lines.append("```sql")
-            lines.extend(brief.recommended_queries)
-            lines.append("```")
-        if brief.similar_incidents:
-            lines.append("")
-            lines.append("### Similar incidents")
-            lines.append(
-                _table(
-                    ["incident", "root cause", "resolution", "similarity"],
-                    [
-                        [
-                            incident["incident_id"],
-                            incident["root_cause"],
-                            incident["resolution"],
-                            f"{incident['similarity']:.3f}",
-                        ]
-                        for incident in brief.similar_incidents
-                    ],
-                )
-            )
-        lines.append("")
-
-    if result.evidence is not None:
-        node_types: dict[str, int] = {}
-        for node in result.evidence.nodes:
-            node_types[node.type] = node_types.get(node.type, 0) + 1
-        lines.append("## Evidence graph")
-        lines.append(
-            f"- nodes: {len(result.evidence.nodes)}; edges: {len(result.evidence.edges)}"
-        )
-        for node_type, count in sorted(node_types.items()):
-            lines.append(f"- {node_type}: {count}")
-        lines.append("")
-
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_report(
-    result: Any,
-    directory: str | Path,
-    brief: InvestigationBrief | None = None,
-) -> dict[str, Path]:
+def write_report(result: Any, directory: str | Path) -> dict[str, Path]:
     path = Path(directory)
     path.mkdir(parents=True, exist_ok=False)
     markdown_path = path / "report.md"
     machine_path = path / "report.json"
-    markdown_path.write_text(render_markdown(result, brief))
+    markdown_path.write_text(render_markdown(result))
     machine_path.write_text(
         json_dumps(result.machine, indent=2, sort_keys=True, default=str)
     )

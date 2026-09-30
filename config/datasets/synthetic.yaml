@@ -4,8 +4,9 @@ dataset: synthetic
 profile: small
 seed: 7
 
-# Fault families to schedule across scenarios. Controls are interleaved and are
-# expected to produce genuine movement rather than a pipeline defect.
+# Fault families to schedule across scenarios. Controls (clean refreshes that
+# must PASS) are interleaved after every third fault; market_movement is a
+# genuine latest-week movement that must surface, not a control.
 faults:
   include:
     - missing_stores
@@ -18,8 +19,9 @@ faults:
     - schema_failure
     - null_duplicate_storm
     - expected_event
-  controls:
     - market_movement
+  controls:
+    - clean
 
 # Stages written for the current version. Use "all" to write every pipeline
 # stage (source, coded, warehouse, report) for lineage experiments.
