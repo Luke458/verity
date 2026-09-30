@@ -349,11 +349,11 @@ def forecast_across_loads(
             values = [float(value) for value in group["value"]]
             training = [
                 (week_id, value)
-                for week_id, value in zip(weeks, values, strict=False)
+                for week_id, value in zip(weeks, values, strict=True)
                 if week_id <= load.target_week - 1
             ]
             actuals = [
-                value for week_id, value in zip(weeks, values, strict=False) if week_id == load.target_week
+                value for week_id, value in zip(weeks, values, strict=True) if week_id == load.target_week
             ]
             pool_records = len(
                 pool.usable(load.available_on, load.target_week, scope=scope)

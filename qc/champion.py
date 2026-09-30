@@ -285,7 +285,7 @@ def _score_head_provider(provider: Any, items: Sequence[EvalItem]) -> ProviderSc
         predictions = [
             head.classes[int(index)] for index in probabilities.argmax(axis=1)
         ]
-        for item, record, predicted in zip(relevant, records, predictions, strict=False):
+        for item, record, predicted in zip(relevant, records, predictions, strict=True):
             expected = record.labels.get(field_name)
             total[field_name] = total.get(field_name, 0) + 1
             total_by_case[item.case_id] = total_by_case.get(item.case_id, 0) + 1

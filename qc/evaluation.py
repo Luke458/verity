@@ -439,7 +439,7 @@ def _ablation_summary(
     reviews = sum(1 for flag in review_flags if flag)
     cleared = sum(
         1
-        for case, flag in zip(selected, review_flags, strict=False)
+        for case, flag in zip(selected, review_flags, strict=True)
         if case.get("actionable") and not flag
     )
     return {
@@ -491,7 +491,7 @@ def ablate_evidence(
                     "false_clearance_rate": _rate(
                         sum(
                             1
-                            for case, flag in zip(selected, review_flags, strict=False)
+                            for case, flag in zip(selected, review_flags, strict=True)
                             if case.get("actionable") and not flag
                         ),
                         len(actionable),

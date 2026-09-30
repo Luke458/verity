@@ -362,7 +362,7 @@ def test_share_shift_ignores_common_movement_and_flags_leaf_shift():
     weeks = list(range(1, 31))
     parent = [1000.0 * (1.0 + 0.1 * rng.standard_normal()) for _ in weeks]
     share = [0.3 + 0.005 * rng.standard_normal() for _ in weeks]
-    child = [p * s for p, s in zip(parent, share, strict=False)]
+    child = [p * s for p, s in zip(parent, share, strict=True)]
     # A 15% market-wide drop keeps the leaf's share: not a leaf anomaly.
     common = share_shift_test(weeks, child, weeks, parent, 0.85 * 0.3 * 1000, 0.85 * 1000, 26)
     assert common is not None and common[1] > 0.05

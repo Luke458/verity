@@ -23,7 +23,7 @@ def frame_digest(frame) -> str | None:
 
     h = hashlib.sha256()
     h.update(
-        dumps([(str(c), str(t)) for c, t in zip(frame.columns, frame.dtypes, strict=False)]).encode()
+        dumps([(str(c), str(t)) for c, t in zip(frame.columns, frame.dtypes, strict=True)]).encode()
     )
     h.update(pd.util.hash_pandas_object(frame, index=False).values.tobytes())
     return h.hexdigest()

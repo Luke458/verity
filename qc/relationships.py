@@ -241,7 +241,7 @@ def detect_relationships(
 
     keep = _benjamini_hochberg([candidate["p_value"] for candidate in candidates])
     relationships: list[EntityRelationship] = []
-    for candidate, significant in zip(candidates, keep, strict=False):
+    for candidate, significant in zip(candidates, keep, strict=True):
         if not significant:
             continue
         relationships.append(

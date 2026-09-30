@@ -72,7 +72,7 @@ sums.
 | `ENTITY_REMOVED` | entity present previously, absent now |
 | `ENTITY_HISTORY_EXTENDED` | overlap history gained |
 | `ENTITY_HISTORY_TRUNCATED` | overlap history removed |
-| `LATEST_WEEK_MISSING` | entity existed through the previous maximum week but is absent in the new period |
+| `LATEST_WEEK_MISSING` | entity traded in the previous maximum week and in at least `entity_presence_threshold` (default 0.5) of its trailing `entity_presence_window` (default 8) weeks, but is absent in the new period; the event carries its expected contribution (trailing mean, absent weeks counted as zero) |
 | `POSSIBLE_RECLASSIFICATION` | product-to-commodity mapping changed between versions |
 
 `UNCHANGED_ENTITY` events are omitted from results.
@@ -91,7 +91,7 @@ final status policy, not the final assessment:
 | Condition | Status |
 |---|---|
 | contract failure | `DATA_CONTRACT_FAILURE` |
-| any `LATEST_WEEK_MISSING` | `INVESTIGATE` |
+| missing entities of one type expected to carry more than `materiality_ratio` of the period (`lifecycle.missing_entity_impact`) | `INVESTIGATE` |
 | structural events, all matched by the expected-event registry and explained fraction >= threshold | `PASS_WITH_EXPLANATION` |
 | structural events not matched by the registry | `INVESTIGATE` |
 | material residual unexplained | `INVESTIGATE` (`unexplained_value_change`) |
@@ -198,7 +198,8 @@ qc shadow --suite-dir data/suites/demo --out reports/shadow/demo
 
 Runs the engine over every scenario, writes one JSONL record per scenario and a
 summary JSON, and (for synthetic suites) scores outcomes against the oracle:
-detection rate, historical false-positive rate, latest-week detection and
+detection rate and false-positive rate (both on the final status; faults and
+genuine movements vs. clean controls), historical false-positive rate, latest-week detection and
 control rates, expected-event pass rate, lineage first-divergence accuracy and
 mean reconstruction score. On real data the oracle fields are simply absent and
 the records become the analyst-feedback store for calibration and training.
@@ -219,10 +220,11 @@ Evidence per series:
 |---|---|
 | forecast quantiles | predictive distribution from the configured forecaster |
 | nominal / calibrated percentile | where the actual falls in the predictive distribution, before and after empirical residual calibration |
-| robust z | deviation from the recent median/MAD |
-| seasonal z | deviation from the same week in previous years |
-| EWMA z | deviation from the exponentially weighted level |
-| change point | strongest recent mean-shift t-statistic (history evidence, not a target-week flag) |
+| share shift (leaves) | the leaf's share of the national parent against its own trailing shares (Student-t prediction interval, `share_t`/`share_p`/`share_impact`) |
+| robust z | deviation from the recent median/MAD (evidence only) |
+| seasonal z | deviation from the same week in previous years (evidence only) |
+| EWMA z | deviation from the exponentially weighted level (evidence only) |
+| change point | strongest recent mean-shift t-statistic (evidence only) |
 
 Model selection, fitting and residual calibration use only observations before
 the assessment target and only the selected previous snapshot; rolling origins
@@ -248,16 +250,23 @@ optional `[forecast]` extra.
 Calibrated prediction intervals come from pooled standardized errors scaled to
 the target (`temporal_interval_alpha`, default 0.1) and are reported with
 history length, observed/missing weeks, forecast error, per-series held-out
-coverage and width. A target-week anomaly must move materially versus the same
-metric/period/scope expected magnitude with a configured absolute floor
-(`temporal_min_relative_residual`, default 2%; `temporal_materiality_abs`
-default 0) and then either be a forecast extreme or seasonal deviation, or carry
-corroborating robust-z and EWMA flags; a lone robust-z on a low-variance series
-is noise and is reported without flagging. Forecast-tail flags on leaf series
-pass Benjamini-Hochberg control (`temporal_fdr_q`) before escalation.
-Same-direction leaf residuals are combined within their parent level and period
-before materiality testing, so a coordinated small movement can escalate when
-the individual series cannot. Sparse leaves fall back to parent expectation
+coverage and width.
+
+Anomalies are decided once per assessment (`temporal.decide_anomalies`). Every
+series of every measure and appended period is one hypothesis in a single
+Benjamini-Hochberg family at `temporal_fdr_q`: national series contribute their
+forecast p-value, leaves their share-of-parent p-value (or their forecast
+p-value when no share test is possible). Under the global null the chance of
+any false page per refresh is therefore about `temporal_fdr_q`. A significant
+series is an anomaly only if its movement is also material versus the same
+metric/period/scope expectation (`temporal_min_relative_residual`, default 2%;
+`temporal_materiality_abs`, default 0); for a share-tested leaf the material
+movement is the part attributable to the share change. Leaves are tested on
+their share because most week-to-week variance in retail series is a common
+market movement: a market-wide swing moves the national series, not every
+leaf. Robust, seasonal and EWMA z-scores and change points ignore trend,
+seasonality and multiplicity, so they are reported as evidence and never decide.
+Sparse leaves fall back to parent expectation
 times a historically estimated child share and are labelled `parent_share`; the
 fallback cannot support statistical clearance.
 Structural additions from newly appearing entities are subtracted from the
@@ -265,10 +274,11 @@ target week before scoring, at one entity level only (store before product) to
 avoid double counting; registered backfills therefore do not trigger
 latest-week anomalies.
 
-The top-level status is the historical revision status, upgraded to
-`INVESTIGATE` when a latest-week anomaly is flagged and the historical verdict
-was passing. `historical_revision.status` always preserves the revision-only
-verdict, so the two paths remain separable.
+The final status is computed once, from findings, by `policy.apply_policy`;
+every check that can escalate (including the opt-in distribution drift check)
+emits findings, so there is no second status path to bypass.
+`historical_revision.status` preserves the revision-only verdict, so the two
+paths remain separable.
 
 ## Evidence graph
 

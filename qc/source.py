@@ -174,7 +174,7 @@ class ParquetManifestSource:
         versions = [str(item["version"]) for item in self.snapshots]
         if not versions or len(set(versions)) != len(versions):
             raise ValueError("snapshot versions must be nonempty and unique")
-        self.by_version = dict(zip(versions, self.snapshots, strict=False))
+        self.by_version = dict(zip(versions, self.snapshots, strict=True))
         from .store import observation_time
         times = [observation_time(item["observed_at"]) for item in self.snapshots]
         if times != sorted(times):

@@ -291,7 +291,7 @@ def seasonal_z(
 ) -> float:
     same = [
         float(value)
-        for week, value in zip(weeks, values, strict=False)
+        for week, value in zip(weeks, values, strict=True)
         if math.isfinite(float(value))
         and (target_week - int(week)) % season == 0
     ]
@@ -412,7 +412,7 @@ def backtest_forecaster(
             median = float(predictions[median_index])
             scale = _forecast_scale(predictions, levels)
             residuals.append((actual - median) / scale)
-            for level, prediction in zip(levels, predictions, strict=False):
+            for level, prediction in zip(levels, predictions, strict=True):
                 if actual <= float(prediction):
                     hits[str(level)] += 1
             count += 1
@@ -613,7 +613,7 @@ def fit_model(
 ):
     pairs = [
         (int(week), float(value))
-        for week, value in zip(weeks, values, strict=False)
+        for week, value in zip(weeks, values, strict=True)
         if math.isfinite(float(value))
     ]
     observed_weeks = [week for week, _ in pairs]
@@ -710,7 +710,7 @@ def rolling_origin_errors(
     """
     pairs = [
         (int(week), float(value))
-        for week, value in zip(weeks, values, strict=False)
+        for week, value in zip(weeks, values, strict=True)
         if math.isfinite(float(value))
     ]
     eligible = _rolling_evaluations(pairs, horizon, config, origins)
@@ -854,7 +854,7 @@ def select_candidate(
     """
     observed = [
         (int(week), float(value))
-        for week, value in zip(weeks, values, strict=False)
+        for week, value in zip(weeks, values, strict=True)
         if math.isfinite(float(value))
     ]
     history_weeks = (
@@ -1275,12 +1275,12 @@ class TemporalResult:
         }
 
 
-# Only these flags decide an anomaly: a calibrated forecast extreme (national
-# series, and leaves without a share test) or a significant share-of-parent
-# shift (leaves). Robust, seasonal and EWMA z-scores and change points ignore
-# trend, seasonality and multiplicity; they are reported as evidence only.
+# Flags that record a decision (see ``decide_anomalies``): a significant,
+# material forecast residual (national series, and leaves without a share test)
+# or share-of-parent shift (leaves). Robust, seasonal and EWMA z-scores and
+# change points ignore trend, seasonality and multiplicity; they are reported
+# as evidence only.
 DECISION_FLAGS = frozenset({"forecast_lower", "forecast_upper", "share_shift"})
-FORECAST_FLAGS = frozenset({"forecast_lower", "forecast_upper"})
 # A share shift needs this many trailing aligned observations to estimate the
 # leaf's own share variability.
 MIN_SHARE_HISTORY = 8
@@ -1356,12 +1356,12 @@ def share_shift_test(
         return None
     parent = {
         int(week_id): float(value)
-        for week_id, value in zip(parent_weeks, parent_values, strict=False)
+        for week_id, value in zip(parent_weeks, parent_values, strict=True)
         if math.isfinite(float(value)) and float(value) > 0.0
     }
     shares = [
         float(value) / parent[int(week_id)]
-        for week_id, value in zip(child_weeks, child_values, strict=False)
+        for week_id, value in zip(child_weeks, child_values, strict=True)
         if int(week_id) in parent and math.isfinite(float(value))
     ][-max(int(window), MIN_SHARE_HISTORY):]
     n = len(shares)
@@ -1409,48 +1409,55 @@ def _attach_share_tests(
             leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested
 
 
-def decide_leaf_anomalies(
+def decide_anomalies(
     evidence: Sequence[SeriesTemporalEvidence], config: DatasetConfig
 ) -> None:
-    """Leaf anomalies from share shifts, with one BH-FDR family per assessment.
+    """Decide every series of one assessment in a single BH-FDR family.
 
-    National series keep their forecast decision. Every leaf of every measure
-    and period is one hypothesis in a single BH family: the measures of one
-    refresh move together, so per-measure families would let one share wobble
-    page once per measure. A leaf without a share test (no national parent or
-    degenerate share history) contributes its forecast p-value instead.
+    Each national series contributes its forecast p-value; each leaf its
+    share-of-parent p-value (or its forecast p-value when no share test is
+    possible). All measures and periods of one refresh are one family because
+    they move together: separate families per measure or per level would let
+    one ordinary wobble page several times, and under the global null the
+    chance of any false page per refresh is then about ``temporal_fdr_q``.
+    A significant series is an anomaly only when its movement is also
+    material (the share-attributable movement for a share-tested leaf).
     """
     from .conformal import benjamini_hochberg
 
-    leaves = [entry for entry in evidence if entry.level != "national"]
-    if not leaves:
+    series = list(evidence)
+    if not series:
         return
-    uses_share = [leaf.share_p is not None for leaf in leaves]
+    share_tested = [
+        entry.level != "national" and entry.share_p is not None for entry in series
+    ]
     p_values = [
-        float(leaf.share_p) if leaf.share_p is not None else _two_sided_percentile(leaf)
-        for leaf in leaves
+        float(entry.share_p) if tested else _two_sided_percentile(entry)
+        for entry, tested in zip(series, share_tested, strict=True)
     ]
     if config.temporal_fdr_enabled:
         adjusted, significant = benjamini_hochberg(p_values, config.temporal_fdr_q)
     else:
         adjusted = list(p_values)
         significant = [value <= config.temporal_fdr_q for value in p_values]
-    for leaf, adjusted_p, is_significant, share_tested in zip(
-        leaves, adjusted, significant, uses_share, strict=False
+    for entry, adjusted_p, is_significant, tested in zip(
+        series, adjusted, significant, share_tested, strict=True
     ):
-        leaf.adjusted_p = float(adjusted_p)
-        leaf.fdr_significant = bool(is_significant)
-        if share_tested:
-            leaf.flags = [flag for flag in leaf.flags if flag != "share_shift"]
-            # Forecast extremes on a leaf are evidence of a movement the share
-            # test attributes to the parent; only the share shift decides.
-            material = abs(float(leaf.share_impact or 0.0)) >= leaf.materiality
-            if is_significant and material and "share_shift" not in leaf.flags:
-                leaf.flags.append("share_shift")
-            leaf.anomaly = bool(is_significant and material)
-        elif not is_significant:
-            leaf.flags = [flag for flag in leaf.flags if flag not in FORECAST_FLAGS]
-            leaf.anomaly = bool(set(leaf.flags) & DECISION_FLAGS)
+        entry.adjusted_p = float(adjusted_p)
+        entry.fdr_significant = bool(is_significant)
+        entry.flags = [flag for flag in entry.flags if flag not in DECISION_FLAGS]
+        if tested:
+            material = abs(float(entry.share_impact or 0.0)) >= entry.materiality
+            decided = "share_shift"
+        else:
+            material = (
+                entry.forecast_median == 0.0
+                or abs(float(entry.residual)) >= entry.materiality
+            )
+            decided = "forecast_lower" if entry.residual < 0 else "forecast_upper"
+        entry.anomaly = bool(is_significant and material)
+        if entry.anomaly:
+            entry.flags.append(decided)
 
 
 def new_period_adjustments(
@@ -1551,7 +1558,7 @@ def _run_single_target(
         values = [float(value) for value in group["value"]]
         observed = [
             (week_id, value)
-            for week_id, value in zip(weeks, values, strict=False)
+            for week_id, value in zip(weeks, values, strict=True)
             if math.isfinite(value)
         ]
         # Every pre-target observation, and nothing at or after the target, may
@@ -1563,7 +1570,7 @@ def _run_single_target(
         ]
         actuals = [
             value
-            for week_id, value in zip(weeks, values, strict=False)
+            for week_id, value in zip(weeks, values, strict=True)
             if week_id == target and math.isfinite(value)
         ]
         series_key = str(series_id)
@@ -1618,7 +1625,7 @@ def _run_single_target(
             scale = _forecast_scale(predictions, levels)
             quantiles = {
                 str(level): float(prediction)
-                for level, prediction in zip(levels, predictions, strict=False)
+                for level, prediction in zip(levels, predictions, strict=True)
             }
         # The latest configured origins are reserved exclusively for
         # calibration; selection never reuses them.
@@ -1642,7 +1649,7 @@ def _run_single_target(
         history_weeks = target - min(weeks) + 1
         missing_weeks = tuple(
             int(week_id)
-            for week_id, value in zip(weeks, values, strict=False)
+            for week_id, value in zip(weeks, values, strict=True)
             if week_id <= target and not math.isfinite(value)
         )
         pending.append(
@@ -1692,7 +1699,7 @@ def _run_single_target(
             values = [float(value) for value in group["value"]]
             observed = [
                 (week_id, value_id)
-                for week_id, value_id in zip(weeks, values, strict=False)
+                for week_id, value_id in zip(weeks, values, strict=True)
                 if math.isfinite(value_id)
             ]
             training = [
@@ -1702,7 +1709,7 @@ def _run_single_target(
             ]
             actuals = [
                 value_id
-                for week_id, value_id in zip(weeks, values, strict=False)
+                for week_id, value_id in zip(weeks, values, strict=True)
                 if week_id == target and math.isfinite(value_id)
             ]
             if len(observed) < 4 or len(training) < 4 or not actuals:
@@ -1733,7 +1740,7 @@ def _run_single_target(
                     "history_weeks": target - min(weeks) + 1,
                     "missing_weeks": tuple(
                         int(week_id)
-                        for week_id, value_id in zip(weeks, values, strict=False)
+                        for week_id, value_id in zip(weeks, values, strict=True)
                         if week_id <= target and not math.isfinite(value_id)
                     ),
                 }
@@ -1841,7 +1848,6 @@ def _run_single_target(
         )
 
         flags: list[str] = []
-        percentile = calibrated if calibrated is not None else nominal
         # Statistical significance is not enough: a target week must also move
         # materially versus the same metric, period and scope's expected
         # magnitude before it can raise an anomaly. The materiality carries a
@@ -1855,10 +1861,6 @@ def _run_single_target(
         )
         material = point == 0.0 or abs(adjusted_actual - point) >= materiality
         if material:
-            if percentile <= config.temporal_lower_percentile:
-                flags.append("forecast_lower")
-            if percentile >= config.temporal_upper_percentile:
-                flags.append("forecast_upper")
             if abs(rz) >= config.temporal_z_threshold:
                 flags.append("robust_z")
             if abs(sz) >= config.temporal_z_threshold:
@@ -1868,7 +1870,8 @@ def _run_single_target(
         if cp >= config.temporal_change_point_threshold:
             flags.append("change_point")
 
-        anomaly = bool(set(flags) & DECISION_FLAGS)
+        # Decided once per assessment across every series (decide_anomalies).
+        anomaly = False
 
         evidence.append(
             SeriesTemporalEvidence(
@@ -1916,7 +1919,7 @@ def _run_single_target(
                 forecast_origin_week=int(item["forecast_origin_week"]),
             )
         )
-    # Leaf decisions are made once per assessment in ``run_temporal_qc``.
+    # Anomalies are decided once per assessment in ``run_temporal_qc``.
     _attach_share_tests(evidence, pending, config)
     anomalies = [item for item in evidence if item.anomaly]
     overall_flags = sorted({flag for item in anomalies for flag in item.flags})
@@ -2039,8 +2042,8 @@ def run_temporal_qc(
             metric_status=metric_status,
         )
     series = [entry for result in results for entry in result.series]
-    # Re-decide leaves with every measure and period in one BH family.
-    decide_leaf_anomalies(series, config)
+    # Every series of every measure and period is one BH family.
+    decide_anomalies(series, config)
     if len(results) == 1:
         result = results[0]
         result.metric_status = dict(metric_status)

@@ -44,8 +44,16 @@ def test_small_cohort_end_to_end(tmp_path):
     assert len(result.code_sha256) == 64
     assert result.plan_sha256
     assert result.production_eligible is False
-    assert len(result.gate_results) == 5
-    assert result.gates_passed is False  # two faults and no controls cannot qualify
+    # Detection, FPR and lineage gates; FPR is INSUFFICIENT_EVIDENCE without
+    # controls, so two faults and no controls cannot qualify.
+    assert [check["gate"] for check in result.gate_results] == [
+        "min_detection_rate",
+        "max_false_positive_rate",
+        "min_lineage_first_divergence_accuracy",
+    ]
+    assert result.gate_results[1]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert result.gates_passed is False
+    assert "oracle_disagreements" in result.metrics["common_gates"]
     assert any("Synthetic" in limitation for limitation in result.limitations)
 
     payload = json.loads((tmp_path / "out" / "cohort.json").read_text())
@@ -154,3 +162,31 @@ def test_plan_hash_pinning(tmp_path):
     tampered.save(plan_path)
     with pytest.raises(ValueError, match="does not match"):
         run_cohort(tampered, workdir=tmp_path / "w2", plan_path=plan_path)
+
+
+def test_controls_can_be_sized_independently():
+    plan = CohortPlan.from_dict(
+        {**CohortPlan().to_dict(), "scenarios_per_family": 1, "scenarios_per_control": 20}
+    )
+    assert plan.scenarios_per_control == 20
+    with pytest.raises(ValueError):
+        CohortPlan(scenarios_per_control=0)
+
+
+def test_cli_cohort_exits_nonzero_when_a_gate_fails(tmp_path, capsys):
+    # Regression: the command exited 0 whatever the gates said, and crashed
+    # formatting an INSUFFICIENT_EVIDENCE gate whose actual value is None.
+    from qc.cli import main
+
+    plan = CohortPlan(
+        families=("missing_stores",),
+        controls=(),
+        dev_seeds=(1,),
+        heldout_seeds=(2,),
+        gates={**DEFAULT_GATES, "min_lineage_first_divergence_accuracy": 0.0},
+    )
+    path = tmp_path / "plan.json"
+    plan.save(path)
+    code = main(["cohort", "--plan", str(path), "--workdir", str(tmp_path / "work")])
+    assert code == 3
+    assert "n/a" in capsys.readouterr().out

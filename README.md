@@ -178,12 +178,12 @@ uv pip install --python .venv/bin/python -e ".[test]"
 # Distribution drift over the appended period (opt-in; per-scope thresholds).
 # Catches a value redistribution that preserves row counts, null cells, entity
 # sets and every column sum -- invisible to the deterministic layer.
-#   echo 'distribution_drift_enabled: true' > drift.yaml
-#   .venv/bin/qc run --scenario-dir data/suites/demo/scenario-0000 --config drift.yaml
-#
-# Pre-registered gate (config/drift-gate.json), run as registered:
-.venv/bin/python -m optional.drift_benchmark --suite data/suites/demo \
-#  --out reports/benchmarks/drift.json
+echo 'distribution_drift_enabled: true' > drift.yaml
+.venv/bin/qc run --scenario-dir data/suites/demo/scenario-0000 --config drift.yaml
+# Evaluate any detector configuration through the full engine on the registered
+# cohort plan (final status on faults and clean refreshes; exit 3 = gate failed):
+.venv/bin/qc cohort --plan config/cohort.json --config drift.yaml \
+  --out reports/cohort/drift
 
 # Weekly entry point for a scheduler (idempotent; exit 2 = INVESTIGATE)
 .venv/bin/qc weekly --uri ./lake/fact --store data/qc.db \

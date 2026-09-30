@@ -753,12 +753,15 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
     result = run_cohort(
         plan,
         workdir=args.workdir,
+        config=load_dataset_config(args.config) if args.config else None,
         out_dir=args.out,
         plan_path=args.plan,
     )
+    # Exit 3 when a registered gate fails so a scheduler or CI job notices.
+    code = 0 if result.gates_passed else 3
     if args.json:
         print(_json_dumps(result.to_dict(), indent=2, default=_json_default))
-        return 0
+        return code
     print(
         f"cohort cases={result.metrics['cases']} "
         f"detection_rate={result.metrics['detection_rate']} "
@@ -769,9 +772,11 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
         f"reconstruction={result.metrics['mean_reconstruction_score']}"
     )
     for check in result.gate_results:
-        state = "PASS" if check["passed"] else "FAIL"
+        state = check.get("status") or ("PASS" if check["passed"] else "FAIL")
+        actual = check["actual"]
+        shown = f"{actual:.3f}" if isinstance(actual, (int, float)) else "n/a"
         print(
-            f"  {state} {check['gate']} actual={check['actual']:.3f} "
+            f"  {state} {check['gate']} actual={shown} "
             f"threshold={check['threshold']}"
         )
     print(
@@ -783,7 +788,7 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
     )
     if args.out:
         print(f"  output: {args.out}")
-    return 0
+    return code
 
 
 def _cmd_store_add_run(args: argparse.Namespace) -> int:
@@ -1696,6 +1701,10 @@ def build_parser() -> argparse.ArgumentParser:
     cohort.add_argument("--store", default=None)
     cohort.add_argument("--cutoff", default=None)
     cohort.add_argument("--plan", default=None, help="cohort plan JSON")
+    cohort.add_argument(
+        "--config", default=None,
+        help="dataset YAML config to evaluate (e.g. with an opt-in detector enabled)",
+    )
     cohort.add_argument("--profile", default=None)
     cohort.add_argument("--scenarios-per-family", type=int, default=None)
     cohort.add_argument("--dev-seed", action="append", type=int, default=None)

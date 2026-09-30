@@ -66,6 +66,9 @@ class CohortPlan:
     families: tuple[str, ...] = DEFAULT_FAMILIES
     controls: tuple[str, ...] = DEFAULT_CONTROLS
     scenarios_per_family: int = 1
+    # Controls need far more cases than any one fault family: an FPR upper
+    # confidence bound of 0.1 is unreachable below ~35 clean refreshes.
+    scenarios_per_control: int | None = None
     dev_seeds: tuple[int, ...] = (1101,)
     heldout_seeds: tuple[int, ...] = (7101, 7102)
     gates: dict[str, float] = field(
@@ -77,6 +80,8 @@ class CohortPlan:
             raise ValueError("dev and held-out seeds must be disjoint")
         if self.scenarios_per_family < 1:
             raise ValueError("scenarios_per_family must be >= 1")
+        if self.scenarios_per_control is not None and self.scenarios_per_control < 1:
+            raise ValueError("scenarios_per_control must be >= 1")
         unknown = set(self.gates) - set(KNOWN_GATES)
         if unknown:
             raise ValueError(f"unknown gates: {sorted(unknown)}")
@@ -105,6 +110,11 @@ class CohortPlan:
             families=tuple(data.get("families", DEFAULT_FAMILIES)),
             controls=tuple(data.get("controls", DEFAULT_CONTROLS)),
             scenarios_per_family=int(data.get("scenarios_per_family", 1)),
+            scenarios_per_control=(
+                int(data["scenarios_per_control"])
+                if data.get("scenarios_per_control") is not None
+                else None
+            ),
             dev_seeds=tuple(int(value) for value in data.get("dev_seeds", (1101,))),
             heldout_seeds=tuple(
                 int(value) for value in data.get("heldout_seeds", (7101, 7102))
@@ -156,6 +166,9 @@ class CohortResult:
     plan_path: str | None = None
     plan_hash_verified: bool = False
     git_dirty: bool | None = None
+    # The engine configuration that was evaluated: a gate result is only
+    # evidence for exactly this configuration.
+    config: dict[str, Any] = field(default_factory=dict)
     production_eligible: bool = False
     limitations: list[str] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -287,41 +300,48 @@ def _evaluation_cases(cases: Sequence[CohortCase]) -> list[Any]:
 def _common_gate_results(
     cases: Sequence[CohortCase], gates: dict[str, float]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """The one gate implementation shared by every evaluation path."""
-    from .evaluation import evaluation_gates
+    """Group-level confidence-bound gates on detection and false positives.
 
-    common = evaluation_gates(
-        _evaluation_cases(cases),
+    The zero-tolerance fixture-agreement check and the 1% false-clearance bound
+    are reported as metrics, not gates: the first contradicts any nonzero FPR
+    tolerance, and the second needs ~380 fault incidents with no miss and
+    duplicates the detection gate.
+    """
+    from .evaluation import (
+        confidence_gates,
+        false_clearance_upper_bound,
+        independent_label_errors,
+    )
+
+    evaluation_cases = _evaluation_cases(cases)
+    bounds = confidence_gates(
+        evaluation_cases,
         minimum_detection_rate=gates["min_detection_rate"],
         maximum_false_positive_rate=gates["max_false_positive_rate"],
     )
-    nested = common["gates"]
     checks = [
         {
             "gate": "min_detection_rate",
             "threshold": gates["min_detection_rate"],
-            "actual": nested["detection_rate"]["value"],
-            "passed": nested["detection_rate"]["status"] == "PASS",
+            "actual": bounds["detection_rate"]["value"],
+            "status": bounds["detection_rate"]["status"],
+            "passed": bounds["detection_rate"]["status"] == "PASS",
         },
         {
             "gate": "max_false_positive_rate",
             "threshold": gates["max_false_positive_rate"],
-            "actual": nested["false_positive_rate"]["value"],
-            "passed": nested["false_positive_rate"]["status"] == "PASS",
-        },
-        {
-            "gate": "false_clearance_upper_bound",
-            "threshold": 0.01,
-            "actual": nested["false_clearance"]["bound"].get("upper_bound"),
-            "passed": nested["false_clearance"]["status"] == "PASS",
-        },
-        {
-            "gate": "independent_label_errors",
-            "threshold": 0,
-            "actual": len(nested["deterministic_fixture_errors"].get("errors", [])),
-            "passed": nested["deterministic_fixture_errors"]["status"] == "PASS",
+            "actual": bounds["false_positive_rate"]["value"],
+            "status": bounds["false_positive_rate"]["status"],
+            "passed": bounds["false_positive_rate"]["status"] == "PASS",
         },
     ]
+    common = {
+        "gates": {name: bounds[name] for name in ("detection_rate", "false_positive_rate")},
+        "false_clearance_upper_bound": false_clearance_upper_bound(
+            [case for case in evaluation_cases if case.actionable]
+        ),
+        "oracle_disagreements": independent_label_errors(evaluation_cases),
+    }
     return checks, common
 
 
@@ -398,7 +418,12 @@ def run_cohort(
         for seed in seeds:
             for family in plan.families + plan.controls:
                 is_control = family in plan.controls
-                for index in range(plan.scenarios_per_family):
+                count = (
+                    plan.scenarios_per_control or plan.scenarios_per_family
+                    if is_control
+                    else plan.scenarios_per_family
+                )
+                for index in range(count):
                     case_id = f"{split}-{seed}-{family}-{index}"
                     root = workdir / case_id
                     built = build_scenario(
@@ -475,13 +500,13 @@ def run_cohort(
         plan=plan.to_dict(),
         metrics=metrics,
         gate_results=gates,
-        gates_passed=all(check["passed"] for check in gates)
-        and common["status"] == "PASS",
+        gates_passed=all(check["passed"] for check in gates),
         code_sha256=code_sha256(),
         plan_sha256=plan_sha,
         plan_path=str(plan_path) if plan_path is not None else None,
         plan_hash_verified=plan_hash_verified,
         git_dirty=git_dirty(),
+        config=config.to_dict(),
         limitations=[
             "Synthetic oracle labels validate the harness and the engine's "
             "deterministic semantics, not real refresh accuracy.",
