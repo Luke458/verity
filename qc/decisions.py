@@ -21,7 +21,6 @@ from .lifecycle import missing_entity_impact
 CAUSE_VALUES: tuple[str, ...] = (
     "MISSING_STORES",
     "MISSING_PRODUCTS",
-    "SOURCE_INGESTION",
     "CODING",
     "WAREHOUSE",
     "MARKET_MOVEMENT",
@@ -337,7 +336,10 @@ class RuleDecisionProvider:
             if first == "warehouse":
                 return "WAREHOUSE", "WAREHOUSE", self._severity(unexplained_relative), True, 0.7, ["lineage:warehouse"]
             if first == "source":
-                return "SOURCE_INGESTION", "SOURCE", self._severity(unexplained_relative), True, 0.6, ["lineage:source"]
+                # Attribution measures overlap (historical) weeks only, so an
+                # unexplained material change that starts at the source is the
+                # source restating history.
+                return "HISTORICAL_CORRECTION", "SOURCE", self._severity(unexplained_relative), True, 0.6, ["lineage:source"]
             return "UNKNOWN", "UNKNOWN", self._severity(unexplained_relative), True, 0.5, ["attribution"]
 
         if attribution is not None and not attribution.material and attribution.breadth > config.broad_recalculation_breadth:

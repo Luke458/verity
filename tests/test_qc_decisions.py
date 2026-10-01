@@ -37,7 +37,7 @@ EXPECTED = {
     "commodity_remap": ("RECLASSIFICATION", True),
     "coding_error": ("CODING", True),
     "warehouse_transform_error": ("WAREHOUSE", True),
-    "recalculation": ("SOURCE_INGESTION", True),
+    "recalculation": ("HISTORICAL_CORRECTION", True),
     "schema_failure": ("SCHEMA_FAILURE", True),
     "null_duplicate_storm": ("SCHEMA_FAILURE", True),
     "market_movement": ("UNKNOWN", True),
