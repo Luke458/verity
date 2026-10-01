@@ -125,15 +125,25 @@ chosen on its own history.
 
 The registered cohort gate still passes after both fixes.
 
+A third gap came from reading the numbers rather than the curves: revision
+materiality is measured against the *whole* history, so a restatement confined
+to one week had to exceed about 10% of that week before anything escalated.
+Each overlap week is now also judged on its own, net of what its structural
+events explain, with a looser tolerance for a declared late-arrival window.
+A new `week_restatement` family shows the effect: one week restated by
+anything from 1% to 40% is detected 60/60 on both profiles. The cost is
+explicit: a feed with late-arriving data must declare its window, because
+undeclared, the realistic profile alarms on every clean refresh (60/60).
+
 ## 6. What it still cannot do
 
 - Category drops of 10% or less on seasonal data are within noise when ~52
   series are tested per refresh at a 1% false-alarm budget (2/20 detected).
-- Revision materiality is relative to the whole history, so a restatement
-  confined to one recent week must exceed roughly 10% of that week to
-  escalate.
-- The cause labeller gives one label; two simultaneous faults cannot both be
-  named, and `recalculation` is labelled differently from the oracle.
+- Late arrival must be declared; within one version pair the engine cannot
+  tell it from a restatement fault.
+- The cause labeller gives one label, so two simultaneous faults cannot both be
+  named; and its SOURCE_INGESTION label matches no fault the generator
+  produces, so larger source-stage history changes get the wrong label.
 - Every number above comes from a generator written alongside the engine; the
   realistic profile's settings are plausible guesses, not calibrated to real
   retail data.

@@ -13,8 +13,9 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > generator (`qcgen`) and its fault oracle. On the registered cohort the engine
 > detects 72/72 held-out faults and movements and raises no alarm on 60/60
 > clean refreshes. On a harder profile with category seasonality and
-> late-arriving data it catches structural faults down to 1% and
-> single-category drops of 40%, but misses most drops of 10% or less; the
+> late-arriving data it catches structural faults and single-week
+> restatements down to 1% and single-category drops of 40%, but misses most
+> drops of 10% or less; the
 > [case study](docs/case-study.md) tells how it got here and
 > [docs/claims.md](docs/claims.md) records the evidence.
 > Backends: local Parquet snapshots and Delta tables via delta-rs.

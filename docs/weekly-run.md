@@ -131,7 +131,14 @@ calendar: sequential_week
 snapshot_metrics: [stock]
 absent_entity_policy: zero
 required_dimensions: []
+restatement_weeks: 2        # late-arriving data restates the last 2 weeks
 ```
+
+Declare `restatement_weeks` whenever the source restates recent weeks as late
+transactions arrive. Without it, every refresh that restates more than
+`week_revision_ratio` (0.5%) of a recent week is reviewed; with it, those weeks
+may move by up to `restatement_tolerance` (10%) and lineage ignores them when
+attributing an origin.
 
 `weekly_date` accepts midnight dates on one consistent weekday across snapshots.
 For fiscal/retail encoded periods use `calendar: mapped` and an explicit

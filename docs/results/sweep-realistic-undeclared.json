@@ -1,0 +1,68 @@
+{
+  "code_sha256": "9675d1c11d640b62dea98068608ffa710f5ea42543efa46deb31e4ec20ba62f8",
+  "config_overrides": {},
+  "controls_per_seed": 6,
+  "families": [
+    "week_restatement"
+  ],
+  "magnitudes": [
+    0.05
+  ],
+  "pairs": [],
+  "profile": "realistic",
+  "schema_version": 1,
+  "seeds": [
+    5001,
+    5002,
+    5003,
+    5004,
+    5005,
+    5006,
+    5007,
+    5008,
+    5009,
+    5010
+  ],
+  "summary": {
+    "clean_false_alarms": {
+      "ci_high": 0.9999999999999999,
+      "ci_low": 0.9398260695220669,
+      "hits": 60,
+      "n": 60,
+      "rate": 1.0
+    },
+    "clean_status_counts": {
+      "INVESTIGATE": 60
+    },
+    "curves": {
+      "week_restatement": [
+        {
+          "cause": {
+            "ci_high": 0.892210712513788,
+            "ci_low": 0.39677321997956516,
+            "hits": 7,
+            "n": 10,
+            "rate": 0.7
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.050000011920928955
+        }
+      ]
+    },
+    "pairs": {}
+  }
+}

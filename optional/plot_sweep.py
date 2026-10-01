@@ -137,7 +137,9 @@ def render(reports: list[dict[str, Any]], mode: str) -> str:
             f'stroke-width="2"/><circle cx="{legend_x + 8}" cy="60" r="4" fill="{color}" '
             f'stroke="{theme["surface"]}" stroke-width="2"/>'
         )
-        parts.append(_text(legend_x + 22, 64, f"{label} profile", theme["secondary"], 11))
+        window = reports[index].get("config_overrides", {}).get("restatement_weeks")
+        suffix = f" ({window}-week late-arrival window declared)" if window else ""
+        parts.append(_text(legend_x + 22, 64, f"{label} profile{suffix}", theme["secondary"], 11))
         legend_x += 130
     for position, (family, title, subtitle) in enumerate(PANELS):
         column, row = position % 2, position // 2

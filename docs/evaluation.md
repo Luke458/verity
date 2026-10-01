@@ -74,7 +74,8 @@ benchmark is not evidence for the system.
 ## Fault-size sweep
 
 ```sh
-qc sweep --profile realistic --seeds 5001-5010 --controls-per-seed 6 --jobs 11 \
+echo "restatement_weeks: 2" > realistic.yaml   # the realistic feed's late arrival
+qc sweep --profile realistic --seeds 5001-5010 --config realistic.yaml --jobs 6 \
   --out reports/sweep/realistic.json
 python -m optional.plot_sweep reports/sweep/small.json reports/sweep/realistic.json \
   --out docs/img/detection-curves
@@ -84,11 +85,14 @@ Each sizable family is injected at magnitudes 1%-40% on the same seeded worlds
 (a paired design), six two-fault refreshes are scored on detection and on
 whether the single cause label names either true cause, and clean refreshes of
 the same profile measure false alarms. Summaries are in
-[`docs/results/`](results/) (engine `24fcb768e0f4`).
+[`docs/results/`](results/) (engine `9675d1c11d64`); the `realistic` runs
+declare the profile's 2-week late-arrival window, as an operator of that feed
+would (`sweep-realistic-undeclared.json` shows the cost of not declaring it).
 
-### What the first sweep exposed, and the fixes
+### What the sweeps exposed, and the fixes
 
-The first `realistic` sweep (engine `a6d485794644`) found two engine flaws:
+The first `realistic` sweep (engine `a6d485794644`) found two engine flaws, and
+a closer look at revision materiality a third:
 
 - **Category seasonality defeated the leaf share test.** Shares that swing
   through the year sit far from their trailing mean, so a 20%
@@ -97,31 +101,43 @@ The first `realistic` sweep (engine `a6d485794644`) found two engine flaws:
   weeks diverge at the source, so "first divergent stage" was always source
   and every coding or warehouse error was labelled SOURCE_INGESTION (0/54,
   0/60).
+- **Single-week restatements were invisible.** Revision materiality is relative
+  to the whole overlap history, so a restatement confined to one week had to
+  exceed roughly `materiality_ratio x overlap weeks` (~10% of that week).
 
-Fixes, developed on seeds 6001-6005 only:
+Fixes, each developed on seeds 6001-6005 only:
 
 - **Lineage** names the stage that adds the largest material weekly revision
   increment over its upstream stage, so an upstream restatement is not blamed
-  for a downstream change. `lineage_restatement_weeks` optionally excludes a
-  declared late-arrival window.
+  for a downstream change; `restatement_weeks` excludes a declared late-arrival
+  window.
 - **Share test** picks, per leaf and on training history only, between the
   trailing-mean baseline and a year-over-year baseline (log share change
   against recent year-over-year changes, last year's share averaged over the
   three weeks around t-52).
+- **Per-week revision check**: each overlap week's revision minus what its
+  structural events explain, against that week's previous value
+  (`week_revision_ratio`, 0.5%; `restatement_tolerance`, 10%, inside the
+  declared window). A new `week_restatement` family measures it.
 
 ### Results
 
-| | `small` | `realistic` before | `realistic` after | `realistic` after, unseen seeds 7001-7010 |
+| | `small` | `realistic` before fixes | `realistic` after | `realistic` after, unseen seeds 7001-7010 |
 |---|---|---|---|---|
 | Structural/revision faults | detected down to 1% | same | same | same |
+| One week restated, 1%-40% | 60/60 | not measured (invisible below ~10%) | 60/60 | 60/60 |
 | Market movement 10% / 20% / 40% | 10/10, 10/10, 10/10 | 1/10, 2/10, 6/10 | 2/10, 4/10, 10/10 | 0/10, 8/10, 10/10 |
 | Cause correct, coding / warehouse errors | 48/48, 54/54 | 0/54, 0/60 | 54/54, 60/60 | 55/55, 59/59 |
-| Lineage correct, coding errors | 60/60 | n/a | 55/60 (60/60 with a 2-week declared window) | 55/60 |
-| Clean false alarms | 3/60 (was 2/60) | 3/60 | 3/60 | 4/60 |
+| Lineage correct, coding errors | 60/60 | n/a | 60/60 | 60/60 |
+| Clean false alarms | 3/60 | 3/60 | 3/60 | 4/60 |
 
-The registered cohort still passes after the fixes (detection 72/72, clean
-false positives 1/60 with Wilson upper 0.089, lineage 1.000); clean false alarms
-ticked up by one on both the cohort and the `small` sweep.
+Without the declared window the `realistic` profile alarms on 60/60 clean
+refreshes: every refresh restates its last two weeks by up to ~3%, above the
+0.5% per-week tolerance. A feed with late-arriving data must declare it.
+
+The registered cohort still passes (detection 72/72, clean false positives
+1/60 with Wilson upper 0.089, lineage 1.000); clean false alarms ticked up by
+one on both the cohort and the `small` sweep after the share-test change.
 
 ### What remains
 
@@ -129,16 +145,17 @@ ticked up by one on both the cohort and the `small` sweep.
   refresh at a 1% false-alarm budget, a drop of 10% or less in one category is
   within noise on `realistic`. Raising `temporal_fdr_q` to 0.05 added a false
   alarm without adding detection on the development seeds.
-- **Single-week restatements.** Revision materiality is relative to the whole
-  overlap history, so a restatement confined to one recent week must exceed
-  roughly `materiality_ratio x overlap weeks` (~10% of a week at defaults) to
-  escalate. This is also why ordinary late arrival passes, and why the 1%
-  coding/warehouse gains on `realistic` are coincidental: late arrival plus a
-  small fault crosses the threshold together.
-- **Labels.** `recalculation` is labelled SOURCE_INGESTION where the oracle says
-  HISTORICAL_CORRECTION (a vocabulary disagreement), `market_movement` is
-  labelled UNKNOWN by design, and one label cannot carry two causes; the "either
-  cause" pair score is satisfied by naming the structural fault.
+- **The cause vocabulary.** No generator family's ground truth is
+  `SOURCE_INGESTION`, yet the rule labeller uses it for any material,
+  unexplained change that starts at the source. So `recalculation` (0/60) and
+  week restatements of ~10% or more (where whole-history materiality fires
+  before the per-week rule) are labelled SOURCE_INGESTION where the oracle
+  says HISTORICAL_CORRECTION. Smaller restatements are labelled correctly.
+  `market_movement` is UNKNOWN by design, and one label cannot carry two
+  causes; the "either cause" pair score is satisfied by naming the structural
+  fault.
+- **Late arrival must be declared.** The engine cannot tell late arrival from
+  a restatement fault within one version pair.
 
 ## Limits
 

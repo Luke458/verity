@@ -94,6 +94,15 @@ final status policy, not the final assessment:
 | immaterial residual but changes spread across > `broad_recalculation_breadth` of rows | `INVESTIGATE` (`broad_historical_recalculation`) |
 | otherwise | `PASS` |
 
+Whole-history materiality cannot see a restatement confined to one week: it
+must exceed `materiality_ratio` of *all* overlap weeks. Each overlap week is
+therefore also judged on its own (`attribution.week_revisions`): its revision
+minus what its structural events explain, as a fraction of that week's previous
+value. Above `week_revision_ratio` (default 0.5%) it becomes a `revision_week`
+finding and the run is labelled `HISTORICAL_CORRECTION`. Weeks inside the
+declared `restatement_weeks` window allow `restatement_tolerance` (default 10%)
+for late-arriving data.
+
 Cross-metric evidence is recorded when the primary metric moves materially
 while units do not (`dollar_change_without_units`), which is characteristic of
 value/coding or warehouse transform errors.
