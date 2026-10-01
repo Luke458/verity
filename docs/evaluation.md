@@ -85,7 +85,7 @@ Each sizable family is injected at magnitudes 1%-40% on the same seeded worlds
 (a paired design), six two-fault refreshes are scored on detection and on
 whether the single cause label names either true cause, and clean refreshes of
 the same profile measure false alarms. Summaries are in
-[`docs/results/`](results/) (engine `9675d1c11d64`); the `realistic` runs
+[`docs/results/`](results/) (engine `6da01c2966b2`); the `realistic` runs
 declare the profile's 2-week late-arrival window, as an operator of that feed
 would (`sweep-realistic-undeclared.json` shows the cost of not declaring it).
 
@@ -145,15 +145,11 @@ one on both the cohort and the `small` sweep after the share-test change.
   refresh at a 1% false-alarm budget, a drop of 10% or less in one category is
   within noise on `realistic`. Raising `temporal_fdr_q` to 0.05 added a false
   alarm without adding detection on the development seeds.
-- **The cause vocabulary.** No generator family's ground truth is
-  `SOURCE_INGESTION`, yet the rule labeller uses it for any material,
-  unexplained change that starts at the source. So `recalculation` (0/60) and
-  week restatements of ~10% or more (where whole-history materiality fires
-  before the per-week rule) are labelled SOURCE_INGESTION where the oracle
-  says HISTORICAL_CORRECTION. Smaller restatements are labelled correctly.
-  `market_movement` is UNKNOWN by design, and one label cannot carry two
-  causes; the "either cause" pair score is satisfied by naming the structural
-  fault.
+- **One label per refresh.** `market_movement` is UNKNOWN by design, and one
+  label cannot carry two causes; the "either cause" pair score is satisfied by
+  naming the structural fault. A multi-label tree model names both causes of
+  70/80 pairs but does not transfer across profiles
+  ([labeller-experiment.md](labeller-experiment.md)).
 - **Late arrival must be declared.** The engine cannot tell late arrival from
   a restatement fault within one version pair.
 

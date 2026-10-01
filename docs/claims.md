@@ -41,11 +41,11 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 | Temporal QC | `validated-synthetic` | Leaves are tested on their share of the national parent against the better of a trailing-mean and a year-over-year baseline (chosen on training history), national series on forecast p-values, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out cohort case. On the `realistic` profile (per-commodity seasonality) a single-commodity drop of 40% is detected 20/20 across two seed sets, 20% 12/20 and 10% 2/20 (`qc sweep`). `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`, `tests/test_benchmark_realism.py`. |
 | Findings and final status | `validated-synthetic` | One status path (`policy.apply_policy`); nothing is cleared automatically. |
 | Recurrence | `plumbing-only` | Stable keys survive serialization and storage; frozen, hash-checked predecessors. `tests/test_qc_second_remediation.py`. |
-| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 60/72 = 0.833 (Wilson 0.731-0.902), origin 66/66; on the `realistic` profile coding/warehouse errors are labelled correctly 54/54 and 60/60 (was 0/54, 0/60 before the lineage fix). `market_movement` is labelled UNKNOWN by design. No generator family's truth is SOURCE_INGESTION, yet the rules use it for any material unexplained change starting at the source, so `recalculation` (0/60) and week restatements of ~10% or more are labelled SOURCE_INGESTION where the oracle says HISTORICAL_CORRECTION. Severity has no ground truth and is not scored. This is the baseline any decision model must beat. |
+| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 66/72 = 0.917 (Wilson 0.830-0.961), origin 66/66; on the `realistic` profile coding/warehouse errors are labelled correctly 54/54 and 60/60 (was 0/54, 0/60 before the lineage fix). Source-stage historical changes are labelled HISTORICAL_CORRECTION (the generator-less SOURCE_INGESTION label was removed): `recalculation` and `week_restatement` 60/60 on both profiles (`recalculation` was 0/60). `market_movement` is labelled UNKNOWN by design, and one label cannot name two causes. Severity has no ground truth and is not scored. A per-cause tree model is compared against these rules in [labeller-experiment.md](labeller-experiment.md). |
 | Weekly orchestrator and journal | `validated-synthetic` | Content-addressed identity, locking, fault injection at all five journal/publication seams (`tests/test_reliability.py`), atomic publication. |
 | Notification | `plumbing-only` | Suppressed statuses and cached retries reach no sink; accumulating size bound; https-only webhooks without redirects. `tests/test_qc_notify.py`. |
 | Delta source and onboarding | `plumbing-only` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. |
-| Fault-size sweep and realistic profile | `validated-synthetic` | `qc sweep`: detection curves over fault size (paired seeds), two-fault refreshes and clean false alarms per profile; results for engine `9675d1c11d64` in `docs/results/` and [evaluation.md](evaluation.md), including unseen seeds 7001-7010. Clean false alarms 3/60 (`small`), 3/60 and 4/60 (`realistic`). `tests/test_benchmark_realism.py`. |
+| Fault-size sweep and realistic profile | `validated-synthetic` | `qc sweep`: detection curves over fault size (paired seeds), two-fault refreshes and clean false alarms per profile; results for engine `6da01c2966b2` in `docs/results/` and [evaluation.md](evaluation.md), including unseen seeds 7001-7010. Clean false alarms 3/60 (`small`), 3/60 and 4/60 (`realistic`). `tests/test_benchmark_realism.py`. |
 | Cohort evaluation | `validated-synthetic` | Registered, hash-pinned plan with independently sized clean controls; exits 3 on gate failure. |
 
 ## Not claimed
@@ -67,9 +67,8 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
   within noise at the 1% false-alarm budget (2/20 detected at 10%).
 - A feed with late-arriving data must declare `restatement_weeks`; within one
   version pair the engine cannot tell late arrival from a restatement fault.
-- The rule labeller's SOURCE_INGESTION label matches no generator family, so
-  source-stage historical changes above whole-history materiality get the
-  wrong cause label.
+- The rule labeller names at most one cause, so two simultaneous faults are
+  never both named (7/80 pairs, only where both share a cause).
 
 - Detector power depends on history length and noise: on the 30-week `tiny`
   profile a 12-30% single-commodity movement is missed about 40% of the time.

@@ -104,6 +104,7 @@ qc/                 engine: contracts, versions, revision, lifecycle, attributio
 qcgen/              synthetic retail world, fault injectors, oracle vault, verifier
 config/             cohort plan (hash-pinned) and generator suite config
 optional/           scale benchmark, sweep chart renderer
+experiments/        research sandbox (learned cause labeller); never on the status path
 deployment/         weekly.sh scheduler wrapper
 data/, reports/     generated output (git-ignored)
 ```
@@ -117,3 +118,4 @@ data/, reports/     generated output (git-ignored)
 - [docs/onboarding.md](docs/onboarding.md): profiling a table and field mapping
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families
 - [docs/claims.md](docs/claims.md): evidence for every capability, and what is not claimed
+- [docs/labeller-experiment.md](docs/labeller-experiment.md): a learned multi-cause labeller against the rule baseline

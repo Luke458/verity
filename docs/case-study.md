@@ -135,20 +135,40 @@ anything from 1% to 40% is detected 60/60 on both profiles. The cost is
 explicit: a feed with late-arriving data must declare its window, because
 undeclared, the realistic profile alarms on every clean refresh (60/60).
 
-## 6. What it still cannot do
+## 6. Then try a model, against the baseline
+
+With the rules fixed (a source-stage historical change is now labelled a
+historical correction, which lifted cohort cause accuracy from 0.833 to
+0.917), a learned labeller had a fair baseline to beat. One gradient-boosted
+classifier per cause was trained on 760 generated refreshes, using only
+the engine's own output as features, and scored once on 380 refreshes from
+unseen seeds:
+
+- It names both causes of a two-fault refresh 70/80 times; the rules, which
+  give one label, manage 7/80.
+- On single faults it is only modestly better (0.93 vs 0.89, p = 0.013),
+  almost entirely on small coding errors and market movements the rules
+  decline to label.
+- Trained on the `small` profile and tested on `realistic`, it falls to
+  0.75, well below the rules' 0.88.
+
+So it stays in a sandbox, outside the status path
+([labeller-experiment.md](labeller-experiment.md)). What carries over to the
+rules is the shape of the gain: emit a set of causes, not one.
+
+## 7. What it still cannot do
 
 - Category drops of 10% or less on seasonal data are within noise when ~52
   series are tested per refresh at a 1% false-alarm budget (2/20 detected).
 - Late arrival must be declared; within one version pair the engine cannot
   tell it from a restatement fault.
-- The cause labeller gives one label, so two simultaneous faults cannot both be
-  named; and its SOURCE_INGESTION label matches no fault the generator
-  produces, so larger source-stage history changes get the wrong label.
+- The rule labeller gives one label, so two simultaneous faults cannot both be
+  named; the learned alternative can, but does not transfer across profiles.
 - Every number above comes from a generator written alongside the engine; the
   realistic profile's settings are plausible guesses, not calibrated to real
   retail data.
 
-## 7. Lessons
+## 8. Lessons
 
 - **Test the system's output, not just its parts.** Each defect in section 1
   sat behind passing unit tests.

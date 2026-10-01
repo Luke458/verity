@@ -1,0 +1,326 @@
+{
+  "code_sha256": [
+    "6da01c2966b213acbbb2c99f85a02302d16abce802eb21781661ce7b6377dde5"
+  ],
+  "models": {
+    "rules": {
+      "by_kind": {
+        "clean": {
+          "exact": {
+            "ci_high": 0.9604211124044252,
+            "ci_low": 0.7694792561952611,
+            "hits": 36,
+            "n": 40,
+            "rate": 0.9
+          }
+        },
+        "pair": {
+          "exact": {
+            "ci_high": 0.1697698277708346,
+            "ci_low": 0.04303145464743989,
+            "hits": 7,
+            "n": 80,
+            "rate": 0.0875
+          },
+          "names_both": {
+            "ci_high": 0.1697698277708346,
+            "ci_low": 0.04303145464743989,
+            "hits": 7,
+            "n": 80,
+            "rate": 0.0875
+          },
+          "names_one_or_more": {
+            "ci_high": 0.9977900813816939,
+            "ci_low": 0.9325356757603457,
+            "hits": 79,
+            "n": 80,
+            "rate": 0.9875
+          }
+        },
+        "single": {
+          "exact": {
+            "ci_high": 0.9212095797086928,
+            "ci_low": 0.8444013019718306,
+            "hits": 231,
+            "n": 260,
+            "rate": 0.8884615384615384
+          }
+        }
+      },
+      "exact": {
+        "ci_high": 0.7637615395820788,
+        "ci_low": 0.6739190036420012,
+        "hits": 274,
+        "n": 380,
+        "rate": 0.7210526315789474
+      },
+      "micro_f1": 0.8469945355191256,
+      "per_cause": {
+        "BACKFILL": {
+          "f1": 0.8615384615384616,
+          "fn": 9,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.7567567567567568,
+          "tp": 28
+        },
+        "CODING": {
+          "f1": 0.7083333333333333,
+          "fn": 14,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.5483870967741935,
+          "tp": 17
+        },
+        "ENTITY_MERGE": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 37
+        },
+        "HISTORICAL_CORRECTION": {
+          "f1": 0.888888888888889,
+          "fn": 20,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.8,
+          "tp": 80
+        },
+        "MARKET_MOVEMENT": {
+          "f1": 0.0,
+          "fn": 36,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tp": 0
+        },
+        "MISSING_PRODUCTS": {
+          "f1": 0.8135593220338984,
+          "fn": 2,
+          "fp": 9,
+          "precision": 0.7272727272727273,
+          "recall": 0.9230769230769231,
+          "tp": 24
+        },
+        "MISSING_STORES": {
+          "f1": 0.9473684210526316,
+          "fn": 4,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.9,
+          "tp": 36
+        },
+        "RECLASSIFICATION": {
+          "f1": 0.8852459016393442,
+          "fn": 7,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.7941176470588235,
+          "tp": 27
+        },
+        "SCHEMA_FAILURE": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 40
+        },
+        "WAREHOUSE": {
+          "f1": 0.7924528301886793,
+          "fn": 11,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.65625,
+          "tp": 21
+        }
+      }
+    },
+    "trees": {
+      "by_kind": {
+        "clean": {
+          "exact": {
+            "ci_high": 1.0,
+            "ci_low": 0.9123754607496077,
+            "hits": 40,
+            "n": 40,
+            "rate": 1.0
+          }
+        },
+        "pair": {
+          "exact": {
+            "ci_high": 0.9120604596258579,
+            "ci_low": 0.7558657249889396,
+            "hits": 68,
+            "n": 80,
+            "rate": 0.85
+          },
+          "names_both": {
+            "ci_high": 0.9306651696322249,
+            "ci_low": 0.7849700281693438,
+            "hits": 70,
+            "n": 80,
+            "rate": 0.875
+          },
+          "names_one_or_more": {
+            "ci_high": 1.0,
+            "ci_low": 0.954180263735425,
+            "hits": 80,
+            "n": 80,
+            "rate": 1.0
+          }
+        },
+        "single": {
+          "exact": {
+            "ci_high": 0.9557632530718746,
+            "ci_low": 0.8932309919599931,
+            "hits": 242,
+            "n": 260,
+            "rate": 0.9307692307692308
+          }
+        }
+      },
+      "exact": {
+        "ci_high": 0.944142603971388,
+        "ci_low": 0.8895346212173356,
+        "hits": 350,
+        "n": 380,
+        "rate": 0.9210526315789473
+      },
+      "micro_f1": 0.9613947696139477,
+      "per_cause": {
+        "BACKFILL": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 37
+        },
+        "CODING": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 31
+        },
+        "ENTITY_MERGE": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 37
+        },
+        "HISTORICAL_CORRECTION": {
+          "f1": 0.9950248756218906,
+          "fn": 0,
+          "fp": 1,
+          "precision": 0.9900990099009901,
+          "recall": 1.0,
+          "tp": 100
+        },
+        "MARKET_MOVEMENT": {
+          "f1": 0.5098039215686274,
+          "fn": 23,
+          "fp": 2,
+          "precision": 0.8666666666666667,
+          "recall": 0.3611111111111111,
+          "tp": 13
+        },
+        "MISSING_PRODUCTS": {
+          "f1": 0.9199999999999999,
+          "fn": 3,
+          "fp": 1,
+          "precision": 0.9583333333333334,
+          "recall": 0.8846153846153846,
+          "tp": 23
+        },
+        "MISSING_STORES": {
+          "f1": 0.9873417721518987,
+          "fn": 1,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 0.975,
+          "tp": 39
+        },
+        "RECLASSIFICATION": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 34
+        },
+        "SCHEMA_FAILURE": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 40
+        },
+        "WAREHOUSE": {
+          "f1": 1.0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tp": 32
+        }
+      }
+    }
+  },
+  "profile_shift": {
+    "realistic->small": {
+      "rules": {
+        "ci_high": 0.9406250772964695,
+        "ci_low": 0.8364128541090128,
+        "hits": 117,
+        "n": 130,
+        "rate": 0.9
+      },
+      "trees": {
+        "ci_high": 0.9631532991422094,
+        "ci_low": 0.8736567808329254,
+        "hits": 121,
+        "n": 130,
+        "rate": 0.9307692307692308
+      }
+    },
+    "small->realistic": {
+      "rules": {
+        "ci_high": 0.9228043637903566,
+        "ci_low": 0.8094044561878863,
+        "hits": 114,
+        "n": 130,
+        "rate": 0.8769230769230769
+      },
+      "trees": {
+        "ci_high": 0.8131590019777191,
+        "ci_low": 0.6650181865795008,
+        "hits": 97,
+        "n": 130,
+        "rate": 0.7461538461538462
+      }
+    }
+  },
+  "sizes": {
+    "dev": 190,
+    "test": 380,
+    "train": 760
+  },
+  "trees_vs_rules_exact": {
+    "only_first": 79,
+    "only_second": 3,
+    "p_value": 3.803541892641332e-20
+  },
+  "trees_vs_rules_single": {
+    "only_first": 14,
+    "only_second": 3,
+    "p_value": 0.012725830078125
+  }
+}
