@@ -1,0 +1,1080 @@
+{
+  "code_sha256": "a6d48579464466ad9db9485f9f19bc7438574cc17a0ba150de263b454a774e52",
+  "config_overrides": {},
+  "controls_per_seed": 6,
+  "families": [
+    "missing_stores",
+    "missing_products",
+    "history_truncation",
+    "commodity_remap",
+    "coding_error",
+    "warehouse_transform_error",
+    "recalculation",
+    "market_movement"
+  ],
+  "magnitudes": [
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.2,
+    0.4
+  ],
+  "pairs": [
+    "missing_stores+market_movement",
+    "coding_error+market_movement",
+    "missing_products+recalculation",
+    "commodity_remap+warehouse_transform_error",
+    "history_truncation+coding_error",
+    "missing_stores+coding_error"
+  ],
+  "profile": "realistic",
+  "schema_version": 1,
+  "seeds": [
+    5001,
+    5002,
+    5003,
+    5004,
+    5005,
+    5006,
+    5007,
+    5008,
+    5009,
+    5010
+  ],
+  "summary": {
+    "clean_false_alarms": {
+      "ci_high": 0.13700734625099836,
+      "ci_low": 0.01714919117914121,
+      "hits": 3,
+      "n": 60,
+      "rate": 0.05
+    },
+    "clean_status_counts": {
+      "INVESTIGATE": 3,
+      "PASS": 57
+    },
+    "curves": {
+      "coding_error": [
+        {
+          "cause": {
+            "ci_high": 0.43449149475208104,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 5,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.7634104063845126,
+            "ci_low": 0.23658959361548731,
+            "hits": 5,
+            "n": 10,
+            "rate": 0.5
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.000959202996455133
+        },
+        {
+          "cause": {
+            "ci_high": 0.2991527535509594,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 9,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.9821242504842788,
+            "ci_low": 0.5958436145024278,
+            "hits": 9,
+            "n": 10,
+            "rate": 0.9
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.001918405992910266
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.004795843735337257
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.00959177315235138
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.019183460623025894
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.038366835564374924
+        }
+      ],
+      "commodity_remap": [
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.0
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.0
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.0
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.0
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.0
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.0
+        }
+      ],
+      "history_truncation": [
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.043099235743284225
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.043099235743284225
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.043099235743284225
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.08081601560115814
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.21104702353477478
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.4489379823207855
+        }
+      ],
+      "market_movement": [
+        {
+          "cause": {
+            "ci_high": 0.7934567085261071,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 1,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.4041563854975721,
+            "ci_low": 0.01787574951572113,
+            "hits": 1,
+            "n": 10,
+            "rate": 0.1
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.0013342396123334765
+        },
+        {
+          "cause": {
+            "ci_high": 0.7934567085261071,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 1,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.4041563854975721,
+            "ci_low": 0.01787574951572113,
+            "hits": 1,
+            "n": 10,
+            "rate": 0.1
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.002668479224666953
+        },
+        {
+          "cause": {
+            "ci_high": 0.7934567085261071,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 1,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.4041563854975721,
+            "ci_low": 0.01787574951572113,
+            "hits": 1,
+            "n": 10,
+            "rate": 0.1
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.006671024486422539
+        },
+        {
+          "cause": {
+            "ci_high": 0.7934567085261071,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 1,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.4041563854975721,
+            "ci_low": 0.01787574951572113,
+            "hits": 1,
+            "n": 10,
+            "rate": 0.1
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.013341962359845638
+        },
+        {
+          "cause": {
+            "ci_high": 0.6576280471103807,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 2,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.5098431532792765,
+            "ci_low": 0.056680947980693314,
+            "hits": 2,
+            "n": 10,
+            "rate": 0.2
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.026683837175369263
+        },
+        {
+          "cause": {
+            "ci_high": 0.3903430336530645,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 6,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.8318224187964902,
+            "ci_low": 0.3126695474501864,
+            "hits": 6,
+            "n": 10,
+            "rate": 0.6
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.053367674350738525
+        }
+      ],
+      "missing_products": [
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.6755843804891231,
+            "hits": 8,
+            "n": 8,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 0.9433190520193067,
+            "ci_low": 0.49015684672072335,
+            "hits": 8,
+            "n": 10,
+            "rate": 0.8
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.007149772718548775
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.015594616532325745
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.05933939293026924
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.07738792896270752
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.2197933942079544
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.4100745916366577
+        }
+      ],
+      "missing_stores": [
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.03769567608833313
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.03769567608833313
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.03769567608833313
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.07268057018518448
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.20813734829425812
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.4422514736652374
+        }
+      ],
+      "recalculation": [
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.0014596489490941167
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.002956678159534931
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.00743852648884058
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.01739725098013878
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.04514215886592865
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.13616187870502472
+        }
+      ],
+      "warehouse_transform_error": [
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.00176264438778162
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.02,
+          "median_relative_effect": 0.0035252084489911795
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.05,
+          "median_relative_effect": 0.008813061751425266
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.017626123502850533
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.2,
+          "median_relative_effect": 0.035252247005701065
+        },
+        {
+          "cause": {
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 10,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "magnitude": 0.4,
+          "median_relative_effect": 0.07050441205501556
+        }
+      ]
+    },
+    "pairs": {
+      "coding_error+market_movement": {
+        "cause_any_of": {
+          "ci_high": 0.2775401687666166,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 10,
+          "rate": 0.0
+        },
+        "detection": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "expected_causes": [
+          "CODING",
+          "MARKET_MOVEMENT"
+        ],
+        "predicted": {
+          "SOURCE_INGESTION": 10
+        }
+      },
+      "commodity_remap+warehouse_transform_error": {
+        "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "detection": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "expected_causes": [
+          "RECLASSIFICATION",
+          "WAREHOUSE"
+        ],
+        "predicted": {
+          "RECLASSIFICATION": 10
+        }
+      },
+      "history_truncation+coding_error": {
+        "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "detection": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "expected_causes": [
+          "CODING",
+          "HISTORICAL_CORRECTION"
+        ],
+        "predicted": {
+          "HISTORICAL_CORRECTION": 10
+        }
+      },
+      "missing_products+recalculation": {
+        "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "detection": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "expected_causes": [
+          "HISTORICAL_CORRECTION",
+          "MISSING_PRODUCTS"
+        ],
+        "predicted": {
+          "MISSING_PRODUCTS": 10
+        }
+      },
+      "missing_stores+coding_error": {
+        "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "detection": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "expected_causes": [
+          "CODING",
+          "MISSING_STORES"
+        ],
+        "predicted": {
+          "MISSING_STORES": 10
+        }
+      },
+      "missing_stores+market_movement": {
+        "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "detection": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "expected_causes": [
+          "MARKET_MOVEMENT",
+          "MISSING_STORES"
+        ],
+        "predicted": {
+          "MISSING_STORES": 10
+        }
+      }
+    }
+  }
+}

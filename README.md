@@ -12,9 +12,16 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > **Validation status: synthetic only.** All evidence comes from the bundled
 > generator (`qcgen`) and its fault oracle. On the registered cohort the engine
 > detects 72/72 held-out faults and movements and raises no alarm on 60/60
-> clean refreshes; see [docs/claims.md](docs/claims.md) for exactly what that
-> does and does not show. Backends: local Parquet snapshots and Delta tables
-> via delta-rs.
+> clean refreshes. On a harder, more realistic profile it still catches
+> structural faults down to 1%, but misses most single-category movements and
+> mislabels the cause of downstream faults; see
+> [docs/evaluation.md](docs/evaluation.md) and [docs/claims.md](docs/claims.md).
+> Backends: local Parquet snapshots and Delta tables via delta-rs.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/detection-curves-dark.svg">
+  <img alt="Detection rate against fault size for four fault families on the small and realistic profiles; numbers in docs/evaluation.md" src="docs/img/detection-curves-light.svg">
+</picture>
 
 ## Quickstart
 
@@ -35,6 +42,10 @@ uv pip install --python .venv/bin/python -e ".[test,delta]"
 
 # The registered system-level gate (exit 3 if a gate fails)
 .venv/bin/qc cohort --plan config/cohort.json --out reports/cohort/v1
+
+# Detection curves over fault size, fault pairs and clean false alarms
+.venv/bin/qc sweep --profile realistic --seeds 5001-5010 --jobs 8 \
+  --out reports/sweep/realistic.json
 
 # Point at a Delta table: inspect, propose a config (with field mapping), assess
 .venv/bin/qc delta-info --uri ./lake/fact
@@ -76,6 +87,7 @@ DATA_CONTRACT_FAILURE, 4 for INCOMPLETE, 75 when locked and 1 on error.
 | Weekly orchestrator and journal | validated on synthetic data |
 | Notification | plumbing |
 | Delta source and onboarding | plumbing |
+| Fault-size sweep and realistic profile | validated on synthetic data |
 | Cohort evaluation | validated on synthetic data |
 
 "Validated on synthetic data" means measured through the full engine against
@@ -89,7 +101,7 @@ qc/                 engine: contracts, versions, revision, lifecycle, attributio
                     weekly orchestrator, store, notify, shadow/cohort harnesses
 qcgen/              synthetic retail world, fault injectors, oracle vault, verifier
 config/             cohort plan (hash-pinned) and generator suite config
-optional/           scale benchmark
+optional/           scale benchmark, sweep chart renderer
 deployment/         weekly.sh scheduler wrapper
 data/, reports/     generated output (git-ignored)
 ```

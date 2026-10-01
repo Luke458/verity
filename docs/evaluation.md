@@ -71,6 +71,51 @@ recorded where they are set. `temporal_fdr_q = 0.01` was chosen on 40 clean +
 evaluated with `qc cohort --config` before it is enabled; a component-level
 benchmark is not evidence for the system.
 
+## Fault-size sweep
+
+```sh
+qc sweep --profile realistic --seeds 5001-5010 --controls-per-seed 6 --jobs 11 \
+  --out reports/sweep/realistic.json
+python -m optional.plot_sweep reports/sweep/small.json reports/sweep/realistic.json \
+  --out docs/img/detection-curves
+```
+
+Each sizable family is injected at magnitudes 1%-40% on the same seeded worlds
+(a paired design), six two-fault refreshes are scored on detection and on
+whether the single cause label names either true cause, and clean refreshes of
+the same profile measure false alarms. Results for engine `a6d485794644`,
+seeds 5001-5010 (disjoint from the cohort and threshold-tuning seeds), are in
+[`docs/results/`](results/):
+
+| | `small` | `realistic` |
+|---|---|---|
+| Structural/revision faults (missing stores, truncation, remap, recalculation) | detected at every size down to 1% | same |
+| Coding error, 1% / 2% / >=5% | 1/10, 7/10, 10/10 | 5/10, 9/10, 10/10 |
+| Market movement, 5% / 10% / 20% / 40% | 4/10, 10/10, 10/10, 10/10 | 1/10, 1/10, 2/10, 6/10 |
+| Clean false alarms | 2/60 (upper 0.114) | 3/60 (upper 0.137) |
+| Cause label correct among detected coding / warehouse errors | 48/48, 54/54 | **0/54, 0/60** |
+
+What this shows:
+
+- **Category seasonality defeats the leaf share test.** Shares that swing
+  through the year sit far from their trailing mean, so a 20% single-commodity
+  drop is caught 2/10 times.
+- **Lineage, and with it the cause label, collapses under late arrival.** The
+  restated weeks diverge at the source stage, so "first divergent stage" is
+  always source and every coding or warehouse error is labelled
+  SOURCE_INGESTION. The cohort's lineage accuracy of 1.000 holds only on
+  generators that never restate history.
+- **Detection gains at 1% on `realistic` are not real gains.** Late arrival
+  adds ~0.04% of total history in restatement, just under the 0.1% revision
+  materiality, so even a small fault on top crosses it.
+- **Revision materiality is relative to the whole overlap.** That is why
+  late-arrival restatements pass, and also why a restatement confined to one
+  recent week must exceed roughly `materiality_ratio x overlap weeks` (~10% of
+  a week at defaults) to escalate on its own.
+- **Pairs are detected, but one label cannot carry two causes.** An "either
+  cause" rule is satisfied by naming the structural fault; on `realistic`
+  coding+market pairs are all labelled SOURCE_INGESTION (0/10).
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

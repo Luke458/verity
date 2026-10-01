@@ -24,8 +24,38 @@ developed and tested against exact ground truth before any real data access.
 | tiny | 2 | 2 | 4 | 24 | 3 | 30 |
 | small | 4 | 3 | 24 | 80 | 8 | 104 |
 | full | 8 | 5 | 60 | 300 | 15 | 320 |
+| realistic | 4 | 3 | 24 | 80 | 8 | 104 |
 
 Any field can be overridden in `config/datasets/*.yaml`.
+
+`tiny`, `small` and `full` share one seasonal curve across every commodity and
+never restate history between versions, which makes commodity shares nearly
+constant and revisions exact. `realistic` turns on the realism knobs in
+`HistoryConfig` (all off by default, and drawing nothing from the RNG when off,
+so other profiles are byte-identical):
+
+| Knob | realistic | Effect |
+|---|---|---|
+| `commodity_season_amplitude` | 0.35 | each commodity gets its own annual cycle; shares swing ~1.5x over a year |
+| `market_shock_sigma` | 0.04 | market-wide weekly demand shock |
+| `commodity_shock_sigma` | 0.03 | category-level weekly noise in shares |
+| `intermittency` | 0.3 | a third of products trade in a store-week with probability 0.25-0.75; no row otherwise |
+| `late_arrival_weeks`, `late_arrival_fraction` | 2, 0.03 | the previous snapshot misses ~3% of its last week and ~1.5% of the week before; every clean refresh restates them |
+
+The values are plausible, uncalibrated assumptions about pharmacy retail. They
+were fixed before any detector ran on the profile, except late arrival, which
+was added after the first sweep showed that clean refreshes never changing
+history flattered the revision checks.
+
+## Fault size and fault pairs
+
+`build_scenario(..., magnitude=m)` sets a family's size explicitly; the meaning
+of `m` per family is in `qcgen.scenarios.MAGNITUDE_MEANING` (for example the
+fraction of stores absent, or the fractional dollar cut). The oracle records the
+magnitude and the realised relative effect (largest relative change in any
+week's dollar total at any stage). `build_scenario(..., also=(family,))`
+injects further families at their own stages, each with its own oracle case.
+`qc sweep` drives both; see [evaluation.md](evaluation.md).
 
 ## Fault families
 

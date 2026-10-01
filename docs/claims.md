@@ -36,15 +36,16 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 | Lifecycle and attribution | `validated-synthetic` | Multi-class events, signed attribution, reclassification conservation. Missing entities escalate only when material (`lifecycle.missing_entity_impact`); negative control in `tests/test_negative_controls.py`. |
 | Counterfactual reconstruction | `validated-synthetic` | Reconstructed from frames; no score when nothing is reconstructable. |
 | Reconciliation | `validated-synthetic` | Per-key mass balance, count consistency, aggregate markers; price-ratio outliers only in appended periods. |
-| Lineage first divergence | `validated-synthetic` | 1.000 on the registered cohort. |
+| Lineage first divergence | `validated-synthetic` | 1.000 on the registered cohort, **only where history is never restated**: on the `realistic` profile late-arriving data makes the source stage diverge first in every refresh, so downstream faults are attributed to source. |
 | Expected events, ratio expectations, reference controls | `plumbing-only` | Scoped approvals must precede the observation cutoff and cover exact finding IDs; `expected_event` reaches PASS_WITH_EXPLANATION with its registry. |
-| Temporal QC | `validated-synthetic` | Share-of-parent tests for leaves, forecast p-values for national series, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out case. `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`. |
+| Temporal QC | `validated-synthetic` | Share-of-parent tests for leaves, forecast p-values for national series, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out case. **On the `realistic` profile (per-commodity seasonality) a 20% single-commodity drop is detected 2/10 times and a 40% drop 6/10** (`qc sweep`). `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`. |
 | Findings and final status | `validated-synthetic` | One status path (`policy.apply_policy`); nothing is cleared automatically. |
 | Recurrence | `plumbing-only` | Stable keys survive serialization and storage; frozen, hash-checked predecessors. `tests/test_qc_second_remediation.py`. |
-| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 60/72 = 0.833 (Wilson 0.731-0.902), origin 66/66. All misses are two whole families: `market_movement` is labelled UNKNOWN by design (temporal-only anomalies get no cause) and `recalculation` is labelled SOURCE_INGESTION where the oracle says HISTORICAL_CORRECTION. Severity has no ground truth and is not scored. This is the baseline any decision model must beat. |
+| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 60/72 = 0.833 (Wilson 0.731-0.902), origin 66/66. All misses are two whole families: `market_movement` is labelled UNKNOWN by design (temporal-only anomalies get no cause) and `recalculation` is labelled SOURCE_INGESTION where the oracle says HISTORICAL_CORRECTION. Severity has no ground truth and is not scored. On the `realistic` profile every detected coding and warehouse error is labelled SOURCE_INGESTION (0/54, 0/60) because the labels follow lineage. This is the baseline any decision model must beat. |
 | Weekly orchestrator and journal | `validated-synthetic` | Content-addressed identity, locking, fault injection at all five journal/publication seams (`tests/test_reliability.py`), atomic publication. |
 | Notification | `plumbing-only` | Suppressed statuses and cached retries reach no sink; accumulating size bound; https-only webhooks without redirects. `tests/test_qc_notify.py`. |
 | Delta source and onboarding | `plumbing-only` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. |
+| Fault-size sweep and realistic profile | `validated-synthetic` | `qc sweep`: detection curves over fault size (paired seeds), two-fault refreshes and clean false alarms per profile; results for engine `a6d485794644` in `docs/results/` and [evaluation.md](evaluation.md). Clean false alarms 2/60 (`small`), 3/60 (`realistic`). `tests/test_benchmark_realism.py`. |
 | Cohort evaluation | `validated-synthetic` | Registered, hash-pinned plan with independently sized clean controls; exits 3 on gate failure. |
 
 ## Not claimed
@@ -61,6 +62,13 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 - Spark or Databricks execution.
 
 ## Known limitations
+
+- On the `realistic` profile: category seasonality defeats the leaf share test
+  (single-commodity movements below ~40% are mostly missed), and late-arriving
+  restatements break lineage attribution and therefore the cause labels.
+- Revision materiality is relative to the whole overlap history, so a
+  restatement confined to one recent week must exceed roughly
+  `materiality_ratio x overlap weeks` (~10% of a week at defaults) to escalate.
 
 - Detector power depends on history length and noise: on the 30-week `tiny`
   profile a 12-30% single-commodity movement is missed about 40% of the time.
