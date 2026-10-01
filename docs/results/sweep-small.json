@@ -1,5 +1,5 @@
 {
-  "code_sha256": "6da01c2966b213acbbb2c99f85a02302d16abce802eb21781661ce7b6377dde5",
+  "code_sha256": "7d122859c6bd9f56e59297bea496beef82dec1169fe72e8b325384146543dd10",
   "config_overrides": {},
   "controls_per_seed": 6,
   "families": [
@@ -30,7 +30,7 @@
     "missing_stores+coding_error"
   ],
   "profile": "small",
-  "schema_version": 1,
+  "schema_version": 2,
   "seeds": [
     5001,
     5002,
@@ -1434,6 +1434,13 @@
           "n": 10,
           "rate": 1.0
         },
+        "causes_all_of": {
+          "ci_high": 0.2775401687666166,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 10,
+          "rate": 0.0
+        },
         "detection": {
           "ci_high": 1.0,
           "ci_low": 0.7224598312333834,
@@ -1451,6 +1458,13 @@
       },
       "commodity_remap+warehouse_transform_error": {
         "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "causes_all_of": {
           "ci_high": 1.0,
           "ci_low": 0.7224598312333834,
           "hits": 10,
@@ -1480,6 +1494,13 @@
           "n": 10,
           "rate": 1.0
         },
+        "causes_all_of": {
+          "ci_high": 0.9433190520193067,
+          "ci_low": 0.49015684672072335,
+          "hits": 8,
+          "n": 10,
+          "rate": 0.8
+        },
         "detection": {
           "ci_high": 1.0,
           "ci_low": 0.7224598312333834,
@@ -1497,6 +1518,13 @@
       },
       "missing_products+recalculation": {
         "cause_any_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
+        "causes_all_of": {
           "ci_high": 1.0,
           "ci_low": 0.7224598312333834,
           "hits": 10,
@@ -1526,6 +1554,13 @@
           "n": 10,
           "rate": 1.0
         },
+        "causes_all_of": {
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
+          "n": 10,
+          "rate": 1.0
+        },
         "detection": {
           "ci_high": 1.0,
           "ci_low": 0.7224598312333834,
@@ -1548,6 +1583,13 @@
           "hits": 10,
           "n": 10,
           "rate": 1.0
+        },
+        "causes_all_of": {
+          "ci_high": 0.2775401687666166,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 10,
+          "rate": 0.0
         },
         "detection": {
           "ci_high": 1.0,

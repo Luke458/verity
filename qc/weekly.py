@@ -56,11 +56,13 @@ def _decision_summary(result: Any) -> dict[str, Any] | None:
     if decisions is None:
         return None
     cause = decisions.get("likely_cause")
+    causes = decisions.get("likely_causes")
     origin = decisions.get("likely_origin")
     severity = decisions.get("severity")
     return {
         "provider": decisions.provider,
         "likely_cause": str(cause.value) if cause is not None else None,
+        "likely_causes": list(causes.value) if causes is not None else [],
         "likely_origin": str(origin.value) if origin is not None else None,
         "severity": str(severity.value) if severity is not None else None,
         "severity_index": severity.index if severity is not None else None,

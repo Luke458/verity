@@ -27,7 +27,7 @@ from .config import DatasetConfig
 from .conformal import wilson_interval
 from .jsonutil import dumps as json_dumps
 
-SWEEP_SCHEMA = 1
+SWEEP_SCHEMA = 2
 DEFAULT_FAMILIES: tuple[str, ...] = (
     "missing_stores",
     "missing_products",
@@ -66,6 +66,7 @@ class SweepCase:
     expected_cause: str | None
     predicted_cause: str | None
     also: tuple[str, ...] = ()
+    predicted_causes: tuple[str, ...] = ()
     expected_causes: tuple[str, ...] = ()
     injection_stage: str | None = None
     first_divergence: str | None = None
@@ -130,6 +131,7 @@ def _run_case(job: SweepJob) -> SweepCase:
         )
     )
     cause = result.decisions.get("likely_cause") if result.decisions else None
+    cause_set = result.decisions.get("likely_causes") if result.decisions else None
     return SweepCase(
         family=family,
         magnitude=magnitude,
@@ -141,6 +143,7 @@ def _run_case(job: SweepJob) -> SweepCase:
         expected_cause=ORACLE_CAUSE.get(str(case.get("expected_class"))),
         predicted_cause=str(cause.value) if cause is not None else None,
         also=tuple(job.also),
+        predicted_causes=tuple(cause_set.value) if cause_set is not None else (),
         expected_causes=causes,
         injection_stage=case.get("injection_stage"),
         first_divergence=(
@@ -210,6 +213,11 @@ def summarize(cases: Sequence[SweepCase]) -> dict[str, Any]:
             # A single label is right if it names either true cause.
             "cause_any_of": _rate(
                 sum(case.predicted_cause in case.expected_causes for case in detected),
+                len(detected),
+            ),
+            # The cause set is right if it contains every true cause.
+            "causes_all_of": _rate(
+                sum(set(case.expected_causes) <= set(case.predicted_causes) for case in detected),
                 len(detected),
             ),
             "expected_causes": sorted({c for case in cell for c in case.expected_causes}),
@@ -298,12 +306,13 @@ def render_table(report: dict[str, Any]) -> str:
         lines.append(f"| {family} | " + " | ".join(row) + " |")
     if summary.get("pairs"):
         lines.append("")
-        lines.append("| fault pair | detected | cause names either fault |")
-        lines.append("|---|---|---|")
+        lines.append("| fault pair | detected | cause names either fault | cause set names both |")
+        lines.append("|---|---|---|---|")
         for key, entry in summary["pairs"].items():
-            detection, cause = entry["detection"], entry["cause_any_of"]
+            detection, cause, both = entry["detection"], entry["cause_any_of"], entry["causes_all_of"]
             lines.append(
-                f"| {key} | {detection['hits']}/{detection['n']} | {cause['hits']}/{cause['n']} |"
+                f"| {key} | {detection['hits']}/{detection['n']} | {cause['hits']}/{cause['n']} "
+                f"| {both['hits']}/{both['n']} |"
             )
     alarms = summary["clean_false_alarms"]
     lines.append("")

@@ -145,16 +145,21 @@ the engine's own output as features, and scored once on 380 refreshes from
 unseen seeds:
 
 - It names both causes of a two-fault refresh 70/80 times; the rules, which
-  give one label, manage 7/80.
-- On single faults it is only modestly better (0.93 vs 0.89, p = 0.013),
+  gave one label, managed 7/80.
+- On single faults it was only modestly better (0.93 vs 0.89, p = 0.013),
   almost entirely on small coding errors and market movements the rules
   decline to label.
-- Trained on the `small` profile and tested on `realistic`, it falls to
+- Trained on the `small` profile and tested on `realistic`, it fell to
   0.75, well below the rules' 0.88.
 
-So it stays in a sandbox, outside the status path
-([labeller-experiment.md](labeller-experiment.md)). What carries over to the
-rules is the shape of the gain: emit a set of causes, not one.
+Its gains showed where the rules were weak, so the rules changed instead.
+They now name every supported cause, with care not to count one fault twice
+(a store outage also removes the products sold only there; a remap can empty
+a category), and name a coding or warehouse stage that lineage localizes even
+below materiality. They now match the model on single faults (0.91 vs 0.93,
+not significant), name both causes of 51/80 pairs, and still transfer across
+profiles. The model stays in a sandbox
+([labeller-experiment.md](labeller-experiment.md)).
 
 ## 7. What it still cannot do
 
@@ -162,8 +167,8 @@ rules is the shape of the gain: emit a set of causes, not one.
   series are tested per refresh at a 1% false-alarm budget (2/20 detected).
 - Late arrival must be declared; within one version pair the engine cannot
   tell it from a restatement fault.
-- The rule labeller gives one label, so two simultaneous faults cannot both be
-  named; the learned alternative can, but does not transfer across profiles.
+- A market movement is never given a cause, so pairs involving one are named
+  only in part.
 - Every number above comes from a generator written alongside the engine; the
   realistic profile's settings are plausible guesses, not calibrated to real
   retail data.

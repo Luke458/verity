@@ -11,9 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
-    # pyarrow 25.0.1 with pandas 3 segfaults intermittently in parallel workers
-    # (use-after-free in Parquet read-ahead teardown and string hashing); 24 does not.
-    "pyarrow>=16,<25",
+    "pyarrow>=16",
     "pyyaml>=6",
 ]
 

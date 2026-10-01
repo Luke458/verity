@@ -329,7 +329,18 @@ accumulates signed scoped impacts against a registered cumulative budget;
 multiple periods inside one logical refresh count as one occurrence. Optional
 missing checks remain visible.
 
-`RuleDecisionProvider` then labels the likely cause, origin and severity. Its
+`RuleDecisionProvider` then labels the likely cause, origin and severity, and
+`likely_causes` lists every cause the evidence supports, so two simultaneous
+faults can both be named. Rules run in priority order: the first match names
+`likely_cause`. Structural rules (merge, missing stores or products,
+reclassification, truncation, backfill) can all match. Events that are
+consequences of another fault are not counted twice: products missing with
+their stores, ids retired or backfilled by a merge, a category emptied by a
+reclassification. At most one revision rule explains the unexplained
+historical revision; when a history-rewriting structural event is present, a
+source-stage revision is credited to that event. A lineage-localized coding or
+warehouse revision below materiality is still named, at LOW severity. Its
 `requires_investigation` is the policy verdict, so a label can neither clear
 nor escalate a run. Temporal-only anomalies have UNKNOWN cause unless
-independent evidence exists.
+independent evidence exists: the engine cannot tell a market movement from an
+upstream loss it cannot localize.

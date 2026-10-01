@@ -50,7 +50,7 @@ required checks. Findings carry a disposition: `HARD_FAILURE`,
 `UNAVAILABLE_EVIDENCE`, `UNEXPLAINED_ANOMALY`, `HUMAN_APPROVED` or
 `INFORMATIONAL`. Only a registered, approved expected event or ratio
 expectation observed before the assessment cutoff can explain a failure, and
-only the exact finding IDs it covers. The rule-based cause label in the result
+only the exact finding IDs it covers. The rule-based cause labels in the result
 cannot change the status or the exit code.
 
 `qc explain --report <dir>` or `qc explain --store data/qc.db --dataset <name>`

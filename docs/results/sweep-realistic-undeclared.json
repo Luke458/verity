@@ -1,5 +1,5 @@
 {
-  "code_sha256": "6da01c2966b213acbbb2c99f85a02302d16abce802eb21781661ce7b6377dde5",
+  "code_sha256": "7d122859c6bd9f56e59297bea496beef82dec1169fe72e8b325384146543dd10",
   "config_overrides": {},
   "controls_per_seed": 6,
   "families": [
@@ -10,7 +10,7 @@
   ],
   "pairs": [],
   "profile": "realistic",
-  "schema_version": 1,
+  "schema_version": 2,
   "seeds": [
     5001,
     5002,

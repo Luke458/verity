@@ -129,8 +129,7 @@ def build_row(job: Job) -> dict[str, Any]:
                 if str(case.get("expected_class")) in ORACLE_CAUSE
             }
         )
-        rule = result.decisions.get("likely_cause") if result.decisions else None
-        rule_cause = str(rule.value) if rule is not None else "UNKNOWN"
+        rule = result.decisions.get("likely_causes") if result.decisions else None
         return {
             "split": job.split,
             "seed": job.seed,
@@ -141,7 +140,7 @@ def build_row(job: Job) -> dict[str, Any]:
             "kind": "clean" if job.family == "clean" else ("pair" if job.also else "single"),
             "status": result.status,
             "causes": causes,
-            "rule_causes": [] if rule_cause == "UNKNOWN" else [rule_cause],
+            "rule_causes": sorted(rule.value) if rule is not None else [],
             "features": extract(result, config),
             "feature_version": FEATURE_VERSION,
             "code_sha256": code_sha256(),

@@ -2,7 +2,8 @@
 
 ``RuleDecisionProvider`` maps deterministic and temporal evidence to
 ``likely_cause``, ``likely_origin`` and ``severity`` with explicit evidence
-references. ``requires_investigation`` is never a provider opinion: it is the
+references, and ``likely_causes`` to every cause the evidence supports (two
+simultaneous faults can both be named). ``requires_investigation`` is never a provider opinion: it is the
 policy verdict (the final status is not PASS or PASS_WITH_EXPLANATION), so a
 label can neither clear nor escalate a run. Probabilities are heuristic
 (``probability_kind="heuristic"``), not calibrated.
@@ -66,6 +67,12 @@ def default_fields() -> tuple[FieldSpec, ...]:
             "choice",
             CAUSE_VALUES,
             "What is the best-supported cause of the change?",
+        ),
+        FieldSpec(
+            "likely_causes",
+            "set",
+            tuple(value for value in CAUSE_VALUES if value != "UNKNOWN"),
+            "Which causes does the evidence support (empty when none)?",
         ),
         FieldSpec(
             "likely_origin",
@@ -174,11 +181,25 @@ def _stage_origin(stage: str) -> str:
     }.get(stage, "UNKNOWN")
 
 
+@dataclass(frozen=True)
+class _Match:
+    cause: str
+    origin: str
+    severity: str
+    strength: float
+    evidence: list[str]
+
+
 class RuleDecisionProvider:
     """Evidence-rule decisions with heuristic probabilities.
 
-    The first matching rule names the cause; ``requires_investigation`` is
-    copied from the policy status computed before the provider runs.
+    Rules are evaluated in priority order. The first match names
+    ``likely_cause``, origin and severity; every match contributes to
+    ``likely_causes``. Structural rules (merges, missing entities,
+    reclassification, truncation, backfill) can all match; the revision rules
+    are mutually exclusive, so one unexplained revision is never counted twice.
+    ``requires_investigation`` is copied from the policy status computed
+    before the provider runs.
     """
 
     name = "rule"
@@ -187,7 +208,11 @@ class RuleDecisionProvider:
         self.config = config or DatasetConfig()
 
     def decide(self, result: Any) -> DecisionSet:
-        cause, origin, severity, _, strength, evidence = self._infer(result)
+        matches = self._matches(result)
+        primary = matches[0] if matches else _Match("UNKNOWN", "UNKNOWN", "LOW", 0.4, [])
+        cause, origin, severity, strength = primary.cause, primary.origin, primary.severity, primary.strength
+        evidence = primary.evidence
+        causes = list(dict.fromkeys(match.cause for match in matches if match.cause != "UNKNOWN"))
         requires = str(getattr(result, "status", "")) not in (
             "PASS",
             "PASS_WITH_EXPLANATION",
@@ -229,6 +254,15 @@ class RuleDecisionProvider:
                     else None
                 ),
             )
+        values["likely_causes"] = DecisionValue(
+            field="likely_causes",
+            kind="set",
+            value=causes,
+            probabilities={match.cause: match.strength for match in matches if match.cause in causes},
+            strategy=self.name,
+            probability_kind="heuristic",
+            evidence=[item for match in matches for item in match.evidence],
+        )
         return DecisionSet(
             run_id=getattr(result, "run_id", ""),
             provider=self.name,
@@ -236,23 +270,17 @@ class RuleDecisionProvider:
             requires_investigation=requires,
         )
 
-    def _infer(self, result: Any) -> tuple[str, str, str, bool, float, list[str]]:
+    def _matches(self, result: Any) -> list[_Match]:
         config = self.config
         contracts = getattr(result, "contracts", None)
         if contracts is not None and contracts.status == "DATA_CONTRACT_FAILURE":
             failed = contracts.failed
             stage = failed[0].name.split(":", 1)[0] if failed else "report"
-            evidence: list[str] = [
-                f"contract:{check.name}" for check in failed
+            # Nothing downstream of a contract failure is trustworthy.
+            return [
+                _Match("SCHEMA_FAILURE", _stage_origin(stage), "HIGH", 0.75,
+                       [f"contract:{check.name}" for check in failed])
             ]
-            return (
-                "SCHEMA_FAILURE",
-                _stage_origin(stage),
-                "HIGH",
-                True,
-                0.75,
-                evidence,
-            )
 
         events = list(getattr(result, "events", ()) or ())
         by_class: dict[str, list[Any]] = {}
@@ -262,7 +290,10 @@ class RuleDecisionProvider:
         lineage = getattr(result, "lineage", None)
         temporal = getattr(result, "temporal", None)
         first = lineage.first_divergence if lineage is not None else None
-        evidence = []
+        matches: list[_Match] = []
+
+        def event_evidence(items: list[Any]) -> list[str]:
+            return [f"event:{e.entity_type}:{e.entity_id}" for e in items]
 
         merge_candidates = [
             relationship
@@ -271,12 +302,31 @@ class RuleDecisionProvider:
             in ("replaced_by", "merged_into", "superseded_by")
         ]
         if merge_candidates:
-            evidence = [
+            # A merge candidate always needs confirmation.
+            matches.append(_Match("ENTITY_MERGE", "SOURCE", "MEDIUM", 0.6, [
                 f"relationship:{relationship.source_id}->{relationship.target_id}"
                 for relationship in merge_candidates
+            ]))
+        # A merge retires one id and backfills another, and a reclassification
+        # can empty a category ("C01->C07" removes C01); those events are the
+        # merge or reclassification itself, not separate truncations,
+        # removals or backfills.
+        explained_ids = {
+            str(entity_id)
+            for relationship in merge_candidates
+            for entity_id in (relationship.source_id, relationship.target_id)
+        } | {
+            part
+            for event in by_class.get("POSSIBLE_RECLASSIFICATION", [])
+            for part in str(event.entity_id).split("->")
+        }
+        by_class = {
+            name: [
+                e for e in items
+                if name == "POSSIBLE_RECLASSIFICATION" or str(e.entity_id) not in explained_ids
             ]
-            # A merge candidate always needs confirmation.
-            return "ENTITY_MERGE", "SOURCE", "MEDIUM", True, 0.6, evidence
+            for name, items in by_class.items()
+        }
 
         # Only entity types whose absence is material name the cause; an
         # immaterial absence stays in the evidence without driving the label.
@@ -293,33 +343,61 @@ class RuleDecisionProvider:
         stores_missing = [e for e in latest_missing if e.entity_type == "store"]
         products_missing = [e for e in latest_missing if e.entity_type == "product"]
         if stores_missing:
-            evidence = [f"event:{e.entity_type}:{e.entity_id}" for e in stores_missing]
-            return "MISSING_STORES", "SOURCE", "HIGH", True, 0.8, evidence
-        if products_missing:
-            evidence = [f"event:{e.entity_type}:{e.entity_id}" for e in products_missing]
-            return "MISSING_PRODUCTS", "SOURCE", "HIGH", True, 0.8, evidence
+            matches.append(_Match("MISSING_STORES", "SOURCE", "HIGH", 0.8, event_evidence(stores_missing)))
+        # Products sold only in the missing stores vanish with them, so a
+        # product absence is named only when no store absence explains it.
+        if products_missing and not stores_missing:
+            matches.append(_Match("MISSING_PRODUCTS", "SOURCE", "HIGH", 0.8, event_evidence(products_missing)))
 
         reclass = by_class.get("POSSIBLE_RECLASSIFICATION", [])
         if reclass:
-            evidence = [f"event:{e.entity_type}:{e.entity_id}" for e in reclass]
-            unmatched = bool(attribution and attribution.unmatched_events)
-            return "RECLASSIFICATION", "SOURCE", "MEDIUM", unmatched, 0.6, evidence
+            matches.append(_Match("RECLASSIFICATION", "SOURCE", "MEDIUM", 0.6, event_evidence(reclass)))
 
         truncated = by_class.get("ENTITY_HISTORY_TRUNCATED", []) + by_class.get(
             "ENTITY_REMOVED", []
         )
         if truncated:
-            evidence = [f"event:{e.entity_type}:{e.entity_id}" for e in truncated]
-            unmatched = bool(attribution and attribution.unmatched_events)
-            return "HISTORICAL_CORRECTION", "SOURCE", "MEDIUM", unmatched, 0.6, evidence
+            matches.append(_Match("HISTORICAL_CORRECTION", "SOURCE", "MEDIUM", 0.6, event_evidence(truncated)))
 
         backfill = by_class.get("NEW_ENTITY_HISTORICAL_BACKFILL", [])
         if backfill:
-            evidence = [f"event:{e.entity_type}:{e.entity_id}" for e in backfill]
             unmatched = bool(attribution and attribution.unmatched_events)
-            strength = 0.65 if not unmatched else 0.6
-            return "BACKFILL", "SOURCE", "MEDIUM", unmatched, strength, evidence
+            matches.append(_Match("BACKFILL", "SOURCE", "MEDIUM", 0.6 if unmatched else 0.65, event_evidence(backfill)))
 
+        rewrites_history = any(
+            match.cause in ("ENTITY_MERGE", "RECLASSIFICATION", "HISTORICAL_CORRECTION", "BACKFILL")
+            for match in matches
+        )
+        revision = self._revision_match(
+            result, attribution, first, structural=bool(matches), rewrites_history=rewrites_history
+        )
+        if revision is not None:
+            matches.append(revision)
+
+        if not matches and temporal is not None and temporal.anomaly:
+            # A temporal anomaly alone could be the market or an upstream loss
+            # the engine cannot localize; it is never given a cause.
+            matches.append(_Match("UNKNOWN", "UNKNOWN", "LOW", 0.4, [
+                f"temporal:{item.series_id}" for item in temporal.series if item.anomaly
+            ]))
+        return matches
+
+    def _revision_match(
+        self,
+        result: Any,
+        attribution: Any,
+        first: str | None,
+        structural: bool,
+        rewrites_history: bool,
+    ) -> _Match | None:
+        """At most one explanation for the unexplained historical revision.
+
+        When a structural event already rewrites history (merge,
+        reclassification, truncation, backfill), it is taken to explain any
+        source-stage revision; only a downstream stage localized by lineage
+        is named alongside it.
+        """
+        config = self.config
         previous_total = float(attribution.previous_total) if attribution else 0.0
         denominator = previous_total if abs(previous_total) > 1e-12 else 1.0
         unexplained_relative = (
@@ -331,43 +409,39 @@ class RuleDecisionProvider:
             and attribution.explained_fraction < config.explained_fraction_threshold
         )
         if unexplained_material:
+            severity = self._severity(unexplained_relative)
             if first == "coded":
-                return "CODING", "CODING", self._severity(unexplained_relative), True, 0.7, ["lineage:coded"]
+                return _Match("CODING", "CODING", severity, 0.7, ["lineage:coded"])
             if first == "warehouse":
-                return "WAREHOUSE", "WAREHOUSE", self._severity(unexplained_relative), True, 0.7, ["lineage:warehouse"]
+                return _Match("WAREHOUSE", "WAREHOUSE", severity, 0.7, ["lineage:warehouse"])
+            if rewrites_history:
+                return None
             if first == "source":
                 # Attribution measures overlap (historical) weeks only, so an
                 # unexplained material change that starts at the source is the
                 # source restating history.
-                return "HISTORICAL_CORRECTION", "SOURCE", self._severity(unexplained_relative), True, 0.6, ["lineage:source"]
-            return "UNKNOWN", "UNKNOWN", self._severity(unexplained_relative), True, 0.5, ["attribution"]
+                return _Match("HISTORICAL_CORRECTION", "SOURCE", severity, 0.6, ["lineage:source"])
+            return _Match("UNKNOWN", "UNKNOWN", severity, 0.5, ["attribution"])
 
+        if rewrites_history:
+            return None
         if attribution is not None and not attribution.material and attribution.breadth > config.broad_recalculation_breadth:
-            return "HISTORICAL_CORRECTION", "SOURCE", "LOW", True, 0.55, ["attribution:breadth"]
+            return _Match("HISTORICAL_CORRECTION", "SOURCE", "LOW", 0.55, ["attribution:breadth"])
 
         restated = [
             item for item in (getattr(result, "week_revisions", ()) or ()) if item.material
         ]
         if restated:
             origin = _stage_origin(first) if first else "SOURCE"
-            return (
-                "HISTORICAL_CORRECTION",
-                origin,
-                "MEDIUM",
-                True,
-                0.6,
-                [f"revision_week:{item.week}" for item in restated],
-            )
+            return _Match("HISTORICAL_CORRECTION", origin, "MEDIUM", 0.6,
+                          [f"revision_week:{item.week}" for item in restated])
 
-        if temporal is not None and temporal.anomaly:
-            evidence = [
-                f"temporal:{item.series_id}"
-                for item in temporal.series
-                if item.anomaly
-            ]
-            return "UNKNOWN", "UNKNOWN", "LOW", True, 0.4, evidence
-
-        return "UNKNOWN", "UNKNOWN", "LOW", False, 0.4, []
+        if not structural and first in ("coded", "warehouse"):
+            # Lineage localized a revision too small to be material. It names
+            # the stage as a label only; the status is unaffected.
+            cause = "CODING" if first == "coded" else "WAREHOUSE"
+            return _Match(cause, _stage_origin(first), "LOW", 0.5, [f"lineage:{first}"])
+        return None
 
     @staticmethod
     def _severity(relative: float) -> str:

@@ -82,10 +82,10 @@ python -m optional.plot_sweep reports/sweep/small.json reports/sweep/realistic.j
 ```
 
 Each sizable family is injected at magnitudes 1%-40% on the same seeded worlds
-(a paired design), six two-fault refreshes are scored on detection and on
-whether the single cause label names either true cause, and clean refreshes of
-the same profile measure false alarms. Summaries are in
-[`docs/results/`](results/) (engine `6da01c2966b2`); the `realistic` runs
+(a paired design), six two-fault refreshes are scored on detection, on whether
+`likely_cause` names either true cause and on whether `likely_causes` names
+both, and clean refreshes of the same profile measure false alarms. Summaries
+are in [`docs/results/`](results/) (engine `7d122859c6bd`); the `realistic` runs
 declare the profile's 2-week late-arrival window, as an operator of that feed
 would (`sweep-realistic-undeclared.json` shows the cost of not declaring it).
 
@@ -145,10 +145,10 @@ one on both the cohort and the `small` sweep after the share-test change.
   refresh at a 1% false-alarm budget, a drop of 10% or less in one category is
   within noise on `realistic`. Raising `temporal_fdr_q` to 0.05 added a false
   alarm without adding detection on the development seeds.
-- **One label per refresh.** `market_movement` is UNKNOWN by design, and one
-  label cannot carry two causes; the "either cause" pair score is satisfied by
-  naming the structural fault. A multi-label tree model names both causes of
-  70/80 pairs but does not transfer across profiles
+- **Pairs involving a market movement.** `market_movement` is UNKNOWN by
+  design, so `likely_causes` names only the other fault of such a pair (0/10
+  for both market-movement pairs; every other pair 38-40/40 per profile). A
+  tree model names more of them but does not transfer across profiles
   ([labeller-experiment.md](labeller-experiment.md)).
 - **Late arrival must be declared.** The engine cannot tell late arrival from
   a restatement fault within one version pair.

@@ -50,9 +50,12 @@ def _print_decisions(decisions: DecisionSet | None) -> None:
     if decisions is None:
         return
     print(f"DECISION {decisions.provider}")
-    for name in ("likely_cause", "likely_origin", "severity", "requires_investigation"):
+    for name in ("likely_cause", "likely_causes", "likely_origin", "severity", "requires_investigation"):
         value = decisions.get(name)
         if value is None:
+            continue
+        if value.kind == "set":
+            print(f"  {name:<24} {', '.join(value.value) or '-'}")
             continue
         probability = (
             value.probabilities.get(

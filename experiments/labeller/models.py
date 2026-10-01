@@ -2,7 +2,7 @@
 
 A labeller returns a *set* of causes per refresh: empty for "nothing wrong", one
 for a single fault, more for simultaneous faults. ``RuleLabeller`` wraps the
-engine's rule-based label (always at most one cause) and is the baseline. Any
+engine's rule-based cause set (``likely_causes``) and is the baseline. Any
 other model, including a remote Jev-style decision service, plugs in by
 implementing the same two methods over the same rows.
 """
@@ -28,7 +28,7 @@ class Labeller(Protocol):
 
 
 class RuleLabeller:
-    """The engine's rule label as a set (UNKNOWN becomes the empty set)."""
+    """The engine's rule cause set (``likely_causes``)."""
 
     name = "rules"
 

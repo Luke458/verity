@@ -8,7 +8,7 @@ cannot change a status.
 ## Setup
 
 - **Rows.** Each row is one generated refresh run through the full engine
-  (engine `6da01c2966b2`). Seeds alternate between the `small` and `realistic`
+  (engine `7d122859c6bd`). Seeds alternate between the `small` and `realistic`
   profiles; `realistic` declares its 2-week late-arrival window. Per seed: all
   13 single-fault families (sizable ones log-uniform at 1%-40%), 4 random
   two-fault pairs and 2 clean refreshes.
@@ -21,15 +21,15 @@ cannot change a status.
   per-stage increments, per-week revisions, temporal anomaly counts and the
   strongest share-test statistic, and failing checks by family. None read
   the oracle.
-- **Models.** `rules` is the engine's own label: at most one cause, with
-  UNKNOWN treated as no cause. `trees` is one gradient-boosted classifier per
-  cause, so it can name several, with each threshold set for F1 on dev.
+- **Models.** `rules` is the engine's `likely_causes`: every cause its rules
+  support (see [engine.md](engine.md)). `trees` is one gradient-boosted
+  classifier per cause, with each threshold set for F1 on dev.
 
 ```
 pip install -e ".[experiments]"
-python -m experiments.labeller.run build --split train --jobs 6 --data reports/labeller
-python -m experiments.labeller.run build --split dev --jobs 6 --data reports/labeller
-python -m experiments.labeller.run build --split test --jobs 6 --data reports/labeller
+python -m experiments.labeller.run build --split train --jobs 4 --data reports/labeller
+python -m experiments.labeller.run build --split dev --jobs 4 --data reports/labeller
+python -m experiments.labeller.run build --split test --jobs 4 --data reports/labeller
 python -m experiments.labeller.run evaluate --data reports/labeller --out reports/labeller/report.json
 ```
 
@@ -37,63 +37,78 @@ python -m experiments.labeller.run evaluate --data reports/labeller --out report
 
 | Exact cause set | rules | trees |
 |---|---|---|
-| All 380 refreshes | 274 (0.72, 0.67-0.76) | 350 (0.92, 0.89-0.94) |
-| 260 single faults | 231 (0.89, 0.84-0.92) | 242 (0.93, 0.89-0.96) |
-| 40 clean | 36 (0.90) | 40 (1.00) |
-| 80 pairs, both causes named | 7 (0.09) | 70 (0.88) |
+| All 380 refreshes | 322 (0.85, 0.81-0.88) | 350 (0.92, 0.89-0.94) |
+| 260 single faults | 236 (0.91, 0.87-0.94) | 242 (0.93, 0.89-0.96) |
+| 40 clean | 36 (0.90) | 39 (0.97) |
+| 80 pairs, both causes named | 51 (0.64, 0.53-0.73) | 70 (0.88, 0.78-0.93) |
 
 Paired exact McNemar tests (same test refreshes):
 
-- **All refreshes:** 79 cases only the trees got right and 3 only the rules
-  got right, p = 4e-20.
-- **Single faults:** 14 vs 3, p = 0.013.
+- **All refreshes:** 32 cases only the trees got right and 4 only the rules
+  got right, p = 2e-6.
+- **Single faults:** 9 vs 3, p = 0.15.
+
+| Single faults, fitted on one profile and tested on the other | rules | trees |
+|---|---|---|
+| Fitted on `small`, tested on `realistic` | 116/130 (0.89) | 97/130 (0.75) |
+| Fitted on `realistic`, tested on `small` | 120/130 (0.92) | 112/130 (0.86) |
 
 Full report: [`results/labeller.json`](results/labeller.json).
 
+## How the rules got here
+
+The first comparison was against the rules as they were: one label per
+refresh, the first matching rule. On the same test split those scored 231/260
+on single faults and named both causes of a pair 7/80 times; the trees beat
+them on single faults (14 vs 3, p = 0.013). The trees' gains showed where the
+rules fell short, and two changes followed:
+
+- **Every supported cause, not just the first.** Most of the work was
+  stopping one fault from being counted twice. A store outage also removes the
+  products sold only there; a merge retires one id and backfills another; a
+  remap can empty a category; and a structural change also shows up as an
+  unexplained source-stage revision. Each was a false second cause until the
+  rules credited it to the fault that caused it.
+- **Name a lineage-localized stage below materiality.** A 1-2% coding error
+  that lineage pins to the coding stage was labelled nothing; it is now
+  CODING at LOW severity, as a label only (the status is unchanged).
+
 ## Reading it
 
-- **The headline is mostly structural.** The rules emit one label, so a pair
-  can be named in full only when both faults share a cause. Most of the
-  all-refresh gap is that design choice, not learning. The like-for-like
-  comparison is single faults: +4 points, a real but small gain.
-- **The single-fault gain comes from two families:**
-  - `market_movement`: the rules leave it UNKNOWN by design (0/20); the trees
-    name it 6/20 (F1 0.51).
-  - `coding_error` at 1-2%: lineage finds the right stage, but the change is
-    below materiality, so the rules say nothing (16/20); the trees name all
-    20.
-
-  Elsewhere the two are level, and on small `missing_products` the rules are
-  slightly better (19/20 vs 17/20).
-- **The trees do not transfer across profiles.**
-
-  | Single faults | rules | trees |
-  |---|---|---|
-  | Fitted on `small`, tested on `realistic` | 114/130 (0.88) | 97/130 (0.75) |
-  | Fitted on `realistic`, tested on `small` | 117/130 (0.90) | 121/130 (0.93) |
-
-  The trees learn the scale of the generator's noise; the rules carry no
-  training distribution to drift from. A labeller trained on one feed would
-  need re-fitting, or proof that it transfers, before it could be trusted on
-  another, and this sandbox has only two synthetic feeds to test that on.
-- **The rules' four clean "errors"** are refreshes where the engine itself
-  raised INVESTIGATE (historical revisions under late arrival). Those are status
-  false alarms, not labelling mistakes. Pooled over all splits, clean
+- **On single faults the rules have caught up.** The remaining gap is not
+  significant. Every family but `market_movement` scores 19-20/20. The rules
+  leave market movement unlabelled by design: a category moving with nothing
+  else wrong could be the market or an upstream loss the engine cannot
+  localize. The trees name it 6/20.
+- **Pairs are still the trees' advantage.** Of the 29 pairs the rules do not
+  fully name, 16 include a market movement. 10 are a historical correction
+  next to a merge, backfill or truncation, credited to that structural event
+  on purpose, to avoid naming a single fault twice.
+- **The trees do not transfer across profiles; the rules do.** Fitted on
+  `small` and tested on `realistic`, the trees fall to 0.75 against the rules'
+  0.89; the rules have no training distribution to drift from.
+- **The four clean "errors"** are clean refreshes on which the engine itself
+  raised INVESTIGATE (historical revisions under late arrival). Those are
+  status false alarms, not labelling mistakes. Pooled over all splits, clean
   `realistic` refreshes alarm 5/70 (7%), in line with the sweep's 3/60.
 
 ## Verdict
 
-A per-cause tree model names simultaneous faults, which the rule labeller
-cannot do at all, and is modestly better on single faults. It is also the more
-brittle of the two: trained on one profile and tested on the other, it falls
-13 points below the rules. That is the case for keeping it a sandbox. The
-useful lessons for the rules are concrete: emit a set rather than one label,
-and name a lineage-localized stage even below materiality, as a label rather
-than a status change.
+The rules, with the two changes the trees pointed to, now match them on single
+faults and transfer across profiles. The trees still name more simultaneous
+faults, mostly ones involving a market movement the rules deliberately leave
+alone. The learned model's real contribution was diagnostic: it showed where
+the rules were weak. It stays in the sandbox.
 
 ## Caveats
 
 - The truth and the features both come from the generator written alongside
   the engine. These are synthetic accuracies, not real-world ones.
-- One test split, one model family, no hyperparameter search. The dev split
-  tunes thresholds only.
+- The rule changes were developed while looking at this dataset's train and
+  dev splits, and the test split had been scored before. The test split is no
+  longer an untouched held-out set for the rules. The sweeps on seeds
+  7001-7010 are.
+- One test split, one model family, no hyperparameter search.
+- The datasets and sweeps were run twice with 4 workers and matched exactly.
+  Runs with 6 workers on the development machine occasionally crashed or
+  silently changed a result; that was traced to the machine, not the code.
