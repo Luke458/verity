@@ -253,7 +253,9 @@ def build_scenario(
         _measure_case(maybe_case, spec, clean_states, faulty_states)
     measured = [item for item in cases if item is not None]
 
-    previous_truth = truth.loc[truth["week"] < current_week].copy()
+    previous_truth = _late_arrival(
+        truth.loc[truth["week"] < current_week].copy(), config, current_week, rng
+    )
     previous_calendar = calendar.loc[calendar["week"] < current_week]
     previous_source = build_source(previous_truth, universe, previous_calendar)
     previous_states: dict[str, State] = {"source": previous_source}
@@ -312,6 +314,30 @@ def build_scenario(
         manifest=manifest,
         oracle=oracle,
     )
+
+
+def _late_arrival(
+    previous: pd.DataFrame, config: SuiteConfig, current_week: int, rng: np.random.Generator
+) -> pd.DataFrame:
+    """Under-count the previous snapshot's last weeks (off by default)."""
+    history = config.history
+    if history.late_arrival_weeks <= 0 or history.late_arrival_fraction <= 0:
+        return previous
+    for lag in range(1, history.late_arrival_weeks + 1):
+        mask = (previous["week"] == current_week - lag).to_numpy()
+        count = int(mask.sum())
+        if not count:
+            continue
+        missing = history.late_arrival_fraction / lag
+        keep = 1.0 - rng.uniform(0.0, 2.0 * missing, count)
+        units = np.rint(previous.loc[mask, "units"].to_numpy(dtype=np.float64) * keep)
+        previous.loc[mask, "dollar"] = (
+            previous.loc[mask, "dollar"].to_numpy(dtype=np.float64) * keep
+        ).astype(np.float32)
+        scripts = previous.loc[mask, "scripts"].to_numpy(dtype=np.float64)
+        previous.loc[mask, "scripts"] = np.where(scripts > 0, units, 0.0).astype(np.float32)
+        previous.loc[mask, "units"] = units.astype(np.int32)
+    return previous
 
 
 def _measure_case(

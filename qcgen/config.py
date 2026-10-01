@@ -93,6 +93,12 @@ class HistoryConfig:
     # in a given store-week with its own probability in [0.25, 0.75]; weeks
     # without a sale have no row, as in real transactional extracts.
     intermittency: float = 0.0
+    # Late-arriving transactions: the previous snapshot under-counts its last
+    # ``late_arrival_weeks`` weeks (the most recent by ``late_arrival_fraction``
+    # on average, the one before by half that, ...) and the current snapshot
+    # restates them. A legitimate revision every clean refresh carries.
+    late_arrival_weeks: int = 0
+    late_arrival_fraction: float = 0.0
 
     def __post_init__(self) -> None:
         if self.n_weeks < 4:
@@ -108,6 +114,10 @@ class HistoryConfig:
             raise ValueError("commodity_season_amplitude must be in [0, 1)")
         if not 0 <= self.intermittency <= 1:
             raise ValueError("intermittency must be in [0, 1]")
+        if self.late_arrival_weeks < 0:
+            raise ValueError("late_arrival_weeks must be >= 0")
+        if not 0 <= self.late_arrival_fraction < 0.5:
+            raise ValueError("late_arrival_fraction must be in [0, 0.5)")
 
 
 _UNIVERSE_PROFILES: dict[str, UniverseConfig] = {
@@ -157,6 +167,11 @@ _HISTORY_PROFILES: dict[str, HistoryConfig] = {
         market_shock_sigma=0.04,
         commodity_shock_sigma=0.03,
         intermittency=0.3,
+        # Added after the first realistic sweep (it makes the profile harder):
+        # the previous snapshot misses ~3% of its latest week and ~1.5% of the
+        # week before.
+        late_arrival_weeks=2,
+        late_arrival_fraction=0.03,
     ),
 }
 
