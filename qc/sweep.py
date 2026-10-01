@@ -80,6 +80,7 @@ class SweepJob:
     workdir: str
     overrides: dict[str, Any]
     also: tuple[str, ...] = ()
+    keep: bool = False
 
 
 def _run_case(job: SweepJob) -> SweepCase:
@@ -111,6 +112,12 @@ def _run_case(job: SweepJob) -> SweepCase:
         built.manifest["previous_version"],
         config,
     )
+    if not job.keep:
+        # A sweep builds hundreds of scenarios (~15 MB each on `small`); only
+        # the scored outcome is kept unless asked otherwise.
+        import shutil
+
+        shutil.rmtree(root, ignore_errors=True)
     case = built.oracle["cases"][0]
     causes = tuple(
         sorted(
@@ -228,6 +235,7 @@ def run_sweep(
     config_overrides: dict[str, Any] | None = None,
     jobs: int = 1,
     pairs: Sequence[tuple[str, str]] = (),
+    keep_scenarios: bool = False,
 ) -> dict[str, Any]:
     """Run family x magnitude x seed, fault pairs and clean controls."""
     overrides = dict(config_overrides or {})
@@ -236,11 +244,11 @@ def run_sweep(
     for seed in seeds:
         for family in families:
             for magnitude in magnitudes:
-                plan.append(SweepJob(profile, family, float(magnitude), int(seed), 0, work, overrides))
+                plan.append(SweepJob(profile, family, float(magnitude), int(seed), 0, work, overrides, keep=keep_scenarios))
         for primary, secondary in pairs:
-            plan.append(SweepJob(profile, primary, None, int(seed), 0, work, overrides, (secondary,)))
+            plan.append(SweepJob(profile, primary, None, int(seed), 0, work, overrides, (secondary,), keep=keep_scenarios))
         for index in range(controls_per_seed):
-            plan.append(SweepJob(profile, "clean", None, int(seed), index, work, overrides))
+            plan.append(SweepJob(profile, "clean", None, int(seed), index, work, overrides, keep=keep_scenarios))
     if jobs > 1:
         # One BLAS/OpenMP thread per worker: N processes each spawning a full
         # thread pool oversubscribe the CPU and run slower than one process.

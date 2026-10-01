@@ -420,6 +420,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         config_overrides=overrides,
         jobs=args.jobs,
         pairs=_parse_pairs(args.pairs, DEFAULT_PAIRS),
+        keep_scenarios=args.keep_scenarios,
     )
     if args.out:
         write_sweep(report, args.out)
@@ -783,6 +784,10 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.add_argument("--config", default=None, help="dataset YAML overrides to evaluate")
     sweep.add_argument("--workdir", default="reports/sweep/work")
     sweep.add_argument("--jobs", type=int, default=1)
+    sweep.add_argument(
+        "--keep-scenarios", action="store_true",
+        help="keep each generated scenario on disk (default: delete once scored)",
+    )
     sweep.add_argument("--out", default=None)
     sweep.add_argument("--json", action="store_true")
     sweep.set_defaults(func=_cmd_sweep)
