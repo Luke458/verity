@@ -39,14 +39,68 @@ class ScenarioResult:
     oracle: dict
 
 
+# What ``magnitude`` means per family when a scenario sets it explicitly. Each
+# is a fraction in (0, 1]; the realised dollar effect is recorded separately in
+# the oracle so curves can also be read on a common effect-size axis.
+MAGNITUDE_MEANING: dict[str, str] = {
+    "missing_stores": "fraction of stores absent from the new week",
+    "missing_products": "fraction of products absent from the new week",
+    "history_truncation": "fraction of stores whose recent history is removed",
+    "commodity_remap": "fraction of products moved between commodities",
+    "coding_error": "fractional dollar reduction on the affected products",
+    "warehouse_transform_error": "fractional dollar reduction on one commodity",
+    "recalculation": "lognormal sigma of the historical restatement",
+    "market_movement": "fractional drop of one commodity in the new week",
+}
+
+
+def _magnitude_spec(
+    family: str, magnitude: float, n_stores: int, n_products: int, current_week: int
+) -> FaultSpec:
+    if not 0.0 < magnitude <= 1.0:
+        raise ValueError("magnitude must be in (0, 1]")
+    def count(total: int) -> int:
+        return max(1, min(total, round(magnitude * total)))
+    if family == "missing_stores":
+        return FaultSpec(family, "source", {"n_stores": count(n_stores), "week": current_week})
+    if family == "missing_products":
+        return FaultSpec(family, "source", {"n_products": count(n_products), "week": current_week})
+    if family == "history_truncation":
+        return FaultSpec(
+            family,
+            "source",
+            {"n_stores": count(n_stores), "n_weeks": min(6, max(2, current_week // 10))},
+        )
+    if family == "commodity_remap":
+        return FaultSpec(family, "source", {"n_products": count(n_products)})
+    if family == "coding_error":
+        return FaultSpec(
+            family, "coded", {"n_products": max(1, n_products // 15), "factor": 1.0 - magnitude}
+        )
+    if family == "warehouse_transform_error":
+        return FaultSpec(family, "warehouse", {"factor": 1.0 - magnitude})
+    if family == "recalculation":
+        return FaultSpec(family, "source", {"sigma": magnitude})
+    if family == "market_movement":
+        return FaultSpec(family, "warehouse", {"factor": 1.0 - magnitude})
+    raise ValueError(f"family {family!r} has no magnitude parameter")
+
+
 def fault_spec(
     family: str,
     rng: np.random.Generator,
     n_stores: int,
     n_products: int,
     current_week: int,
+    magnitude: float | None = None,
 ) -> FaultSpec:
-    """Default parameters per family, scaled to the universe size."""
+    """Parameters per family, scaled to the universe size.
+
+    Without ``magnitude`` the defaults (some drawn from ``rng``) are used; with
+    it, the family's size parameter is set explicitly (``MAGNITUDE_MEANING``).
+    """
+    if magnitude is not None:
+        return _magnitude_spec(family, magnitude, n_stores, n_products, current_week)
     if family == "missing_stores":
         return FaultSpec(family, "source", {"n_stores": max(1, n_stores // 8), "week": current_week})
     if family == "missing_products":
@@ -135,6 +189,8 @@ def build_scenario(
     family: str,
     stages: tuple[str, ...],
     oracle_root: str | Path | None = None,
+    magnitude: float | None = None,
+    also: tuple[str, ...] = (),
 ) -> ScenarioResult:
     scenario_id = f"scenario-{index:04d}"
     seed = config.seed * 1000 + index
@@ -151,70 +207,51 @@ def build_scenario(
     )
     source_state = build_source(truth, universe, calendar)
 
-    spec = fault_spec(
-        family, rng, len(universe.stores), len(universe.products), current_week
-    )
+    # The primary fault takes ``magnitude``; any ``also`` faults use their
+    # default parameters. Specs are drawn before any injection, primary first,
+    # so a single-fault scenario consumes the generator exactly as before.
+    families = (family, *also)
+    if len(set(families)) != len(families):
+        raise ValueError("a scenario cannot inject the same family twice")
+    specs = [
+        fault_spec(
+            name,
+            rng,
+            len(universe.stores),
+            len(universe.products),
+            current_week,
+            magnitude=magnitude if position == 0 else None,
+        )
+        for position, name in enumerate(families)
+    ]
 
     clean_states: dict[str, State] = {"source": source_state}
     for stage in STAGE_ORDER[1:]:
         clean_states[stage] = ADVANCE[stage](clean_states[STAGE_ORDER[STAGE_ORDER.index(stage) - 1]])
 
-    context = FaultContext(
-        scenario_id=scenario_id,
-        family=family,
-        stage=spec.stage,
-        current_week=current_week,
-        rng=rng,
-    )
-
     faulty_states: dict[str, State] = {}
     state = source_state
-    case: GroundTruthCase | None = None
+    cases: list[GroundTruthCase | None] = [None] * len(specs)
     for stage in STAGE_ORDER:
         if stage != "source":
             state = ADVANCE[stage](state)
-        if stage == spec.stage:
-            state, case = INJECTORS[family](state, context, spec.params)
-        faulty_states[stage] = state
-    if case is None:
-        raise RuntimeError(f"fault {family!r} was never injected")
-
-    for stage in STAGE_ORDER:
-        if STAGE_ORDER.index(stage) < STAGE_ORDER.index(spec.stage):
-            case.effects[stage] = {}
-        else:
-            case.effects[stage] = effect_delta(
-                clean_states[stage]["fact"],
-                faulty_states[stage]["fact"],
-                case.affected,
-                case.weeks or None,
+        for position, spec in enumerate(specs):
+            if stage != spec.stage:
+                continue
+            context = FaultContext(
+                scenario_id=scenario_id,
+                family=spec.family,
+                stage=spec.stage,
+                current_week=current_week,
+                rng=rng,
             )
-    effect_stage = spec.stage
-    for stage in STAGE_ORDER[STAGE_ORDER.index(spec.stage):]:
-        if any(abs(value) > 1e-9 for value in case.effects[stage].values()):
-            effect_stage = stage
-            break
-    case.details.setdefault("effect_stage", effect_stage)
-    case.injected_effect = case.effects[effect_stage]
-
-    split_by = case.details.get("split_by")
-    if split_by:
-        split_stage = max(effect_stage, "coded", key=STAGE_ORDER.index)
-        split = _split_effects(
-            clean_states[split_stage]["fact"],
-            faulty_states[split_stage]["fact"],
-            str(split_by),
-            [str(v) for v in case.details.get("split_values", [])],
-        )
-        case.details["per_value"] = split
-        case.details["split_stage"] = split_stage
-        if split:
-            case.details["effect_stage"] = split_stage
-            values = list(split.values())
-            case.injected_effect = {
-                "dollar_net": round(sum(values), 6),
-                "dollar_moved": round(max(abs(value) for value in values), 6),
-            }
+            state, cases[position] = INJECTORS[spec.family](state, context, spec.params)
+        faulty_states[stage] = state
+    for spec, maybe_case in zip(specs, cases, strict=True):
+        if maybe_case is None:
+            raise RuntimeError(f"fault {spec.family!r} was never injected")
+        _measure_case(maybe_case, spec, clean_states, faulty_states)
+    measured = [item for item in cases if item is not None]
 
     previous_truth = truth.loc[truth["week"] < current_week].copy()
     previous_calendar = calendar.loc[calendar["week"] < current_week]
@@ -254,9 +291,14 @@ def build_scenario(
         "seed": seed,
         "profile": config.profile,
         "family": family,
-        "fault": asdict(spec),
-        "cases": [case.to_dict()],
-        "expected_events": [case.event_registry] if case.event_registry else [],
+        "families": list(families),
+        "fault": asdict(specs[0]),
+        "magnitude": magnitude,
+        # Realised effect on the new week as a share of the clean new-week
+        # dollar total: a common effect-size axis across families.
+        "relative_effect": _relative_effect(clean_states, faulty_states),
+        "cases": [item.to_dict() for item in measured],
+        "expected_events": [item.event_registry for item in measured if item.event_registry],
     }
     scenario_dir.mkdir(parents=True, exist_ok=True)
     (scenario_dir / "manifest.json").write_text(
@@ -270,6 +312,69 @@ def build_scenario(
         manifest=manifest,
         oracle=oracle,
     )
+
+
+def _measure_case(
+    case: GroundTruthCase,
+    spec: FaultSpec,
+    clean_states: dict[str, State],
+    faulty_states: dict[str, State],
+) -> None:
+    """Exact per-stage effect of one case on its affected scope."""
+    for stage in STAGE_ORDER:
+        if STAGE_ORDER.index(stage) < STAGE_ORDER.index(spec.stage):
+            case.effects[stage] = {}
+        else:
+            case.effects[stage] = effect_delta(
+                clean_states[stage]["fact"],
+                faulty_states[stage]["fact"],
+                case.affected,
+                case.weeks or None,
+            )
+    effect_stage = spec.stage
+    for stage in STAGE_ORDER[STAGE_ORDER.index(spec.stage):]:
+        if any(abs(value) > 1e-9 for value in case.effects[stage].values()):
+            effect_stage = stage
+            break
+    case.details.setdefault("effect_stage", effect_stage)
+    case.injected_effect = case.effects[effect_stage]
+
+    split_by = case.details.get("split_by")
+    if split_by:
+        split_stage = max(effect_stage, "coded", key=STAGE_ORDER.index)
+        split = _split_effects(
+            clean_states[split_stage]["fact"],
+            faulty_states[split_stage]["fact"],
+            str(split_by),
+            [str(v) for v in case.details.get("split_values", [])],
+        )
+        case.details["per_value"] = split
+        case.details["split_stage"] = split_stage
+        if split:
+            case.details["effect_stage"] = split_stage
+            values = list(split.values())
+            case.injected_effect = {
+                "dollar_net": round(sum(values), 6),
+                "dollar_moved": round(max(abs(value) for value in values), 6),
+            }
+
+
+def _relative_effect(
+    clean: dict[str, State], faulty: dict[str, State]
+) -> float | None:
+    """Largest relative change in total dollars of any week, at any stage."""
+    worst: float | None = None
+    for stage in STAGE_ORDER:
+        before = clean[stage]["fact"]
+        after = faulty[stage]["fact"]
+        if "dollar" not in before.columns or "dollar" not in after.columns:
+            continue
+        b = before.groupby("week")["dollar"].sum()
+        a = after.groupby("week")["dollar"].sum().reindex(b.index, fill_value=0.0)
+        change = ((a - b).abs() / b.abs().where(b.abs() > 0)).max()
+        if pd.notna(change):
+            worst = float(change) if worst is None else max(worst, float(change))
+    return worst
 
 
 def generate_suite(

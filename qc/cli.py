@@ -360,6 +360,79 @@ def _cmd_cohort(args: argparse.Namespace) -> int:
     return code
 
 
+def _parse_seeds(text: str) -> list[int]:
+    seeds: list[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if "-" in part:
+            low, high = (int(value) for value in part.split("-", 1))
+            seeds.extend(range(low, high + 1))
+        elif part:
+            seeds.append(int(part))
+    return seeds
+
+
+def _parse_pairs(
+    text: str, default: tuple[tuple[str, str], ...]
+) -> tuple[tuple[str, str], ...]:
+    if text == "default":
+        return default
+    if text == "none":
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for item in text.split(","):
+        primary, separator, secondary = item.strip().partition("+")
+        if not separator or not primary or not secondary:
+            raise ValueError(f"invalid pair {item!r}; expected family+family")
+        pairs.append((primary, secondary))
+    return tuple(pairs)
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    from .sweep import (
+        DEFAULT_FAMILIES,
+        DEFAULT_MAGNITUDES,
+        DEFAULT_PAIRS,
+        render_table,
+        run_sweep,
+        write_sweep,
+    )
+
+    overrides: dict[str, Any] = {}
+    if args.config:
+        load_dataset_config(args.config)  # validate before running anything
+        overrides = dict(yaml.safe_load(Path(args.config).read_text()) or {})
+    report = run_sweep(
+        args.profile,
+        _parse_seeds(args.seeds),
+        families=(
+            tuple(value.strip() for value in args.families.split(","))
+            if args.families
+            else DEFAULT_FAMILIES
+        ),
+        magnitudes=(
+            tuple(float(value) for value in args.magnitudes.split(","))
+            if args.magnitudes
+            else DEFAULT_MAGNITUDES
+        ),
+        controls_per_seed=args.controls_per_seed,
+        workdir=args.workdir,
+        config_overrides=overrides,
+        jobs=args.jobs,
+        pairs=_parse_pairs(args.pairs, DEFAULT_PAIRS),
+    )
+    if args.out:
+        write_sweep(report, args.out)
+    if args.json:
+        print(_json_dumps(report["summary"], indent=2, default=_json_default))
+    else:
+        print(f"sweep profile={report['profile']} seeds={len(report['seeds'])}")
+        print(render_table(report))
+        if args.out:
+            print(f"output: {args.out}")
+    return 0
+
+
 def _cmd_onboard(args: argparse.Namespace) -> int:
     from .onboard import assess_versions, config_from_proposal, profile_table
 
@@ -694,6 +767,25 @@ def build_parser() -> argparse.ArgumentParser:
     cohort.add_argument("--out", default=None)
     cohort.add_argument("--json", action="store_true")
     cohort.set_defaults(func=_cmd_cohort)
+
+    sweep = subparsers.add_parser(
+        "sweep", help="detection curves over fault size plus clean false alarms"
+    )
+    sweep.add_argument("--profile", default="small", help="generator profile (small, realistic, ...)")
+    sweep.add_argument("--seeds", required=True, help="e.g. 5001-5010 or 5001,5003")
+    sweep.add_argument("--families", default=None, help="comma-separated; default: all sizable families")
+    sweep.add_argument("--magnitudes", default=None, help="comma-separated fractions in (0, 1]")
+    sweep.add_argument("--controls-per-seed", type=int, default=4)
+    sweep.add_argument(
+        "--pairs", default="default",
+        help="two-fault refreshes: 'default', 'none', or a+b,c+d",
+    )
+    sweep.add_argument("--config", default=None, help="dataset YAML overrides to evaluate")
+    sweep.add_argument("--workdir", default="reports/sweep/work")
+    sweep.add_argument("--jobs", type=int, default=1)
+    sweep.add_argument("--out", default=None)
+    sweep.add_argument("--json", action="store_true")
+    sweep.set_defaults(func=_cmd_sweep)
 
     report = subparsers.add_parser(
         "report", help="write a Markdown and machine report for a run"

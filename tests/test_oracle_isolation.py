@@ -33,6 +33,7 @@ HARNESS_ALLOWLIST = {
     "cli.py",
     "cohort.py",
     "shadow.py",
+    "sweep.py",
 }
 
 GROUND_TRUTH_KEYS = {

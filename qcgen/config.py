@@ -79,6 +79,20 @@ class HistoryConfig:
     eofy_boost: float = 1.12
     base_units_mean: float = 20.0
     stock_cover_weeks: float = 5.0
+    # Realism knobs. All default to 0 (off), and when off they draw nothing
+    # from the generator, so default profiles stay bit-identical.
+    # Per-commodity annual seasonality: each commodity gets an amplitude drawn
+    # from U(0, this) and its own phase, so category shares move through the
+    # year (cough & cold peaks in winter, sun care in summer).
+    commodity_season_amplitude: float = 0.0
+    # Common lognormal shock per week (market-wide demand swings).
+    market_shock_sigma: float = 0.0
+    # Lognormal shock per commodity-week (category-level noise in shares).
+    commodity_shock_sigma: float = 0.0
+    # Fraction of products that sell intermittently: each such product trades
+    # in a given store-week with its own probability in [0.25, 0.75]; weeks
+    # without a sale have no row, as in real transactional extracts.
+    intermittency: float = 0.0
 
     def __post_init__(self) -> None:
         if self.n_weeks < 4:
@@ -87,6 +101,13 @@ class HistoryConfig:
             raise ValueError("noise_sigma must be >= 0")
         if not 0 <= self.promo_fraction <= 1:
             raise ValueError("promo_fraction must be in [0, 1]")
+        for name in ("commodity_season_amplitude", "market_shock_sigma", "commodity_shock_sigma"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0")
+        if not 0 <= self.commodity_season_amplitude < 1:
+            raise ValueError("commodity_season_amplitude must be in [0, 1)")
+        if not 0 <= self.intermittency <= 1:
+            raise ValueError("intermittency must be in [0, 1]")
 
 
 _UNIVERSE_PROFILES: dict[str, UniverseConfig] = {
@@ -98,6 +119,14 @@ _UNIVERSE_PROFILES: dict[str, UniverseConfig] = {
         n_commodities=3,
     ),
     "small": UniverseConfig(
+        n_banners=4,
+        n_states=3,
+        n_stores=24,
+        n_products=80,
+        n_commodities=8,
+    ),
+    # Same entity scale as ``small``; realism lives in the history config.
+    "realistic": UniverseConfig(
         n_banners=4,
         n_states=3,
         n_stores=24,
@@ -117,6 +146,18 @@ _HISTORY_PROFILES: dict[str, HistoryConfig] = {
     "tiny": HistoryConfig(n_weeks=30, start_week="2024-01-06"),
     "small": HistoryConfig(n_weeks=104, start_week="2022-01-01"),
     "full": HistoryConfig(n_weeks=320, start_week="2020-07-04"),
+    # Plausible, uncalibrated assumptions about real pharmacy retail: strong
+    # category seasonality, a few percent of market-wide weekly swing,
+    # category-level share noise and a third of products selling
+    # intermittently. Chosen before running any detector on it.
+    "realistic": HistoryConfig(
+        n_weeks=104,
+        start_week="2022-01-01",
+        commodity_season_amplitude=0.35,
+        market_shock_sigma=0.04,
+        commodity_shock_sigma=0.03,
+        intermittency=0.3,
+    ),
 }
 
 

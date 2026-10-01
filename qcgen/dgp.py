@@ -77,6 +77,57 @@ def holiday_boosts(dates: pd.DatetimeIndex, config: HistoryConfig) -> np.ndarray
     return boost
 
 
+def _realism_factor(
+    frame: pd.DataFrame,
+    dates: pd.DatetimeIndex,
+    products: pd.DataFrame,
+    config: HistoryConfig,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Commodity seasonality and market/commodity shocks (all off by default)."""
+    factor = np.ones(len(frame))
+    commodities = sorted(str(value) for value in products["commodity_id"].unique())
+    commodity_index = {value: index for index, value in enumerate(commodities)}
+    row_commodity = frame["commodity_id"].astype(str).map(commodity_index).to_numpy()
+    row_week = frame["week"].to_numpy(dtype=np.int64) - 1
+    if config.commodity_season_amplitude > 0:
+        amplitude = rng.uniform(0.0, config.commodity_season_amplitude, len(commodities))
+        phase = rng.uniform(0.0, 52.18, len(commodities))
+        woy = dates.isocalendar().week.to_numpy(dtype=np.float64)
+        season = 1.0 + amplitude[:, None] * np.sin(
+            2 * np.pi * (woy[None, :] - phase[:, None]) / 52.18
+        )
+        factor *= season[row_commodity, row_week]
+    if config.market_shock_sigma > 0:
+        shocks = rng.lognormal(0.0, config.market_shock_sigma, len(dates))
+        factor *= shocks[row_week]
+    if config.commodity_shock_sigma > 0:
+        shocks = rng.lognormal(
+            0.0, config.commodity_shock_sigma, (len(commodities), len(dates))
+        )
+        factor *= shocks[row_commodity, row_week]
+    return factor
+
+
+def _apply_intermittency(
+    frame: pd.DataFrame,
+    products: pd.DataFrame,
+    config: HistoryConfig,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    """Drop non-trading store-weeks of intermittently selling products."""
+    if config.intermittency <= 0:
+        return frame
+    product_ids = products["product_id"].astype(str).to_numpy()
+    slow = rng.random(len(product_ids)) < config.intermittency
+    trade_probability = np.where(slow, rng.uniform(0.25, 0.75, len(product_ids)), 1.0)
+    probability = frame["product_id"].astype(str).map(
+        dict(zip(product_ids, trade_probability, strict=True))
+    ).to_numpy(dtype=np.float64)
+    keep = rng.random(len(frame)) < probability
+    return frame.loc[keep].reset_index(drop=True)
+
+
 def generate_history(
     universe: Universe,
     config: HistoryConfig,
@@ -108,7 +159,7 @@ def generate_history(
     weeks = pd.DataFrame({"week": np.arange(1, n_weeks + 1, dtype=np.int32)})
     frame = universe.assortment.merge(weeks, how="cross")
     frame = frame.merge(
-        products[["product_id", "base_popularity", "is_script"]],
+        products[["product_id", "commodity_id", "base_popularity", "is_script"]],
         on="product_id",
         how="left",
     )
@@ -117,6 +168,11 @@ def generate_history(
     frame["price"] = frame["product_id"].map(price).astype(np.float64)
     frame["week_factor"] = frame["week"].map(week_factor_series).astype(np.float64)
     frame = frame.loc[frame["week"] >= frame["open_week"]].reset_index(drop=True)
+
+    frame["week_factor"] = frame["week_factor"] * _realism_factor(
+        frame, dates, products, config, rng
+    )
+    frame = _apply_intermittency(frame, products, config, rng)
 
     n = len(frame)
     promo = rng.random(n) < config.promo_fraction
