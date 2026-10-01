@@ -67,8 +67,14 @@ class DatasetConfig:
     broad_recalculation_breadth: float = 0.5
     lineage_materiality_ratio: float = 1e-5
     # Most recent overlap weeks the source is known to restate (late-arriving
-    # data); excluded from lineage attribution. 0 = no declared window.
-    lineage_restatement_weeks: int = 0
+    # data). Lineage attribution ignores them, and the per-week revision check
+    # allows them ``restatement_tolerance`` instead of ``week_revision_ratio``.
+    # 0 = no declared window: a feed with late arrival must declare it.
+    restatement_weeks: int = 0
+    restatement_tolerance: float = 0.1
+    # An overlap week whose unexplained revision exceeds this fraction of that
+    # week's previous value escalates on its own (attribution.week_revisions).
+    week_revision_ratio: float = 0.005
     reconciliation_tolerance: float = 1e-6
     # Columns scanned for aggregate marker values ("TOTAL", "ALL", ...) that
     # would double count if mixed into detail rows. Parent/child reconciliation

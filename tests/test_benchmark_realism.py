@@ -155,7 +155,7 @@ def test_lineage_blames_the_stage_that_added_the_change():
     # excludes it entirely.
     alone = _stage_frames(restate_source=0.03, coded_factor=1.0)
     assert analyze_lineage(_StageSource(alone), "v1", "v2", ["source", "coded"], config, pair).first_divergence == "source"
-    windowed = replace(config, lineage_restatement_weeks=1)
+    windowed = replace(config, restatement_weeks=1)
     assert analyze_lineage(_StageSource(alone), "v1", "v2", ["source", "coded"], windowed, pair).first_divergence is None
 
 

@@ -115,6 +115,11 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
         None,
     ),
     "clean": FamilySpec("clean", "warehouse", "control", "PASS", "clean", None),
+    # One overlap week restated (e.g. a partial reload) while every other week
+    # is untouched: too small for whole-history materiality on its own.
+    "week_restatement": FamilySpec(
+        "week_restatement", "source", "fault", "INVESTIGATE", "historical_correction", "source"
+    ),
     "missing_products": FamilySpec(
         "missing_products", "source", "fault", "INVESTIGATE", "missing_products", "source"
     ),

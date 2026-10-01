@@ -158,6 +158,99 @@ def _cross_metric_flags(
     return flags
 
 
+@dataclass(frozen=True)
+class WeekRevision:
+    """One overlap week's revision that no structural event explains."""
+
+    week: int
+    previous: float
+    delta: float
+    explained: float
+    unexplained: float
+    relative: float
+    tolerance: float
+    in_restatement_window: bool
+    material: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def week_revisions(
+    base_cube: pd.DataFrame,
+    events: list[LifecycleEvent],
+    config: DatasetConfig,
+) -> list[WeekRevision]:
+    """Per-week unexplained revision of the primary metric.
+
+    Whole-history materiality cannot see a restatement confined to one week:
+    it must exceed ``materiality_ratio`` of *all* overlap weeks. Each overlap
+    week is therefore also judged on its own: its revision minus the part its
+    structural events (backfills, extensions, truncations, removals) account
+    for, as a fraction of that week's previous value. Weeks inside the
+    declared ``restatement_weeks`` window (late-arriving data) use the looser
+    ``restatement_tolerance``. Every week is returned; ``material`` marks the
+    ones that escalate.
+    """
+    metric = config.primary_metric
+    week = config.week_column
+    delta_column, previous_column = f"{metric}_delta", f"{metric}_previous"
+    if not len(base_cube) or delta_column not in base_cube.columns:
+        return []
+    overlap = base_cube.loc[base_cube["period"] == "overlap"]
+    if not len(overlap):
+        return []
+    per_week = overlap.groupby(week)[[delta_column, previous_column]].sum()
+    structural = [
+        event
+        for event in events
+        if event.classification in EXPLAINABLE_CLASSES and event.classification != RECLASSIFIED
+    ]
+    explanation_type = next(
+        (
+            entity_type
+            for entity_type in config.explanation_entity_types
+            if any(event.entity_type == entity_type for event in structural)
+        ),
+        structural[0].entity_type if structural else None,
+    )
+    explained: dict[int, float] = {}
+    for event in structural:
+        if event.entity_type != explanation_type:
+            continue
+        for week_id, value in event.value_added_by_week.items():
+            explained[int(week_id)] = explained.get(int(week_id), 0.0) + float(value)
+        for week_id, value in event.value_removed_by_week.items():
+            explained[int(week_id)] = explained.get(int(week_id), 0.0) - float(value)
+    weeks = sorted(int(value) for value in per_week.index)
+    window = set(weeks[-config.restatement_weeks:]) if config.restatement_weeks else set()
+    revisions: list[WeekRevision] = []
+    for week_id in weeks:
+        delta = float(per_week.at[week_id, delta_column])
+        previous = float(per_week.at[week_id, previous_column])
+        accounted = explained.get(week_id, 0.0)
+        unexplained = delta - accounted
+        relative = abs(unexplained) / abs(previous) if abs(previous) > 1e-12 else (
+            0.0 if abs(unexplained) <= 1e-9 else float("inf")
+        )
+        in_window = week_id in window
+        tolerance = config.restatement_tolerance if in_window else config.week_revision_ratio
+        revisions.append(
+            WeekRevision(
+                week=week_id,
+                previous=previous,
+                delta=delta,
+                explained=accounted,
+                unexplained=unexplained,
+                relative=relative,
+                tolerance=tolerance,
+                in_restatement_window=in_window,
+                material=relative > tolerance and abs(unexplained) > config.materiality_abs,
+            )
+        )
+    return revisions
+
+
 def explain_revision(
     base_cube: pd.DataFrame,
     events: list[LifecycleEvent],

@@ -140,6 +140,8 @@ def _family_checks(
         _check(checks, f"{case_id}: dollar changed", abs(effect.get("dollar", 0.0)) > 1e-9, effect.get("dollar"))
     elif family == "null_duplicate_storm":
         _check(checks, f"{case_id}: duplicate units added", effect.get("units", 0.0) > 0, effect.get("units"))
+    elif family == "week_restatement":
+        _check(checks, f"{case_id}: dollar negative", effect.get("dollar", 0.0) < 0, effect.get("dollar"))
     elif family == "market_movement":
         _check(checks, f"{case_id}: dollar negative", effect.get("dollar", 0.0) < 0, effect.get("dollar"))
         _check(checks, f"{case_id}: units negative", effect.get("units", 0.0) < 0, effect.get("units"))

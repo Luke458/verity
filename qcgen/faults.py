@@ -444,6 +444,35 @@ def inject_entity_merge(
     return {**state, "fact": new_fact, "stores": new_dim}, case
 
 
+def inject_week_restatement(
+    state: State, ctx: FaultContext, params: dict
+) -> tuple[State, GroundTruthCase]:
+    """Scale every row of one overlap week (a partial reload of that week)."""
+    fact = state["fact"]
+    week = int(params.get("week", ctx.current_week - 3))
+    factor = float(params.get("factor", 0.9))
+    if week >= ctx.current_week or week < 1:
+        raise ValueError("week_restatement must target an overlap week")
+    mask = fact["week"] == week
+    new_fact = fact.copy()
+    units = np.rint(new_fact.loc[mask, "units"].to_numpy(dtype=np.float64) * factor)
+    new_fact.loc[mask, "dollar"] = (
+        new_fact.loc[mask, "dollar"].to_numpy(dtype=np.float64) * factor
+    ).astype(np.float32)
+    if "scripts" in new_fact.columns:
+        scripts = new_fact.loc[mask, "scripts"].to_numpy(dtype=np.float64)
+        new_fact.loc[mask, "scripts"] = np.where(scripts > 0, units, 0.0).astype(np.float32)
+    new_fact.loc[mask, "units"] = units.astype(np.int32)
+    case = _case(
+        ctx,
+        injection_stage=ctx.stage,
+        affected={},
+        weeks=[week],
+        details={"week": week, "factor": factor},
+    )
+    return {**state, "fact": new_fact}, case
+
+
 def inject_clean(
     state: State, ctx: FaultContext, params: dict
 ) -> tuple[State, GroundTruthCase]:
@@ -467,4 +496,5 @@ INJECTORS = {
     "null_duplicate_storm": inject_null_duplicate_storm,
     "market_movement": inject_market_movement,
     "clean": inject_clean,
+    "week_restatement": inject_week_restatement,
 }

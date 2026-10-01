@@ -20,7 +20,7 @@ PANELS = (
     ("market_movement", "Market movement", "drop of one commodity"),
     ("coding_error", "Coding error", "dollar cut on affected products"),
     ("warehouse_transform_error", "Warehouse transform", "dollar cut on one commodity"),
-    ("missing_products", "Missing products", "share of products absent"),
+    ("week_restatement", "One week restated", "cut of one overlap week"),
 )
 THEMES = {
     "light": {

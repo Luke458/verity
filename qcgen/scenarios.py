@@ -51,6 +51,7 @@ MAGNITUDE_MEANING: dict[str, str] = {
     "warehouse_transform_error": "fractional dollar reduction on one commodity",
     "recalculation": "lognormal sigma of the historical restatement",
     "market_movement": "fractional drop of one commodity in the new week",
+    "week_restatement": "fractional cut of one overlap week 3-8 weeks back",
 }
 
 
@@ -83,6 +84,12 @@ def _magnitude_spec(
         return FaultSpec(family, "source", {"sigma": magnitude})
     if family == "market_movement":
         return FaultSpec(family, "warehouse", {"factor": 1.0 - magnitude})
+    if family == "week_restatement":
+        # Outside a typical late-arrival window; the week is fixed per world
+        # so magnitudes stay paired.
+        return FaultSpec(
+            family, "source", {"week": current_week - 3 - (current_week % 6), "factor": 1.0 - magnitude}
+        )
     raise ValueError(f"family {family!r} has no magnitude parameter")
 
 
@@ -149,6 +156,12 @@ def fault_spec(
         return FaultSpec(family, "warehouse", {"factor": float(rng.uniform(0.7, 0.88))})
     if family == "clean":
         return FaultSpec(family, "warehouse", {})
+    if family == "week_restatement":
+        return FaultSpec(
+            family,
+            "source",
+            {"week": current_week - int(rng.integers(3, 9)), "factor": float(rng.uniform(0.9, 0.97))},
+        )
     raise ValueError(f"unknown fault family: {family!r}")
 
 

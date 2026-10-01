@@ -111,6 +111,11 @@ def test_family_ground_truth(family, tiny_config, tmp_path):
         assert case["expected_status"] == "INVESTIGATE"
         assert effect["dollar"] < 0
         assert effect["units"] < 0
+    elif family == "week_restatement":
+        assert effect["dollar"] < 0
+        assert case["weeks"] == [case["details"]["week"]]
+        assert case["details"]["week"] < manifest["n_current_weeks"]
+        assert case["expected_class"] == "historical_correction"
     elif family == "clean":
         assert case["kind"] == "control"
         assert case["expected_status"] == "PASS"

@@ -29,6 +29,7 @@ FAULT_DESCRIPTIONS = {
     "null_duplicate_storm": ("warehouse", "Nulls and duplicated rows introduced."),
     "market_movement": ("warehouse", "Genuine latest-week trend shift; must surface."),
     "clean": ("warehouse", "No injection; negative control that must PASS."),
+    "week_restatement": ("source", "One overlap week partially reloaded (3-10% cut)."),
 }
 
 

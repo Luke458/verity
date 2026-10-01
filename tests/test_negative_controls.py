@@ -324,8 +324,30 @@ def _material_missing_entity_fails() -> None:
     )
 
 
+@negative_control("revision:single_week_restatement")
+def _single_week_restatement_fails() -> None:
+    from qc.attribution import week_revisions
+    from qc.revision import build_revision_cube
+
+    config = DatasetConfig(entity_columns=("store_id",), entity_key_columns=("store_id",))
+    previous = pd.DataFrame(
+        [{"week": week, "store_id": "S1", "dollar": 100.0, "units": 1} for week in range(1, 11)]
+    )
+    current = previous.copy()
+    current.loc[current["week"] == 5, "dollar"] = 98.0
+    current = pd.concat(
+        [current, pd.DataFrame([{"week": 11, "store_id": "S1", "dollar": 100.0, "units": 1}])],
+        ignore_index=True,
+    )
+    pair = build_version_pair(previous, current, "v1", "v2", "warehouse", "warehouse", config)
+    cube = build_revision_cube(previous, current, ["store_id", "week"], config, pair.new_periods)
+    assert any(item.material for item in week_revisions(cube, [], config)), (
+        "a 2% restatement of one week went unflagged"
+    )
+
+
 def test_negative_controls_are_registered() -> None:
-    assert len(NEGATIVE_CONTROLS) >= 17, (
+    assert len(NEGATIVE_CONTROLS) >= 18, (
         "the negative-control registry shrank; every check must keep a control"
     )
 

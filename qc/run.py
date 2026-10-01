@@ -19,7 +19,13 @@ from typing import Any
 
 import pandas as pd
 
-from .attribution import AttributionResult, classify_run, explain_revision
+from .attribution import (
+    AttributionResult,
+    WeekRevision,
+    classify_run,
+    explain_revision,
+    week_revisions,
+)
 from .config import DatasetConfig
 from .contracts import ContractCheck, ContractResult, validate_contracts
 from .counterfactual import CounterfactualResult, reconstruct_counterfactual
@@ -67,6 +73,7 @@ class QCRunResult:
     temporal: TemporalResult | None = None
     decisions: DecisionSet | None = None
     relationships: list[EntityRelationship] = field(default_factory=list)
+    week_revisions: list[WeekRevision] = field(default_factory=list)
     reference: dict[str, Any] | None = None
     expectations: Sequence[Any] = ()
     observed_at: str | None = None
@@ -247,6 +254,9 @@ def _finalize(
         config.materiality_ratio * abs(result.attribution.previous_total),
     ) if result.attribution else config.materiality_abs
     result.assessment_id = assessment_id or result.run_id
+    result.machine["week_revisions"] = [
+        item.to_dict() for item in result.week_revisions if item.material
+    ]
 
     findings = collect_findings(result, config, tuple(prior_refreshes))
     if config.recurrence_enabled:
@@ -409,6 +419,7 @@ def run_qc(
             return False
     approved_events = [item for item in registry.events() if approval_available(item)]
     attribution = explain_revision(cubes["base"], events, approved_events, config)
+    revisions_by_week = week_revisions(cubes["base"], events, config)
     counterfactual = reconstruct_counterfactual(previous, current, events, config)
     reconciliation = run_reconciliation(
         current,
@@ -480,6 +491,7 @@ def run_qc(
             lineage=lineage,
             temporal=temporal,
             relationships=relationships,
+            week_revisions=revisions_by_week,
             reference=reference_report,
             expectations=expectations,
             hierarchy=hierarchy,

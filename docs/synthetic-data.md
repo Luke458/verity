@@ -78,6 +78,7 @@ cannot drift again: change `FAMILY_SPECS`, then update this table to match.
 | schema_failure | report | fault | schema_failure | report | DATA_CONTRACT_FAILURE | |
 | null_duplicate_storm | warehouse | fault | null_duplicate_storm | warehouse | DATA_CONTRACT_FAILURE | Contract failure — the report table is not fit for revision QC — not an ordinary INVESTIGATE. |
 | market_movement | warehouse | movement | market_movement | (none) | INVESTIGATE | Genuine latest-week business movement, not a data fault; it must surface as a latest-week anomaly and is scored as a detection target, never as a control. |
+| week_restatement | source | fault | historical_correction | source | INVESTIGATE | One overlap week partially reloaded while every other week is untouched; too small for whole-history materiality on its own. |
 | clean | warehouse | control | clean | (none) | PASS | Negative control: no injection. The only family expected to PASS; the false-positive rate is measured on it. |
 
 `requires_investigation` is derived, not declared: it is true exactly when the

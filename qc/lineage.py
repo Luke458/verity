@@ -11,7 +11,7 @@ first, and "first divergent stage" would blame it for every downstream fault.
 
 When no stage adds a material value increment, the first stage whose
 structure changed (rows, entities, fingerprints) is reported, as before.
-``lineage_restatement_weeks`` excludes a declared late-arrival window from the
+``restatement_weeks`` excludes a declared late-arrival window from the
 comparison. Stages outside the configured pipeline order are reported as
 unmapped; when no stage can be mapped the status is ``UNKNOWN``.
 """
@@ -138,7 +138,7 @@ def analyze_lineage(
         return result
 
     overlap = list(pair.overlap_weeks)
-    window = max(0, int(config.lineage_restatement_weeks))
+    window = max(0, int(config.restatement_weeks))
     compared = sorted(overlap)[:-window] if window else list(overlap)
     upstream_revision: pd.Series | None = None
     increments: dict[str, float] = {}

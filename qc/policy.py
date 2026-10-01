@@ -53,6 +53,7 @@ _CHECK_SCOPE_KINDS = {
     "historical_revision": SCOPE_HISTORICAL_REVISION,
     "counterfactual_residual": SCOPE_COUNTERFACTUAL,
     "revision_missing_evidence": SCOPE_REVISION,
+    "revision_week": SCOPE_REVISION,
     "reference": SCOPE_REFERENCE,
     "ratio:dollar_per_unit": SCOPE_APPROVAL,
     "recurrence": SCOPE_RECURRENCE,
@@ -242,6 +243,20 @@ def collect_findings(
                 materiality=float(threshold),
             )
         )
+    # A restatement confined to one overlap week, judged against that week.
+    for item in getattr(result, "week_revisions", ()) or ():
+        if item.material:
+            findings.append(
+                finding(
+                    "revision_week",
+                    str(item.week),
+                    "FAIL",
+                    metric=getattr(config, "primary_metric", ""),
+                    period=int(item.week),
+                    impact=abs(float(item.unexplained)),
+                    materiality=float(item.tolerance) * abs(float(item.previous)),
+                )
+            )
     for name, cube in result.cubes.items():
         measure_columns = [
             column for column in cube if column.endswith(("_previous", "_current"))

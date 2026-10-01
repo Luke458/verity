@@ -80,6 +80,7 @@ LINEAGE_FAMILIES: dict[str, str] = {
     "coding_error": "coded",
     "warehouse_transform_error": "warehouse",
     "recalculation": "source",
+    "week_restatement": "source",
 }
 
 

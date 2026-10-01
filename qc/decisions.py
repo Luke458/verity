@@ -343,6 +343,20 @@ class RuleDecisionProvider:
         if attribution is not None and not attribution.material and attribution.breadth > config.broad_recalculation_breadth:
             return "HISTORICAL_CORRECTION", "SOURCE", "LOW", True, 0.55, ["attribution:breadth"]
 
+        restated = [
+            item for item in (getattr(result, "week_revisions", ()) or ()) if item.material
+        ]
+        if restated:
+            origin = _stage_origin(first) if first else "SOURCE"
+            return (
+                "HISTORICAL_CORRECTION",
+                origin,
+                "MEDIUM",
+                True,
+                0.6,
+                [f"revision_week:{item.week}" for item in restated],
+            )
+
         if temporal is not None and temporal.anomaly:
             evidence = [
                 f"temporal:{item.series_id}"

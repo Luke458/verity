@@ -513,3 +513,60 @@ def test_missing_entity_escalates_only_when_material():
         )
         status = classify_run("PASS", events, attribution, CONFIG)
         assert (status == "INVESTIGATE") is material
+
+
+def _restated_frames(week_factor: dict[int, float]):
+    rows_prev, rows_curr = [], []
+    # 100 overlap weeks: one week is 1% of history, as on a two-year table.
+    for week in range(1, 101):
+        for store in ("S1", "S2"):
+            rows_prev.append({"week": week, "store_id": store, "dollar": 100.0, "units": 1})
+            rows_curr.append(
+                {"week": week, "store_id": store, "dollar": 100.0 * week_factor.get(week, 1.0), "units": 1}
+            )
+    for store in ("S1", "S2"):
+        rows_curr.append({"week": 101, "store_id": store, "dollar": 100.0, "units": 1})
+    return _fact(rows_prev), _fact(rows_curr)
+
+
+def test_single_week_restatement_is_material_on_its_own():
+    # Regression: whole-history materiality needed ~10% of one week before a
+    # restatement confined to that week escalated.
+    from qc.attribution import week_revisions
+
+    previous, current = _restated_frames({60: 0.97})
+    pair = _pair(previous, current)
+    events = classify_entity_changes(previous, current, pair, CONFIG)
+    cube = build_revision_cube(previous, current, ["store_id", "week"], CONFIG, pair.new_periods)
+    attribution = explain_revision(cube, events, [], CONFIG)
+    assert not attribution.material  # invisible to whole-history materiality
+    flagged = [item for item in week_revisions(cube, events, CONFIG) if item.material]
+    assert [item.week for item in flagged] == [60]
+    assert flagged[0].relative == pytest.approx(0.03)
+
+
+def test_declared_restatement_window_tolerates_late_arrival_only():
+    from qc.attribution import week_revisions
+
+    window = replace(CONFIG, restatement_weeks=2)
+    for factors, material_weeks in (({99: 1.015, 100: 1.03}, []), ({100: 1.2}, [100]), ({50: 1.03, 100: 1.03}, [50])):
+        previous, current = _restated_frames(factors)
+        pair = _pair(previous, current)
+        cube = build_revision_cube(previous, current, ["store_id", "week"], window, pair.new_periods)
+        flagged = [item.week for item in week_revisions(cube, [], window) if item.material]
+        assert flagged == material_weeks, factors
+
+
+def test_week_revision_excludes_what_structural_events_explain():
+    from qc.attribution import week_revisions
+
+    # S3 is a historical backfill: every week gains S3's rows, all explained.
+    previous, current = _restated_frames({})
+    backfill = _fact([{"week": week, "store_id": "S3", "dollar": 100.0, "units": 1} for week in range(1, 102)])
+    current = pd.concat([current, backfill], ignore_index=True)
+    pair = _pair(previous, current)
+    events = classify_entity_changes(previous, current, pair, CONFIG)
+    cube = build_revision_cube(previous, current, ["store_id", "week"], CONFIG, pair.new_periods)
+    revisions = week_revisions(cube, events, CONFIG)
+    assert revisions and not any(item.material for item in revisions)
+    assert all(item.explained == pytest.approx(item.delta) for item in revisions)

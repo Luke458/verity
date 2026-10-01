@@ -30,6 +30,7 @@ FAULT_FAMILIES: tuple[str, ...] = (
     "null_duplicate_storm",
     "expected_event",
     "market_movement",
+    "week_restatement",
 )
 
 # Negative controls: refreshes that must PASS. The false-positive rate is

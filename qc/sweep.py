@@ -37,6 +37,7 @@ DEFAULT_FAMILIES: tuple[str, ...] = (
     "warehouse_transform_error",
     "recalculation",
     "market_movement",
+    "week_restatement",
 )
 DEFAULT_MAGNITUDES: tuple[float, ...] = (0.01, 0.02, 0.05, 0.1, 0.2, 0.4)
 # Two faults in one refresh, at default sizes: one structural or value fault
