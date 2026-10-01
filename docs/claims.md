@@ -36,16 +36,16 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 | Lifecycle and attribution | `validated-synthetic` | Multi-class events, signed attribution, reclassification conservation. Missing entities escalate only when material (`lifecycle.missing_entity_impact`); negative control in `tests/test_negative_controls.py`. |
 | Counterfactual reconstruction | `validated-synthetic` | Reconstructed from frames; no score when nothing is reconstructable. |
 | Reconciliation | `validated-synthetic` | Per-key mass balance, count consistency, aggregate markers; price-ratio outliers only in appended periods. |
-| Lineage first divergence | `validated-synthetic` | 1.000 on the registered cohort, **only where history is never restated**: on the `realistic` profile late-arriving data makes the source stage diverge first in every refresh, so downstream faults are attributed to source. |
+| Lineage first divergence | `validated-synthetic` | The origin is the stage adding the largest material weekly revision increment over its upstream stage, so a legitimate source restatement is not blamed for a downstream fault. 1.000 on the registered cohort; on the `realistic` profile (late-arriving data) coding errors 55/60 and warehouse errors 60/60, coding 60/60 with a declared 2-week restatement window. `tests/test_benchmark_realism.py`. |
 | Expected events, ratio expectations, reference controls | `plumbing-only` | Scoped approvals must precede the observation cutoff and cover exact finding IDs; `expected_event` reaches PASS_WITH_EXPLANATION with its registry. |
-| Temporal QC | `validated-synthetic` | Share-of-parent tests for leaves, forecast p-values for national series, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out case. **On the `realistic` profile (per-commodity seasonality) a 20% single-commodity drop is detected 2/10 times and a 40% drop 6/10** (`qc sweep`). `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`. |
+| Temporal QC | `validated-synthetic` | Leaves are tested on their share of the national parent against the better of a trailing-mean and a year-over-year baseline (chosen on training history), national series on forecast p-values, one BH family per refresh at `temporal_fdr_q = 0.01`. `market_movement` detected on every held-out cohort case. On the `realistic` profile (per-commodity seasonality) a single-commodity drop of 40% is detected 20/20 across two seed sets, 20% 12/20 and 10% 2/20 (`qc sweep`). `tests/test_qc_temporal.py`, `tests/test_qc_policy.py`, `tests/test_benchmark_realism.py`. |
 | Findings and final status | `validated-synthetic` | One status path (`policy.apply_policy`); nothing is cleared automatically. |
 | Recurrence | `plumbing-only` | Stable keys survive serialization and storage; frozen, hash-checked predecessors. `tests/test_qc_second_remediation.py`. |
-| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 60/72 = 0.833 (Wilson 0.731-0.902), origin 66/66. All misses are two whole families: `market_movement` is labelled UNKNOWN by design (temporal-only anomalies get no cause) and `recalculation` is labelled SOURCE_INGESTION where the oracle says HISTORICAL_CORRECTION. Severity has no ground truth and is not scored. On the `realistic` profile every detected coding and warehouse error is labelled SOURCE_INGESTION (0/54, 0/60) because the labels follow lineage. This is the baseline any decision model must beat. |
+| Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 60/72 = 0.833 (Wilson 0.731-0.902), origin 66/66; on the `realistic` profile coding/warehouse errors are labelled correctly 54/54 and 60/60 (was 0/54, 0/60 before the lineage fix). All misses are two whole families: `market_movement` is labelled UNKNOWN by design and `recalculation` SOURCE_INGESTION where the oracle says HISTORICAL_CORRECTION. Severity has no ground truth and is not scored. This is the baseline any decision model must beat. |
 | Weekly orchestrator and journal | `validated-synthetic` | Content-addressed identity, locking, fault injection at all five journal/publication seams (`tests/test_reliability.py`), atomic publication. |
 | Notification | `plumbing-only` | Suppressed statuses and cached retries reach no sink; accumulating size bound; https-only webhooks without redirects. `tests/test_qc_notify.py`. |
 | Delta source and onboarding | `plumbing-only` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. |
-| Fault-size sweep and realistic profile | `validated-synthetic` | `qc sweep`: detection curves over fault size (paired seeds), two-fault refreshes and clean false alarms per profile; results for engine `a6d485794644` in `docs/results/` and [evaluation.md](evaluation.md). Clean false alarms 2/60 (`small`), 3/60 (`realistic`). `tests/test_benchmark_realism.py`. |
+| Fault-size sweep and realistic profile | `validated-synthetic` | `qc sweep`: detection curves over fault size (paired seeds), two-fault refreshes and clean false alarms per profile; results for engine `24fcb768e0f4` in `docs/results/` and [evaluation.md](evaluation.md), including unseen seeds 7001-7010. Clean false alarms 3/60 (`small`), 3/60 and 4/60 (`realistic`). `tests/test_benchmark_realism.py`. |
 | Cohort evaluation | `validated-synthetic` | Registered, hash-pinned plan with independently sized clean controls; exits 3 on gate failure. |
 
 ## Not claimed
@@ -63,9 +63,8 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 
 ## Known limitations
 
-- On the `realistic` profile: category seasonality defeats the leaf share test
-  (single-commodity movements below ~40% are mostly missed), and late-arriving
-  restatements break lineage attribution and therefore the cause labels.
+- On the `realistic` profile a single-commodity movement of 10% or less is
+  within noise at the 1% false-alarm budget (2/20 detected at 10%).
 - Revision materiality is relative to the whole overlap history, so a
   restatement confined to one recent week must exceed roughly
   `materiality_ratio x overlap weeks` (~10% of a week at defaults) to escalate.

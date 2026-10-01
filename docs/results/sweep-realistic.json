@@ -1,5 +1,5 @@
 {
-  "code_sha256": "a6d48579464466ad9db9485f9f19bc7438574cc17a0ba150de263b454a774e52",
+  "code_sha256": "24fcb768e0f49dff27eddf50537795bd7c9ee57ea4e1a1fe55970ba070140aa5",
   "config_overrides": {},
   "controls_per_seed": 6,
   "families": [
@@ -58,13 +58,20 @@
       "coding_error": [
         {
           "cause": {
-            "ci_high": 0.43449149475208104,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.5655085052479191,
+            "hits": 5,
             "n": 5,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 0.7634104063845126,
+            "ci_low": 0.23658959361548731,
+            "hits": 5,
+            "n": 10,
+            "rate": 0.5
+          },
+          "lineage": {
             "ci_high": 0.7634104063845126,
             "ci_low": 0.23658959361548731,
             "hits": 5,
@@ -76,11 +83,11 @@
         },
         {
           "cause": {
-            "ci_high": 0.2991527535509594,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7008472464490407,
+            "hits": 9,
             "n": 9,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
             "ci_high": 0.9821242504842788,
@@ -89,18 +96,32 @@
             "n": 10,
             "rate": 0.9
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.02,
           "median_relative_effect": 0.001918405992910266
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -112,13 +133,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -130,13 +158,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -148,13 +183,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -181,6 +223,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.01,
           "median_relative_effect": 0.0
         },
@@ -198,6 +247,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.02,
           "median_relative_effect": 0.0
@@ -217,6 +273,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.05,
           "median_relative_effect": 0.0
         },
@@ -234,6 +297,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.1,
           "median_relative_effect": 0.0
@@ -253,6 +323,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.2,
           "median_relative_effect": 0.0
         },
@@ -270,6 +347,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.4,
           "median_relative_effect": 0.0
@@ -291,6 +375,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.01,
           "median_relative_effect": 0.043099235743284225
         },
@@ -303,6 +394,13 @@
             "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -327,6 +425,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.05,
           "median_relative_effect": 0.043099235743284225
         },
@@ -339,6 +444,13 @@
             "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -363,6 +475,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.2,
           "median_relative_effect": 0.21104702353477478
         },
@@ -375,6 +494,13 @@
             "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -401,6 +527,13 @@
             "n": 10,
             "rate": 0.1
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.01,
           "median_relative_effect": 0.0013342396123334765
         },
@@ -418,6 +551,13 @@
             "hits": 1,
             "n": 10,
             "rate": 0.1
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.02,
           "median_relative_effect": 0.002668479224666953
@@ -437,26 +577,15 @@
             "n": 10,
             "rate": 0.1
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.05,
           "median_relative_effect": 0.006671024486422539
-        },
-        {
-          "cause": {
-            "ci_high": 0.7934567085261071,
-            "ci_low": 0.0,
-            "hits": 0,
-            "n": 1,
-            "rate": 0.0
-          },
-          "detection": {
-            "ci_high": 0.4041563854975721,
-            "ci_low": 0.01787574951572113,
-            "hits": 1,
-            "n": 10,
-            "rate": 0.1
-          },
-          "magnitude": 0.1,
-          "median_relative_effect": 0.013341962359845638
         },
         {
           "cause": {
@@ -473,23 +602,62 @@
             "n": 10,
             "rate": 0.2
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
+          "magnitude": 0.1,
+          "median_relative_effect": 0.013341962359845638
+        },
+        {
+          "cause": {
+            "ci_high": 0.48990002040399916,
+            "ci_low": 0.0,
+            "hits": 0,
+            "n": 4,
+            "rate": 0.0
+          },
+          "detection": {
+            "ci_high": 0.6873304525498135,
+            "ci_low": 0.16817758120350967,
+            "hits": 4,
+            "n": 10,
+            "rate": 0.4
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.2,
           "median_relative_effect": 0.026683837175369263
         },
         {
           "cause": {
-            "ci_high": 0.3903430336530645,
+            "ci_high": 0.2775401687666166,
             "ci_low": 0.0,
             "hits": 0,
-            "n": 6,
+            "n": 10,
             "rate": 0.0
           },
           "detection": {
-            "ci_high": 0.8318224187964902,
-            "ci_low": 0.3126695474501864,
-            "hits": 6,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.6
+            "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.4,
           "median_relative_effect": 0.053367674350738525
@@ -511,6 +679,13 @@
             "n": 10,
             "rate": 0.8
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.01,
           "median_relative_effect": 0.007149772718548775
         },
@@ -528,6 +703,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.02,
           "median_relative_effect": 0.015594616532325745
@@ -547,6 +729,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.05,
           "median_relative_effect": 0.05933939293026924
         },
@@ -564,6 +753,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.1,
           "median_relative_effect": 0.07738792896270752
@@ -583,6 +779,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.2,
           "median_relative_effect": 0.2197933942079544
         },
@@ -600,6 +803,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.4,
           "median_relative_effect": 0.4100745916366577
@@ -621,6 +831,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.01,
           "median_relative_effect": 0.03769567608833313
         },
@@ -638,6 +855,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.02,
           "median_relative_effect": 0.03769567608833313
@@ -657,6 +881,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.05,
           "median_relative_effect": 0.03769567608833313
         },
@@ -674,6 +905,13 @@
             "hits": 10,
             "n": 10,
             "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
           },
           "magnitude": 0.1,
           "median_relative_effect": 0.07268057018518448
@@ -693,6 +931,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.2,
           "median_relative_effect": 0.20813734829425812
         },
@@ -711,6 +956,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
           "magnitude": 0.4,
           "median_relative_effect": 0.4422514736652374
         }
@@ -725,6 +977,13 @@
             "rate": 0.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -749,6 +1008,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.02,
           "median_relative_effect": 0.002956678159534931
         },
@@ -761,6 +1027,13 @@
             "rate": 0.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -785,6 +1058,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.1,
           "median_relative_effect": 0.01739725098013878
         },
@@ -797,6 +1077,13 @@
             "rate": 0.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -821,6 +1108,13 @@
             "n": 10,
             "rate": 1.0
           },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.4,
           "median_relative_effect": 0.13616187870502472
         }
@@ -828,13 +1122,20 @@
       "warehouse_transform_error": [
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -846,13 +1147,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -864,13 +1172,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -882,13 +1197,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -900,13 +1222,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -918,13 +1247,20 @@
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
-            "ci_low": 0.0,
-            "hits": 0,
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
             "n": 10,
-            "rate": 0.0
+            "rate": 1.0
           },
           "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
             "ci_high": 1.0,
             "ci_low": 0.7224598312333834,
             "hits": 10,
@@ -939,11 +1275,11 @@
     "pairs": {
       "coding_error+market_movement": {
         "cause_any_of": {
-          "ci_high": 0.2775401687666166,
-          "ci_low": 0.0,
-          "hits": 0,
+          "ci_high": 1.0,
+          "ci_low": 0.7224598312333834,
+          "hits": 10,
           "n": 10,
-          "rate": 0.0
+          "rate": 1.0
         },
         "detection": {
           "ci_high": 1.0,
@@ -957,7 +1293,7 @@
           "MARKET_MOVEMENT"
         ],
         "predicted": {
-          "SOURCE_INGESTION": 10
+          "CODING": 10
         }
       },
       "commodity_remap+warehouse_transform_error": {

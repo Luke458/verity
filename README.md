@@ -12,10 +12,11 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > **Validation status: synthetic only.** All evidence comes from the bundled
 > generator (`qcgen`) and its fault oracle. On the registered cohort the engine
 > detects 72/72 held-out faults and movements and raises no alarm on 60/60
-> clean refreshes. On a harder, more realistic profile it still catches
-> structural faults down to 1%, but misses most single-category movements and
-> mislabels the cause of downstream faults; see
-> [docs/evaluation.md](docs/evaluation.md) and [docs/claims.md](docs/claims.md).
+> clean refreshes. On a harder profile with category seasonality and
+> late-arriving data it catches structural faults down to 1% and
+> single-category drops of 40%, but misses most drops of 10% or less; the
+> [case study](docs/case-study.md) tells how it got here and
+> [docs/claims.md](docs/claims.md) records the evidence.
 > Backends: local Parquet snapshots and Delta tables via delta-rs.
 
 <picture>
@@ -108,6 +109,7 @@ data/, reports/     generated output (git-ignored)
 
 ## Docs
 
+- [docs/case-study.md](docs/case-study.md): how the engine went from alarming on everything to measured claims, and what it still cannot do
 - [docs/engine.md](docs/engine.md): what each layer decides and the final status policy
 - [docs/evaluation.md](docs/evaluation.md): cohort gate, shadow scoring, choosing thresholds
 - [docs/weekly-run.md](docs/weekly-run.md): weekly runs, journal, recovery, notifications, grain and calendars

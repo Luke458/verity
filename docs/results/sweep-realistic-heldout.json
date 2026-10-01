@@ -28,83 +28,83 @@
     "history_truncation+coding_error",
     "missing_stores+coding_error"
   ],
-  "profile": "small",
+  "profile": "realistic",
   "schema_version": 1,
   "seeds": [
-    5001,
-    5002,
-    5003,
-    5004,
-    5005,
-    5006,
-    5007,
-    5008,
-    5009,
-    5010
+    7001,
+    7002,
+    7003,
+    7004,
+    7005,
+    7006,
+    7007,
+    7008,
+    7009,
+    7010
   ],
   "summary": {
     "clean_false_alarms": {
-      "ci_high": 0.13700734625099836,
-      "ci_low": 0.01714919117914121,
-      "hits": 3,
+      "ci_high": 0.15925579893767722,
+      "ci_low": 0.02622827414319792,
+      "hits": 4,
       "n": 60,
-      "rate": 0.05
+      "rate": 0.06666666666666667
     },
     "clean_status_counts": {
-      "INVESTIGATE": 3,
-      "PASS": 57
+      "INVESTIGATE": 4,
+      "PASS": 56
     },
     "curves": {
       "coding_error": [
         {
           "cause": {
-            "ci_high": 1.0,
-            "ci_low": 0.20654329147389294,
-            "hits": 1,
-            "n": 1,
+            "ci_high": 0.9999999999999999,
+            "ci_low": 0.6096569663469354,
+            "hits": 6,
+            "n": 6,
             "rate": 1.0
           },
           "detection": {
-            "ci_high": 0.4041563854975721,
-            "ci_low": 0.01787574951572113,
-            "hits": 1,
+            "ci_high": 0.8318224187964902,
+            "ci_low": 0.3126695474501864,
+            "hits": 6,
             "n": 10,
-            "rate": 0.1
+            "rate": 0.6
           },
           "lineage": {
-            "ci_high": 1.0,
-            "ci_low": 0.7224598312333834,
-            "hits": 10,
+            "ci_high": 0.8318224187964902,
+            "ci_low": 0.3126695474501864,
+            "hits": 6,
             "n": 10,
-            "rate": 1.0
+            "rate": 0.6
           },
           "magnitude": 0.01,
-          "median_relative_effect": 0.0007717623375356197
+          "median_relative_effect": 0.0008246008073911071
         },
         {
           "cause": {
             "ci_high": 1.0,
-            "ci_low": 0.6456611570247934,
-            "hits": 7,
-            "n": 7,
+            "ci_low": 0.7008472464490407,
+            "hits": 9,
+            "n": 9,
             "rate": 1.0
           },
           "detection": {
-            "ci_high": 0.892210712513788,
-            "ci_low": 0.39677321997956516,
-            "hits": 7,
+            "ci_high": 0.9821242504842788,
+            "ci_low": 0.5958436145024278,
+            "hits": 9,
             "n": 10,
-            "rate": 0.7
+            "rate": 0.9
           },
           "lineage": {
-            "ci_high": 1.0,
-            "ci_low": 0.7224598312333834,
-            "hits": 10,
+            "ci_high": 0.9821242504842788,
+            "ci_low": 0.5958436145024278,
+            "hits": 9,
             "n": 10,
-            "rate": 1.0
+            "rate": 0.9
           },
           "magnitude": 0.02,
-          "median_relative_effect": 0.0015435946406796575
+          "median_relative_effect": 0.0016490836860612035
         },
         {
           "cause": {
@@ -129,7 +129,7 @@
             "rate": 1.0
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.0038589516188949347
+          "median_relative_effect": 0.004122650250792503
         },
         {
           "cause": {
@@ -154,7 +154,7 @@
             "rate": 1.0
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.007717903237789869
+          "median_relative_effect": 0.00824518222361803
         },
         {
           "cause": {
@@ -179,7 +179,7 @@
             "rate": 1.0
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.015435876324772835
+          "median_relative_effect": 0.01649036444723606
         },
         {
           "cause": {
@@ -204,7 +204,7 @@
             "rate": 1.0
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.03087175264954567
+          "median_relative_effect": 0.03298072889447212
         }
       ],
       "commodity_remap": [
@@ -383,7 +383,7 @@
             "rate": 1.0
           },
           "magnitude": 0.01,
-          "median_relative_effect": 0.04341418296098709
+          "median_relative_effect": 0.05322793126106262
         },
         {
           "cause": {
@@ -408,7 +408,7 @@
             "rate": 1.0
           },
           "magnitude": 0.02,
-          "median_relative_effect": 0.04341418296098709
+          "median_relative_effect": 0.05322793126106262
         },
         {
           "cause": {
@@ -433,7 +433,7 @@
             "rate": 1.0
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.04341418296098709
+          "median_relative_effect": 0.05322793126106262
         },
         {
           "cause": {
@@ -458,7 +458,7 @@
             "rate": 1.0
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.07904869318008423
+          "median_relative_effect": 0.09391368180513382
         },
         {
           "cause": {
@@ -483,7 +483,7 @@
             "rate": 1.0
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.20585110783576965
+          "median_relative_effect": 0.23471933603286743
         },
         {
           "cause": {
@@ -508,7 +508,7 @@
             "rate": 1.0
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.42955729365348816
+          "median_relative_effect": 0.44192561507225037
         }
       ],
       "market_movement": [
@@ -535,7 +535,7 @@
             "rate": null
           },
           "magnitude": 0.01,
-          "median_relative_effect": 0.0012306773569434881
+          "median_relative_effect": 0.0008067338494583964
         },
         {
           "cause": {
@@ -560,22 +560,22 @@
             "rate": null
           },
           "magnitude": 0.02,
-          "median_relative_effect": 0.0024613547138869762
+          "median_relative_effect": 0.0016134676989167929
         },
         {
           "cause": {
-            "ci_high": 0.48990002040399916,
-            "ci_low": 0.0,
+            "ci_high": null,
+            "ci_low": null,
             "hits": 0,
-            "n": 4,
-            "rate": 0.0
+            "n": 0,
+            "rate": null
           },
           "detection": {
-            "ci_high": 0.6873304525498135,
-            "ci_low": 0.16817758120350967,
-            "hits": 4,
+            "ci_high": 0.2775401687666166,
+            "ci_low": 0.0,
+            "hits": 0,
             "n": 10,
-            "rate": 0.4
+            "rate": 0.0
           },
           "lineage": {
             "ci_high": null,
@@ -585,22 +585,22 @@
             "rate": null
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.006153269670903683
+          "median_relative_effect": 0.004033766221255064
         },
         {
           "cause": {
+            "ci_high": null,
+            "ci_low": null,
+            "hits": 0,
+            "n": 0,
+            "rate": null
+          },
+          "detection": {
             "ci_high": 0.2775401687666166,
             "ci_low": 0.0,
             "hits": 0,
             "n": 10,
             "rate": 0.0
-          },
-          "detection": {
-            "ci_high": 1.0,
-            "ci_low": 0.7224598312333834,
-            "hits": 10,
-            "n": 10,
-            "rate": 1.0
           },
           "lineage": {
             "ci_high": null,
@@ -610,22 +610,22 @@
             "rate": null
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.012306539341807365
+          "median_relative_effect": 0.008067629300057888
         },
         {
           "cause": {
-            "ci_high": 0.2775401687666166,
+            "ci_high": 0.3244156195108769,
             "ci_low": 0.0,
             "hits": 0,
-            "n": 10,
+            "n": 8,
             "rate": 0.0
           },
           "detection": {
-            "ci_high": 1.0,
-            "ci_low": 0.7224598312333834,
-            "hits": 10,
+            "ci_high": 0.9433190520193067,
+            "ci_low": 0.49015684672072335,
+            "hits": 8,
             "n": 10,
-            "rate": 1.0
+            "rate": 0.8
           },
           "lineage": {
             "ci_high": null,
@@ -635,7 +635,7 @@
             "rate": null
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.02461307868361473
+          "median_relative_effect": 0.016135258600115776
         },
         {
           "cause": {
@@ -660,7 +660,7 @@
             "rate": null
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.04922615736722946
+          "median_relative_effect": 0.03227061405777931
         }
       ],
       "missing_products": [
@@ -687,7 +687,7 @@
             "rate": null
           },
           "magnitude": 0.01,
-          "median_relative_effect": 0.007117520552128553
+          "median_relative_effect": 0.005933831911534071
         },
         {
           "cause": {
@@ -712,7 +712,7 @@
             "rate": null
           },
           "magnitude": 0.02,
-          "median_relative_effect": 0.009772968478500843
+          "median_relative_effect": 0.021565217524766922
         },
         {
           "cause": {
@@ -737,7 +737,7 @@
             "rate": null
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.05183371901512146
+          "median_relative_effect": 0.0314297080039978
         },
         {
           "cause": {
@@ -762,7 +762,7 @@
             "rate": null
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.13264138996601105
+          "median_relative_effect": 0.07788193225860596
         },
         {
           "cause": {
@@ -787,7 +787,7 @@
             "rate": null
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.21403366327285767
+          "median_relative_effect": 0.2051023542881012
         },
         {
           "cause": {
@@ -812,7 +812,7 @@
             "rate": null
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.38503989577293396
+          "median_relative_effect": 0.3558901846408844
         }
       ],
       "missing_stores": [
@@ -839,7 +839,7 @@
             "rate": null
           },
           "magnitude": 0.01,
-          "median_relative_effect": 0.04257385432720184
+          "median_relative_effect": 0.05320762097835541
         },
         {
           "cause": {
@@ -864,7 +864,7 @@
             "rate": null
           },
           "magnitude": 0.02,
-          "median_relative_effect": 0.04257385432720184
+          "median_relative_effect": 0.05320762097835541
         },
         {
           "cause": {
@@ -889,7 +889,7 @@
             "rate": null
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.04257385432720184
+          "median_relative_effect": 0.05320762097835541
         },
         {
           "cause": {
@@ -914,7 +914,7 @@
             "rate": null
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.07726863026618958
+          "median_relative_effect": 0.09562961012125015
         },
         {
           "cause": {
@@ -939,7 +939,7 @@
             "rate": null
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.20420996844768524
+          "median_relative_effect": 0.22378872334957123
         },
         {
           "cause": {
@@ -964,7 +964,7 @@
             "rate": null
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.42554357647895813
+          "median_relative_effect": 0.4337945580482483
         }
       ],
       "recalculation": [
@@ -991,7 +991,7 @@
             "rate": 1.0
           },
           "magnitude": 0.01,
-          "median_relative_effect": 0.0014062841655686498
+          "median_relative_effect": 0.001262481790035963
         },
         {
           "cause": {
@@ -1016,7 +1016,7 @@
             "rate": 1.0
           },
           "magnitude": 0.02,
-          "median_relative_effect": 0.002747870283201337
+          "median_relative_effect": 0.0026289690285921097
         },
         {
           "cause": {
@@ -1041,7 +1041,7 @@
             "rate": 1.0
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.007405448239296675
+          "median_relative_effect": 0.007354159373790026
         },
         {
           "cause": {
@@ -1066,7 +1066,7 @@
             "rate": 1.0
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.01737123169004917
+          "median_relative_effect": 0.017332442104816437
         },
         {
           "cause": {
@@ -1091,7 +1091,7 @@
             "rate": 1.0
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.04529451206326485
+          "median_relative_effect": 0.04536230117082596
         },
         {
           "cause": {
@@ -1116,35 +1116,10 @@
             "rate": 1.0
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.13934655487537384
+          "median_relative_effect": 0.13705222308635712
         }
       ],
       "warehouse_transform_error": [
-        {
-          "cause": {
-            "ci_high": 1.0,
-            "ci_low": 0.5655085052479191,
-            "hits": 5,
-            "n": 5,
-            "rate": 1.0
-          },
-          "detection": {
-            "ci_high": 0.7634104063845126,
-            "ci_low": 0.23658959361548731,
-            "hits": 5,
-            "n": 10,
-            "rate": 0.5
-          },
-          "lineage": {
-            "ci_high": 1.0,
-            "ci_low": 0.7224598312333834,
-            "hits": 10,
-            "n": 10,
-            "rate": 1.0
-          },
-          "magnitude": 0.01,
-          "median_relative_effect": 0.0012673557503148913
-        },
         {
           "cause": {
             "ci_high": 1.0,
@@ -1167,8 +1142,33 @@
             "n": 10,
             "rate": 1.0
           },
+          "magnitude": 0.01,
+          "median_relative_effect": 0.0012644181260839105
+        },
+        {
+          "cause": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "detection": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
+          "lineage": {
+            "ci_high": 1.0,
+            "ci_low": 0.7224598312333834,
+            "hits": 10,
+            "n": 10,
+            "rate": 1.0
+          },
           "magnitude": 0.02,
-          "median_relative_effect": 0.0025347115006297827
+          "median_relative_effect": 0.0025287740863859653
         },
         {
           "cause": {
@@ -1193,7 +1193,7 @@
             "rate": 1.0
           },
           "magnitude": 0.05,
-          "median_relative_effect": 0.006336912512779236
+          "median_relative_effect": 0.006321966648101807
         },
         {
           "cause": {
@@ -1218,7 +1218,7 @@
             "rate": 1.0
           },
           "magnitude": 0.1,
-          "median_relative_effect": 0.0126737579703331
+          "median_relative_effect": 0.012643870897591114
         },
         {
           "cause": {
@@ -1243,7 +1243,7 @@
             "rate": 1.0
           },
           "magnitude": 0.2,
-          "median_relative_effect": 0.02534758299589157
+          "median_relative_effect": 0.025287741795182228
         },
         {
           "cause": {
@@ -1268,7 +1268,7 @@
             "rate": 1.0
           },
           "magnitude": 0.4,
-          "median_relative_effect": 0.05069516599178314
+          "median_relative_effect": 0.05057542026042938
         }
       ]
     },
