@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .cohort import ORACLE_CAUSE, code_sha256
+from .cohort import LINEAGE_FAMILIES, ORACLE_CAUSE, code_sha256
 from .config import DatasetConfig
 from .conformal import wilson_interval
 from .jsonutil import dumps as json_dumps
@@ -66,6 +66,8 @@ class SweepCase:
     predicted_cause: str | None
     also: tuple[str, ...] = ()
     expected_causes: tuple[str, ...] = ()
+    injection_stage: str | None = None
+    first_divergence: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,10 @@ def _run_case(job: SweepJob) -> SweepCase:
         predicted_cause=str(cause.value) if cause is not None else None,
         also=tuple(job.also),
         expected_causes=causes,
+        injection_stage=case.get("injection_stage"),
+        first_divergence=(
+            result.lineage.first_divergence if result.lineage is not None else None
+        ),
     )
 
 
@@ -158,6 +164,10 @@ def summarize(cases: Sequence[SweepCase]) -> dict[str, Any]:
             cell = [c for c in faults if c.family == family and c.magnitude == magnitude]
             effects = [c.relative_effect for c in cell if c.relative_effect is not None]
             labelled = [c for c in cell if c.detected and c.expected_cause is not None]
+            traced = [
+                c for c in cell
+                if c.family in LINEAGE_FAMILIES and c.injection_stage is not None
+            ]
             points.append(
                 {
                     "magnitude": magnitude,
@@ -169,6 +179,12 @@ def summarize(cases: Sequence[SweepCase]) -> dict[str, Any]:
                     "cause": _rate(
                         sum(c.predicted_cause == c.expected_cause for c in labelled),
                         len(labelled),
+                    ),
+                    # First-divergence stage vs the oracle's injection stage,
+                    # for families whose change is visible in overlap history.
+                    "lineage": _rate(
+                        sum(c.first_divergence == c.injection_stage for c in traced),
+                        len(traced),
                     ),
                 }
             )

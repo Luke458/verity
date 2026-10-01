@@ -1,10 +1,19 @@
-"""Pipeline lineage: stage summaries and first-divergence detection.
+"""Pipeline lineage: stage summaries and origin attribution.
 
-For each captured stage the overlap revision is fingerprinted for *both*
-versions. The first stage where the fingerprints differ (row/entity/metric
-structure) is the likely origin of the change. Stages outside the configured
-pipeline order are reported as unmapped; when no stage can be mapped the
-status is ``UNKNOWN`` rather than ``PASS``.
+For each captured stage the overlap revision (current minus previous, per
+week) is measured, and each stage's *increment* over the stage upstream of it
+is computed. A value-preserving pipeline passes an upstream revision through
+unchanged, so only the stage that introduced a change shows an increment. The
+origin (``first_divergence``, kept for compatibility) is the stage with the
+largest material increment. This matters when the source legitimately
+restates recent weeks (late-arriving data): the source then always diverges
+first, and "first divergent stage" would blame it for every downstream fault.
+
+When no stage adds a material value increment, the first stage whose
+structure changed (rows, entities, fingerprints) is reported, as before.
+``lineage_restatement_weeks`` excludes a declared late-arrival window from the
+comparison. Stages outside the configured pipeline order are reported as
+unmapped; when no stage can be mapped the status is ``UNKNOWN``.
 """
 
 from __future__ import annotations
@@ -73,6 +82,29 @@ def _overlap_relative_divergence(
     return (0.0 if absolute <= 1e-9 else None), row_delta
 
 
+def _week_revision(
+    previous: pd.DataFrame,
+    current: pd.DataFrame,
+    weeks: list[int],
+    config: DatasetConfig,
+) -> tuple[pd.Series | None, float]:
+    """Per-week revision of the primary metric and the previous total."""
+    week = config.week_column
+    metric = config.primary_metric
+    if any(
+        column not in frame.columns
+        for frame in (previous, current)
+        for column in (week, metric)
+    ):
+        return None, 0.0
+    before = previous.loc[previous[week].isin(weeks)].groupby(week)[metric].sum()
+    after = current.loc[current[week].isin(weeks)].groupby(week)[metric].sum()
+    index = pd.Index(sorted(weeks))
+    before = before.reindex(index, fill_value=0.0).astype(float)
+    after = after.reindex(index, fill_value=0.0).astype(float)
+    return after - before, float(before.abs().sum())
+
+
 def _fingerprint_changed(
     previous: pd.DataFrame,
     current: pd.DataFrame,
@@ -106,16 +138,31 @@ def analyze_lineage(
         return result
 
     overlap = list(pair.overlap_weeks)
+    window = max(0, int(config.lineage_restatement_weeks))
+    compared = sorted(overlap)[:-window] if window else list(overlap)
+    upstream_revision: pd.Series | None = None
+    increments: dict[str, float] = {}
     for stage in ordered:
         previous = source.read_fact(previous_id, stage)
         current = source.read_fact(current_id, stage)
+        revision, scale = _week_revision(previous, current, compared, config)
+        increment: float | None = None
+        if revision is not None and scale > 1e-12:
+            inherited = (
+                upstream_revision.reindex(revision.index, fill_value=0.0)
+                if upstream_revision is not None
+                else 0.0 * revision
+            )
+            increment = float((revision - inherited).abs().sum()) / scale
+            increments[stage] = increment
+            upstream_revision = revision
         relative, row_delta = _overlap_relative_divergence(
-            previous, current, overlap, config,
+            previous, current, compared, config,
             dict(config.stage_keys).get(stage, config.report_grain if stage == config.contract_stage else config.entity_key_columns)
         )
         stage_config = replace(config, entity_key_columns=dict(config.stage_keys).get(stage, config.report_grain if stage == config.contract_stage else config.entity_key_columns))
         fingerprint_changed, deltas = _fingerprint_changed(
-            previous, current, overlap, stage_config
+            previous, current, compared, stage_config
         )
         diverged = (
             fingerprint_changed
@@ -134,12 +181,23 @@ def analyze_lineage(
                 "stage": stage,
                 "row_count_delta": row_delta,
                 "relative_divergence": relative,
+                "increment": increment,
                 "fingerprint_changed": fingerprint_changed,
                 "diverged": diverged,
             }
         )
-        if result.first_divergence is None and diverged:
-            result.first_divergence = stage
+
+    material = {
+        stage: value
+        for stage, value in increments.items()
+        if value > config.lineage_materiality_ratio
+    }
+    if material:
+        result.first_divergence = max(material, key=lambda stage: material[stage])
+    else:
+        result.first_divergence = next(
+            (item["stage"] for item in result.divergences if item["diverged"]), None
+        )
 
     if result.first_divergence is not None:
         result.status = "FIRST_DIVERGENCE"

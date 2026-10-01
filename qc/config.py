@@ -66,6 +66,9 @@ class DatasetConfig:
     materiality_abs: float = 0.0
     broad_recalculation_breadth: float = 0.5
     lineage_materiality_ratio: float = 1e-5
+    # Most recent overlap weeks the source is known to restate (late-arriving
+    # data); excluded from lineage attribution. 0 = no declared window.
+    lineage_restatement_weeks: int = 0
     reconciliation_tolerance: float = 1e-6
     # Columns scanned for aggregate marker values ("TOTAL", "ALL", ...) that
     # would double count if mixed into detail rows. Parent/child reconciliation
@@ -123,8 +126,12 @@ class DatasetConfig:
             if isinstance(default, bool) and not isinstance(value, bool):
                 raise ValueError(f"{field.name} must be boolean")
             if isinstance(default, int) and not isinstance(default, bool):
-                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-                    raise ValueError(f"{field.name} must be a positive integer")
+                # Integer fields defaulting to 0 are counts where 0 means off.
+                minimum = 0 if default == 0 else 1
+                if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                    raise ValueError(
+                        f"{field.name} must be an integer >= {minimum}"
+                    )
             if isinstance(default, float):
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                     raise ValueError(f"{field.name} must be finite and nonnegative")

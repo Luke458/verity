@@ -13,7 +13,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from statistics import NormalDist
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -1093,6 +1093,7 @@ class SeriesTemporalEvidence:
     share_p: float | None = None
     share_impact: float | None = None
     share_n: int = 0
+    share_method: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1144,6 +1145,7 @@ class SeriesTemporalEvidence:
             "share_p": self.share_p,
             "share_impact": self.share_impact,
             "share_n": self.share_n,
+            "share_method": self.share_method,
         }
 
 
@@ -1234,6 +1236,28 @@ def student_t_two_sided_p(t: float, df: int) -> float:
     return min(1.0, max(0.0, value))
 
 
+class ShareTest(NamedTuple):
+    t: float
+    p: float
+    impact: float
+    n: int
+    method: str
+
+
+def _trailing_baseline(values: np.ndarray) -> tuple[float, float, int] | None:
+    """Mean, predictive sd and n of a trailing sample, or None if degenerate."""
+    n = len(values)
+    if n < MIN_SHARE_HISTORY:
+        return None
+    mean = float(values.mean())
+    sd = float(values.std(ddof=1))
+    if not math.isfinite(sd) or sd <= 1e-12 * max(abs(mean), 1e-12):
+        return None
+    # Prediction interval for one new observation: the trailing mean is itself
+    # estimated, so the spread is sd * sqrt(1 + 1/n) with n - 1 df.
+    return mean, sd * math.sqrt(1.0 + 1.0 / n), n
+
+
 def share_shift_test(
     child_weeks: Sequence[int],
     child_values: Sequence[float],
@@ -1242,13 +1266,25 @@ def share_shift_test(
     child_actual: float,
     parent_actual: float,
     window: int,
-) -> tuple[float, float, float, int] | None:
-    """Test the leaf's share of its parent against its own trailing shares.
+    target_week: int | None = None,
+    season: int = 52,
+) -> ShareTest | None:
+    """Test the leaf's share of its parent against its own history.
 
-    Returns ``(t, p, impact, n)`` where ``impact`` is the leaf movement
-    attributable to the share change at the parent's current level, or
-    ``None`` when the share history is too short or degenerate. A common
+    Two baselines are built from the training history only:
+
+    - ``trailing``: the share against its trailing mean (stable shares);
+    - ``seasonal``: the year-over-year log change of the share against recent
+      year-over-year changes (shares that move with their own annual cycle,
+      such as cough & cold in winter). Last year's share is the mean over the
+      three weeks centred ``season`` weeks earlier, which halves the noise the
+      single comparison week would add. Needs that share and a full window of
+      year-over-year history.
+
+    The baseline with the smaller relative predictive spread is used. A common
     (market-wide) movement leaves shares unchanged and is not a leaf anomaly.
+    ``impact`` is the leaf movement attributable to the share change at the
+    parent's current level. Returns ``None`` when no baseline is available.
     """
     if not (math.isfinite(parent_actual) and parent_actual > 0.0):
         return None
@@ -1259,25 +1295,63 @@ def share_shift_test(
         for week_id, value in zip(parent_weeks, parent_values, strict=True)
         if math.isfinite(float(value)) and float(value) > 0.0
     }
-    shares = [
-        float(value) / parent[int(week_id)]
+    share_by_week = {
+        int(week_id): float(value) / parent[int(week_id)]
         for week_id, value in zip(child_weeks, child_values, strict=True)
         if int(week_id) in parent and math.isfinite(float(value))
-    ][-max(int(window), MIN_SHARE_HISTORY):]
-    n = len(shares)
-    if n < MIN_SHARE_HISTORY:
-        return None
-    history = np.asarray(shares, dtype=float)
-    mean = float(history.mean())
-    sd = float(history.std(ddof=1))
-    if not math.isfinite(sd) or sd <= 1e-12 * max(abs(mean), 1e-12):
-        return None
+    }
+    weeks = sorted(share_by_week)
     observed = child_actual / parent_actual
-    # Prediction interval for one new observation: the trailing mean is itself
-    # estimated, so the spread is sd * sqrt(1 + 1/n) with n - 1 df.
-    t = (observed - mean) / (sd * math.sqrt(1.0 + 1.0 / n))
-    p = student_t_two_sided_p(t, n - 1)
-    return t, p, (observed - mean) * parent_actual, n
+    size = max(int(window), MIN_SHARE_HISTORY)
+    candidates: list[tuple[float, ShareTest]] = []
+
+    trailing = _trailing_baseline(
+        np.asarray([share_by_week[week] for week in weeks][-size:], dtype=float)
+    )
+    if trailing is not None:
+        mean, spread, n = trailing
+        t = (observed - mean) / spread
+        candidates.append(
+            (
+                spread / abs(mean) if mean else math.inf,
+                ShareTest(t, student_t_two_sided_p(t, n - 1), (observed - mean) * parent_actual, n, "trailing"),
+            )
+        )
+
+    def year_ago(week: int) -> float | None:
+        values = [
+            share_by_week[other]
+            for other in (week - season - 1, week - season, week - season + 1)
+            if other in share_by_week and share_by_week[other] > 0.0
+        ]
+        return sum(values) / len(values) if values else None
+
+    last_year = year_ago(int(target_week)) if target_week is not None else None
+    if last_year is not None and observed > 0.0:
+        pairs = [
+            (share_by_week[week], year_ago(week))
+            for week in weeks
+            if share_by_week[week] > 0.0
+        ]
+        changes = np.asarray(
+            [math.log(now / then) for now, then in pairs if then is not None][-size:],
+            dtype=float,
+        )
+        seasonal = _trailing_baseline(changes)
+        if seasonal is not None:
+            mean, spread, n = seasonal
+            t = (math.log(observed / last_year) - mean) / spread
+            expected = last_year * math.exp(mean)
+            # Log units are already relative; compare spreads on one scale.
+            candidates.append(
+                (
+                    spread,
+                    ShareTest(t, student_t_two_sided_p(t, n - 1), (observed - expected) * parent_actual, n, "seasonal"),
+                )
+            )
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
 
 
 def _attach_share_tests(
@@ -1304,9 +1378,12 @@ def _attach_share_tests(
             leaf.adjusted_actual,
             national.adjusted_actual,
             window,
+            target_week=int(leaf.target_week),
+            season=config.temporal_season,
         )
         if tested is not None:
-            leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested
+            leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested[:4]
+            leaf.share_method = tested.method
 
 
 def decide_anomalies(
