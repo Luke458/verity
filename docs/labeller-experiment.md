@@ -112,3 +112,35 @@ the rules were weak. It stays in the sandbox.
 - The datasets and sweeps were run twice with 4 workers and matched exactly.
   Runs with 6 workers on the development machine occasionally crashed or
   silently changed a result; that was traced to the machine, not the code.
+
+## Decision model: Decision-2.0-Lux-9B (registered before results)
+
+[Decision-2.0-Lux-9B](https://huggingface.co/vllm-sr/Decision-2.0-Lux-9B)
+(Apache-2.0) is a Jev-style decision model: a state plus typed questions in,
+a probability per option out. It sees the same 64 features as the trees,
+rendered as readable JSON (`service.render_state`), and is asked one yes/no
+question per cause. It is never trained on the generator.
+
+It does not fit unmodified on the 16 GB development GPU, so the backbone is
+quantized to EXL3 and run by a ROCm ExLlamaV3 fork, while Lux's own prompt
+encoding, decision head and answer normalization are kept (`lux.py`).
+Calibration rows for the quantizer come from train-split prompts only.
+
+**Fidelity gate**, against the unmodified runtime (CPU, fp32) on 30 random dev
+refreshes (300 answers):
+
+- 8.0 bpw passes with median |ΔP(yes)| ≤ 0.01, max ≤ 0.05 and ≥ 99% of yes/no
+  decisions unchanged.
+- 4.0 bpw is used only with ≥ 97% of decisions unchanged and median
+  |ΔP(yes)| ≤ 0.03; otherwise the 8.0 bpw model is used.
+
+**Predictions**, on the 380 test refreshes:
+
+1. Zero-shot (P ≥ 0.5) Lux names fewer single faults exactly right than the
+   rules (236/260).
+2. It over-names MARKET_MOVEMENT: more false positives for it than any
+   other model.
+3. With per-cause thresholds tuned on dev it improves, but still trails the
+   trees on single faults.
+4. It has no training distribution to drift from, so its dev-tuned
+   cross-profile score drops less than the trees' (0.93 to 0.75).
