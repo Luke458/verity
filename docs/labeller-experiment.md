@@ -201,3 +201,34 @@ late-arrival window and what is expected), or fine-tuning on the train
 split. Results: [`results/labeller.json`](results/labeller.json) (all
 models) and [`results/lux.json`](results/lux.json) (fidelity, per-cause AUC
 and provenance).
+
+## Follow-up: the labelling policy as text (registered before the test run)
+
+Decision models are built to apply a written policy to a state. Lux was given
+the evidence and bare questions, but not the definitions an annotator would
+get, or the feed's declared late-arrival window. Two prompt versions were
+tried on the **dev split only** (`service.py`):
+
+- **v2** adds a written labelling policy (one definition per cause) and the
+  declared window to the state, and asks per cause whether it applies under
+  the policy.
+- **v3** also states absent evidence explicitly ("none"), and reports whether
+  the *unexplained* part of a revision is material and where it first
+  appears, with latest-week movement only when the engine flagged it.
+
+| Dev split (190) | Single faults exact | Clean left clean | Pairs, both named | Micro F1 |
+|---|---|---|---|---|
+| Rules | 119/130 | 20/20 | 26/40 | 0.934 |
+| Lux v1 | 3/130 | 0/20 | 36/40 | 0.468 |
+| Lux v2 | 44/130 | 0/20 | 34/40 | 0.629 |
+| Lux v3 | 36/130 | 19/20 | 28/40 | 0.591 |
+
+The policy lifted HISTORICAL_CORRECTION's dev AUC from 0.61 to 0.86, and
+MARKET_MOVEMENT's from 0.63 to 0.76. The remaining errors are conditional
+rules the model does not apply: in v3 it still answers "coding error" when the
+evidence says the change first appears at the source, and "market movement"
+when missing stores explain the anomaly.
+
+**Frozen and registered:** v2, the better dev micro F1, is scored once on the
+test split. Prediction: zero-shot micro F1 within 0.05 of dev (0.58-0.68),
+and fewer than half the rules' exact single faults (fewer than 118 of 260).
