@@ -237,6 +237,18 @@ the time; above 0.8, 99%. In between it under-states detection (0.29
 predicted, 0.61 observed). It never over-states it. No further tuning was
 done on these seeds; a third model change would be fitting the evaluation.
 
+**Combining a category's measures does not help.** On clean development
+refreshes the share t-statistics of one category's measures are highly
+correlated: dollars and units ρ = 0.90, other pairs 0.58-0.85. They are
+largely one measurement of one category shock. Averaging dollar and units
+would gain about 3% in t, and grouping them per category before BH gains
+nothing over BH's own rank-2 threshold for two simultaneous discoveries.
+Testing one measure per category would cut the family from about 47 to
+about 13, lowering the critical |t| from about 4.3 to about 4.0: not enough
+for a 10% drop (|t| ≈ 2.8). None of these is implemented. At this
+false-alarm budget, detection on this world is at its limit; the report of
+that limit is the improvement.
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not
