@@ -19,6 +19,20 @@ from qc.cohort import ORACLE_CAUSE
 CAUSES: tuple[str, ...] = tuple(sorted(set(ORACLE_CAUSE.values())))
 
 
+def tune_threshold(probabilities: Sequence[float] | np.ndarray, truth: Sequence[bool] | np.ndarray) -> float:
+    """The decision threshold (0.1-0.9 in steps of 0.05) with the best F1 on dev."""
+    p = np.asarray(probabilities, dtype=float)
+    y = np.asarray(truth, dtype=bool)
+    best_threshold, best_f1 = 0.5, -1.0
+    for threshold in np.linspace(0.1, 0.9, 17):
+        predicted = p >= threshold
+        denominator = int(predicted.sum()) + int(y.sum())
+        f1 = 2 * int(np.sum(predicted & y)) / denominator if denominator else 1.0
+        if f1 > best_f1:
+            best_threshold, best_f1 = float(threshold), f1
+    return best_threshold
+
+
 class Labeller(Protocol):
     name: str
 
@@ -78,17 +92,9 @@ class TreeLabeller:
             )
             model.fit(x_train, y_train)
             self.models[cause] = model
-            y_dev = self._targets(dev, cause)
-            probabilities = model.predict_proba(x_dev)[:, 1]
-            best_threshold, best_f1 = 0.5, -1.0
-            for threshold in np.linspace(0.1, 0.9, 17):
-                predicted = probabilities >= threshold
-                true_positive = int(np.sum(predicted & (y_dev == 1)))
-                denominator = int(predicted.sum()) + int(y_dev.sum())
-                f1 = 2 * true_positive / denominator if denominator else 1.0
-                if f1 > best_f1:
-                    best_threshold, best_f1 = float(threshold), f1
-            self.thresholds[cause] = best_threshold
+            self.thresholds[cause] = tune_threshold(
+                model.predict_proba(x_dev)[:, 1], self._targets(dev, cause)
+            )
 
     def predict(self, rows: Sequence[dict[str, Any]]) -> list[set[str]]:
         x = self._matrix(rows)

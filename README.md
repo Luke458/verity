@@ -118,4 +118,4 @@ data/, reports/     generated output (git-ignored)
 - [docs/onboarding.md](docs/onboarding.md): profiling a table and field mapping
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families
 - [docs/claims.md](docs/claims.md): evidence for every capability, and what is not claimed
-- [docs/labeller-experiment.md](docs/labeller-experiment.md): a learned multi-cause labeller against the rule baseline
+- [docs/labeller-experiment.md](docs/labeller-experiment.md): learned and zero-shot (Decision-2.0-Lux-9B) cause labellers against the rule baseline

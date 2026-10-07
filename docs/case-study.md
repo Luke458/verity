@@ -161,6 +161,15 @@ not significant), name both causes of 51/80 pairs, and still transfer across
 profiles. The model stays in a sandbox
 ([labeller-experiment.md](labeller-experiment.md)).
 
+A general decision model was tried last: Decision-2.0-Lux-9B, quantized to
+4 bits to fit a 16 GB consumer GPU after checking it against the unmodified
+model (297/300 answers unchanged). It was never trained on the generator, and
+it ranked eight of ten causes almost as well as the trees. But it could not
+tell normal late-arriving data from a restatement, or a market move from a
+fault, and it named three causes per refresh. That left it right on 5 of 260
+single faults (98 with tuned thresholds). Its predicted failures were
+registered before the run, and they held.
+
 ## 7. What it still cannot do
 
 - Category drops of 10% or less on seasonal data are within noise when ~52

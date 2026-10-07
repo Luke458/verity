@@ -1,0 +1,67 @@
+{
+  "fidelity": {
+    "answers": 300,
+    "decisions_unchanged": 297,
+    "max_abs_dp": 0.0322,
+    "median_abs_dp": 0.0055,
+    "p95_abs_dp": 0.0199,
+    "reference": "unmodified runtime, CPU fp32",
+    "sample": "30 random dev refreshes x 10 questions"
+  },
+  "model": {
+    "license": "Apache-2.0",
+    "repo": "vllm-sr/Decision-2.0-Lux-9B",
+    "revision": "78bf3c03d9147aeb30b641edfe0e30ed04887ca5"
+  },
+  "prompt_version": 1,
+  "quantization": {
+    "bits_per_weight": 4.0,
+    "calibration": "250 x 2048 tokens of Lux prompts from train-split refreshes (seeds 8001-8040)",
+    "format": "EXL3",
+    "quantizer": "ROCm ExLlamaV3 fork (upstream v1.5.0) commit 311ff54",
+    "shim": "experiments/labeller/lux.py shim (key prefix, tied unused head, fp32 params cast to stock Qwen3.5 dtypes)",
+    "size_gb": 5.9
+  },
+  "test_auc": {
+    "BACKFILL": {
+      "lux": 0.983,
+      "trees": 1.0
+    },
+    "CODING": {
+      "lux": 0.963,
+      "trees": 1.0
+    },
+    "ENTITY_MERGE": {
+      "lux": 1.0,
+      "trees": 1.0
+    },
+    "HISTORICAL_CORRECTION": {
+      "lux": 0.602,
+      "trees": 1.0
+    },
+    "MARKET_MOVEMENT": {
+      "lux": 0.645,
+      "trees": 0.887
+    },
+    "MISSING_PRODUCTS": {
+      "lux": 0.976,
+      "trees": 0.988
+    },
+    "MISSING_STORES": {
+      "lux": 0.994,
+      "trees": 0.999
+    },
+    "RECLASSIFICATION": {
+      "lux": 0.99,
+      "trees": 1.0
+    },
+    "SCHEMA_FAILURE": {
+      "lux": 1.0,
+      "trees": 1.0
+    },
+    "WAREHOUSE": {
+      "lux": 0.969,
+      "trees": 1.0
+    }
+  }
+}

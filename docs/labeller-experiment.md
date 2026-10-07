@@ -144,3 +144,60 @@ refreshes (300 answers):
    trees on single faults.
 4. It has no training distribution to drift from, so its dev-tuned
    cross-profile score drops less than the trees' (0.93 to 0.75).
+
+### Results
+
+**Fidelity.** The 4.0 bpw backbone (5.9 GB) passed its gate: 297/300 yes/no
+decisions unchanged against the unmodified runtime, median |ΔP| 0.0055,
+95th percentile 0.020, max 0.032. All three flips were within 0.03 of 0.5.
+It also met the stricter 8.0 bpw thresholds, so no 8-bit model was built.
+On the RX 9070 XT, 300 questions took about 40 s, model load included.
+
+| Test split (Wilson 95%) | rules | trees | Lux, P ≥ 0.5 | Lux, dev-tuned |
+|---|---|---|---|---|
+| Single faults exactly right | 236/260 (0.91) | 242/260 (0.93) | 5/260 (0.02) | 98/260 (0.38, 0.32-0.44) |
+| Clean refreshes left clean | 36/40 | 39/40 | 1/40 | 9/40 |
+| Pairs, both causes named | 51/80 (0.64) | 70/80 (0.88) | 72/80 (0.90) | 56/80 (0.70) |
+| Micro F1 | 0.924 | 0.961 | 0.472 | 0.697 |
+
+Lux names 3.2 causes per refresh at P ≥ 0.5 against a true average of 1.1,
+which is also why it "names both" causes of most pairs.
+
+| Per-cause ranking (test AUC) | trees | Lux, zero-shot |
+|---|---|---|
+| ENTITY_MERGE, SCHEMA_FAILURE | 1.00 | 1.00 |
+| MISSING_STORES, RECLASSIFICATION, BACKFILL, MISSING_PRODUCTS | 0.99-1.00 | 0.98-0.99 |
+| WAREHOUSE, CODING | 1.00 | 0.96-0.97 |
+| MARKET_MOVEMENT | 0.89 | 0.65 |
+| HISTORICAL_CORRECTION | 1.00 | 0.60 |
+
+**Predictions, scored.**
+
+1. Fewer single faults right than the rules: **yes**, by far (5 and 98
+   against 236).
+2. Over-names MARKET_MOVEMENT: **yes**, with 196 false "yes" answers at 0.5
+   against 0 for the rules and 3 for the trees. Its worst cause was in fact
+   RECLASSIFICATION (199).
+3. Tuning helps but trails the trees: **yes** (98 against 242).
+4. Smaller cross-profile drop than the trees: **not meaningfully testable**.
+   Dev-tuned Lux scores 0.22 (fitted on `small`, tested on `realistic`) and
+   0.45 (the reverse), around its in-distribution 0.38; at that level the
+   comparison says little.
+
+**Reading it.** Lux reads the evidence: for eight of ten causes its
+zero-shot ranking is nearly as good as trees trained on this generator. It
+fails where the label depends on this domain's conventions, which the state
+does not spell out. Every `realistic` refresh restates its last two weeks
+through declared late arrival, which here is normal; asked whether "the
+source restated history", Lux reasonably says yes. MARKET_MOVEMENT is the
+call the rules deliberately refuse to make. An exact cause set needs all ten
+answers right, and those two causes, plus a poor sense of base rates, spoil
+most refreshes even with tuned thresholds.
+
+**Verdict.** Not a usable labeller here, zero-shot or dev-tuned; the rules
+stay the baseline. Next steps worth testing (new experiments, registered
+first): stating the domain's conventions in the state (the declared
+late-arrival window and what is expected), or fine-tuning on the train
+split. Results: [`results/labeller.json`](results/labeller.json) (all
+models) and [`results/lux.json`](results/lux.json) (fidelity, per-cause AUC
+and provenance).
