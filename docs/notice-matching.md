@@ -1,6 +1,6 @@
 # Experiment: matching free-text notices to findings
 
-**Status: built (`experiments/notices/`); dev results below, test registered.**
+**Status: done (`experiments/notices/`); test results at the end.**
 Research sandbox; nothing here changes how the engine decides a status.
 
 ## The gap
@@ -123,3 +123,61 @@ threshold. On the test split (200 refreshes, seeds 8201-8220):
 3. **Rewritten:** every method's false explanation rate is between 3% and 12%.
 4. **Rewritten:** other-dataset notices are the largest source of lux + checks'
    false explanations.
+
+## Test results
+
+Test split: 200 refreshes (seeds 8201-8220), 720 notices on refreshes with at
+least one observed change. 940 of 1,020 notices were rewritten; the other 80
+kept their template text.
+
+| Test | patterns | lux + checks | lux + checks, tuned | lux, one question |
+|---|---|---|---|---|
+| Templated: accuracy | **0.97** | 0.77 | 0.86 | 0.68 |
+| Templated: recall | 114/120 | 116/120 | 42/120 | 120/120 |
+| Templated: false explanations | **2%** | 22% | 4% | 32% |
+| Rewritten: accuracy | 0.83 | **0.87** | **0.87** | 0.70 |
+| Rewritten: recall | 62/120 (0.52) | **107/120 (0.89)** | 89/120 (0.74) | 120/120 |
+| Rewritten: false explanations | 9% | 11% | 9% | 30% |
+| Rewritten: false explanations, other-dataset notices | 48/125 | 60/125 | 49/125 | 120/125 |
+
+**Registered predictions** (methods = the three frozen ones):
+
+1. **Templated, patterns win: held.** Accuracy 0.97 against 0.77; false
+   explanations 2% against 22%.
+2. **Rewritten recall: held.** Lux + checks 0.89 (needed ≥ 0.85); patterns 0.52
+   (needed ≤ 0.70).
+3. **Rewritten false explanations in 3-12%: held**, at 9%, 11% and 9%. The
+   single-question model, never a frozen method, was 30%.
+4. **Other datasets dominate Lux + checks' false explanations: held**, 60 of
+   82.
+
+**Two analyses not registered in advance** (rewritten test set):
+
+- **Suggestion precision.** Of the matches each method proposes, 107/189
+  (0.57) are right for Lux + checks and 62/127 (0.49) for patterns.
+- **Notices already scoped to the dataset** (other-dataset notices removed):
+  false explanations fall to 22/595 (3.7%) for Lux + checks and 17/595 (2.9%)
+  for patterns.
+
+## Conclusion
+
+On realistically worded notices, a decision model asked direct questions
+finds 89% of the notices that explain a flagged change, against 52% for
+hand-written patterns, at a similar false explanation rate. The patterns win
+only on the templates they were written for. This is the first role in this
+repo where the model beats the deterministic alternative, and it is the one
+the deterministic engine cannot fill: reading text.
+
+It is a **suggestion aid, not an approver.** About four in ten of its
+suggestions are wrong, mostly notices about another dataset that mention the
+same stores. Its matches belong in draft registry entries that a person
+approves, which is the only way the engine accepts an explanation anyway.
+Notices should be scoped to their dataset upstream (by channel or metadata),
+where both methods' false explanations fall to about 3%.
+
+What the result does not show: the notices, rewrites and distractors are
+synthetic. Real notices are messier and refer to things this generator does
+not model (banners, regions, promotions, partial weeks).
+
+Results: [`results/notices-test.json`](results/notices-test.json) and
+[`results/notices-test-rewritten.json`](results/notices-test-rewritten.json).

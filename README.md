@@ -104,7 +104,7 @@ qc/                 engine: contracts, versions, revision, lifecycle, attributio
 qcgen/              synthetic retail world, fault injectors, oracle vault, verifier
 config/             cohort plan (hash-pinned) and generator suite config
 optional/           scale benchmark, sweep chart renderer
-experiments/        research sandbox (learned cause labeller); never on the status path
+experiments/        research sandboxes (cause labellers, notice matching); never on the status path
 deployment/         weekly.sh scheduler wrapper
 data/, reports/     generated output (git-ignored)
 ```
@@ -119,3 +119,4 @@ data/, reports/     generated output (git-ignored)
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families
 - [docs/claims.md](docs/claims.md): evidence for every capability, and what is not claimed
 - [docs/labeller-experiment.md](docs/labeller-experiment.md): learned and zero-shot (Decision-2.0-Lux-9B) cause labellers against the rule baseline
+- [docs/notice-matching.md](docs/notice-matching.md): matching free-text change notices to flagged changes with a decision model

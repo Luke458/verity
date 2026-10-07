@@ -170,6 +170,20 @@ fault, and it named three causes per refresh. That left it right on 5 of 260
 single faults (98 with tuned thresholds). Its predicted failures were
 registered before the run, and they held.
 
+The lesson was about the job, not the model. A decision model recognizes
+direct evidence well and applies conditional rules badly, and turning the
+engine's numbers into causes is all conditional rules. Reading text is the
+opposite, and the engine cannot do it. So the model was given a different
+job: match free-text change notices ("S012 closed for refit from week 118")
+to the changes a refresh flagged, so a person can approve the explanation.
+It is asked only direct questions (which change? this dataset? already
+happened? same kind? same weeks?), and code combines the answers. On notices
+reworded by a second local model, it found 89% of the true matches, against
+52% for hand-written patterns, at a similar false-explanation rate (11% vs
+9%). The predictions were again registered first
+([notice-matching.md](notice-matching.md)). About four in ten of its
+suggestions are still wrong, so it drafts and a person approves.
+
 ## 7. What it still cannot do
 
 - Category drops of 10% or less on seasonal data are within noise when ~52

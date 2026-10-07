@@ -1,0 +1,312 @@
+{
+  "methods": {
+    "lux": {
+      "accuracy": {
+        "ci_high": 0.7108925259632842,
+        "ci_low": 0.6427760114625837,
+        "hits": 488,
+        "n": 720,
+        "rate": 0.6777777777777778
+      },
+      "false_explanations": {
+        "ci_high": 0.3572239885374164,
+        "ci_low": 0.28910747403671583,
+        "hits": 232,
+        "n": 720,
+        "rate": 0.32222222222222224
+      },
+      "false_explanations_by_kind": {
+        "chatter": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "other_dataset": {
+          "ci_high": 0.9827956446559014,
+          "ci_low": 0.909773215091261,
+          "hits": 120,
+          "n": 125,
+          "rate": 0.96
+        },
+        "wrong_change": {
+          "ci_high": 0.406094065989336,
+          "ci_low": 0.24463985845742658,
+          "hits": 40,
+          "n": 125,
+          "rate": 0.32
+        },
+        "wrong_entity": {
+          "ci_high": 0.27859150900113455,
+          "ci_low": 0.13929836507680304,
+          "hits": 25,
+          "n": 125,
+          "rate": 0.2
+        },
+        "wrong_weeks": {
+          "ci_high": 0.5671131686275227,
+          "ci_low": 0.3751065198210374,
+          "hits": 47,
+          "n": 100,
+          "rate": 0.47
+        }
+      },
+      "notices": 720,
+      "recall": {
+        "ci_high": 1.0,
+        "ci_low": 0.9689797289440706,
+        "hits": 120,
+        "n": 120,
+        "rate": 1.0
+      }
+    },
+    "lux-checks": {
+      "accuracy": {
+        "ci_high": 0.8000486240957978,
+        "ci_low": 0.7387432883889227,
+        "hits": 555,
+        "n": 720,
+        "rate": 0.7708333333333334
+      },
+      "false_explanations": {
+        "ci_high": 0.2554677246987594,
+        "ci_low": 0.19468822102196182,
+        "hits": 161,
+        "n": 720,
+        "rate": 0.22361111111111112
+      },
+      "false_explanations_by_kind": {
+        "chatter": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "other_dataset": {
+          "ci_high": 0.9672168133020287,
+          "ci_low": 0.8787832363713688,
+          "hits": 117,
+          "n": 125,
+          "rate": 0.936
+        },
+        "wrong_change": {
+          "ci_high": 0.3219049560335135,
+          "ci_low": 0.17359960150069903,
+          "hits": 30,
+          "n": 125,
+          "rate": 0.24
+        },
+        "wrong_entity": {
+          "ci_high": 0.17923980390046323,
+          "ci_low": 0.06789776657366933,
+          "hits": 14,
+          "n": 125,
+          "rate": 0.112
+        },
+        "wrong_weeks": {
+          "ci_high": 0.03699480747600191,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 100,
+          "rate": 0.0
+        }
+      },
+      "notices": 720,
+      "recall": {
+        "ci_high": 0.9869626598330794,
+        "ci_low": 0.9174184205147198,
+        "hits": 116,
+        "n": 120,
+        "rate": 0.9666666666666667
+      }
+    },
+    "lux-checks-tuned": {
+      "accuracy": {
+        "ci_high": 0.8793479198252548,
+        "ci_low": 0.8279891550264805,
+        "hits": 616,
+        "n": 720,
+        "rate": 0.8555555555555555
+      },
+      "false_explanations": {
+        "ci_high": 0.05238578674439318,
+        "ci_low": 0.024760373409983112,
+        "hits": 26,
+        "n": 720,
+        "rate": 0.03611111111111111
+      },
+      "false_explanations_by_kind": {
+        "chatter": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "other_dataset": {
+          "ci_high": 0.2873296687017176,
+          "ci_low": 0.14608314206747489,
+          "hits": 26,
+          "n": 125,
+          "rate": 0.208
+        },
+        "wrong_change": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "wrong_entity": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "wrong_weeks": {
+          "ci_high": 0.03699480747600191,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 100,
+          "rate": 0.0
+        }
+      },
+      "notices": 720,
+      "recall": {
+        "ci_high": 0.4387884223511861,
+        "ci_low": 0.27051765896559277,
+        "hits": 42,
+        "n": 120,
+        "rate": 0.35
+      },
+      "threshold": 0.9
+    },
+    "lux-tuned": {
+      "accuracy": {
+        "ci_high": 0.8548936617306923,
+        "ci_low": 0.7999457395968911,
+        "hits": 597,
+        "n": 720,
+        "rate": 0.8291666666666667
+      },
+      "false_explanations": {
+        "ci_high": 0.16160947390127617,
+        "ci_low": 0.11171220310651109,
+        "hits": 97,
+        "n": 720,
+        "rate": 0.13472222222222222
+      },
+      "false_explanations_by_kind": {
+        "chatter": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "other_dataset": {
+          "ci_high": 0.8264003984993009,
+          "ci_low": 0.6780950439664866,
+          "hits": 95,
+          "n": 125,
+          "rate": 0.76
+        },
+        "wrong_change": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "wrong_entity": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "wrong_weeks": {
+          "ci_high": 0.07001316294199365,
+          "ci_low": 0.005501852234968185,
+          "hits": 2,
+          "n": 100,
+          "rate": 0.02
+        }
+      },
+      "notices": 720,
+      "recall": {
+        "ci_high": 0.8476337715724263,
+        "ci_low": 0.7014547414958805,
+        "hits": 94,
+        "n": 120,
+        "rate": 0.7833333333333333
+      },
+      "threshold": 0.95
+    },
+    "patterns": {
+      "accuracy": {
+        "ci_high": 0.9819475109746804,
+        "ci_low": 0.9574845415627807,
+        "hits": 700,
+        "n": 720,
+        "rate": 0.9722222222222222
+      },
+      "false_explanations": {
+        "ci_high": 0.03237245700652168,
+        "ci_low": 0.01161727776417953,
+        "hits": 14,
+        "n": 720,
+        "rate": 0.019444444444444445
+      },
+      "false_explanations_by_kind": {
+        "chatter": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "other_dataset": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "wrong_change": {
+          "ci_high": 0.17923980390046323,
+          "ci_low": 0.06789776657366933,
+          "hits": 14,
+          "n": 125,
+          "rate": 0.112
+        },
+        "wrong_entity": {
+          "ci_high": 0.0298164567965626,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 125,
+          "rate": 0.0
+        },
+        "wrong_weeks": {
+          "ci_high": 0.03699480747600191,
+          "ci_low": 0.0,
+          "hits": 0,
+          "n": 100,
+          "rate": 0.0
+        }
+      },
+      "notices": 720,
+      "recall": {
+        "ci_high": 0.9768859506955258,
+        "ci_low": 0.8951958053541377,
+        "hits": 114,
+        "n": 120,
+        "rate": 0.95
+      }
+    }
+  },
+  "split": "test"
+}
