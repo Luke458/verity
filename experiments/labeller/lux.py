@@ -28,7 +28,7 @@ from typing import Any
 
 from . import data
 from .models import CAUSES
-from .service import PROMPT_VERSION, questions, render_state, row_key, state_sha256
+from .service import questions, render_state, row_key, row_state, state_sha256
 
 PREFIX = "model.language_model."
 
@@ -47,14 +47,16 @@ def _tokenizer(model_dir: Path) -> Any:
     return AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
 
 
-def _encoded_questions(model_dir: Path, tokenizer: Any, state: dict[str, Any]) -> list[tuple[str, dict, dict]]:
+def _encoded_questions(
+    model_dir: Path, tokenizer: Any, state: dict[str, Any], version: int = 1
+) -> list[tuple[str, dict, dict]]:
     decision_model, infer = _vendored(model_dir)
     metadata = json.loads((model_dir / "decision_config.json").read_text())
     encode = decision_model.encoder_for(metadata)
     cap = json.loads((model_dir / "MODEL_MANIFEST.json").read_text())["max_input_tokens"]
     item = {"id": "request", "state": state}
     out = []
-    for cause, question in questions().items():
+    for cause, question in questions(version).items():
         row = infer.question_to_row(item, cause, question)
         out.append((cause, row, encode(row, tokenizer, cap)))
     return out
@@ -146,11 +148,11 @@ class _Exl3Backend:
             x = module.forward(x, params)
         raise RuntimeError("final norm not reached")
 
-    def answer(self, state: dict[str, Any]) -> dict[str, float]:
+    def answer(self, state: dict[str, Any], version: int) -> dict[str, float]:
         torch = self.torch
         out = {}
         with torch.inference_mode():
-            for cause, row, encoded in _encoded_questions(self.model_dir, self.tokenizer, state):
+            for cause, row, encoded in _encoded_questions(self.model_dir, self.tokenizer, state, version):
                 hidden = self.hidden(encoded["ids"])
                 candidates = hidden[torch.tensor(encoded["candidate_positions"], device=hidden.device)]
                 query = hidden[encoded["query_position"]]
@@ -172,8 +174,8 @@ class _ReferenceBackend:
 
         self.model = Decision2.from_pretrained(str(model_dir), device="cpu", threads=threads)
 
-    def answer(self, state: dict[str, Any]) -> dict[str, float]:
-        response = self.model.system_one(state=state, questions=questions())
+    def answer(self, state: dict[str, Any], version: int) -> dict[str, float]:
+        response = self.model.system_one(state=state, questions=questions(version))
         answers = response["answers"]
         return {cause: float(answers[cause]["noul"]) for cause in CAUSES}
 
@@ -197,11 +199,11 @@ def infer(args: argparse.Namespace) -> None:
         for position, row in enumerate(rows):
             if row_key(row) in done:
                 continue
-            state = render_state(row["features"])
+            state = row_state(row, args.prompt)
             record = {
                 "key": row_key(row),
-                "probabilities": backend.answer(state),
-                "prompt_version": PROMPT_VERSION,
+                "probabilities": backend.answer(state, args.prompt),
+                "prompt_version": args.prompt,
                 "state_sha256": state_sha256(state),
                 "backend": label,
             }
@@ -232,6 +234,7 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None, help="random sample of this many rows (seed 0)")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--label", default=None)
+    p.add_argument("--prompt", type=int, choices=(1, 2, 3), default=1, help="prompt version (service.py)")
     args = parser.parse_args()
     if args.command == "shim":
         shim(Path(args.model).expanduser(), Path(args.out).expanduser())

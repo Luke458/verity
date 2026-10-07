@@ -232,3 +232,23 @@ when missing stores explain the anomaly.
 **Frozen and registered:** v2, the better dev micro F1, is scored once on the
 test split. Prediction: zero-shot micro F1 within 0.05 of dev (0.58-0.68),
 and fewer than half the rules' exact single faults (fewer than 118 of 260).
+
+### Result
+
+| Test split (380) | rules | trees | Lux v1 | Lux v1, tuned | Lux v2 (policy) | Lux v2, tuned |
+|---|---|---|---|---|---|---|
+| Single faults exact | 236/260 | 242/260 | 5/260 | 98/260 | 88/260 | 168/260 |
+| Clean left clean | 36/40 | 39/40 | 1/40 | 9/40 | 0/40 | 14/40 |
+| Pairs, both named | 51/80 | 70/80 | 72/80 | 56/80 | 68/80 | 32/80 |
+| Micro F1 | 0.924 | 0.961 | 0.472 | 0.697 | 0.634 | 0.746 |
+
+Both predictions held: micro F1 0.634 (registered range 0.58-0.68) and 88
+exact single faults (registered: fewer than 118).
+
+**Conclusion.** Writing the policy down roughly doubled what Lux gets right,
+but the rules still win by a wide margin. The rules *are* the policy, applied
+exactly; the model recognizes direct evidence well and applies conditional
+definitions unreliably. Turning the engine's own numbers into causes is the
+wrong job for a decision model. Its strength is reading text, which the
+engine cannot do. That is the next experiment: matching free-text change
+notices to findings.

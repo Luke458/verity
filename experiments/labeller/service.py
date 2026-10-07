@@ -18,7 +18,7 @@ from typing import Any
 from .features import CHECK_PREFIXES, EVENT_CLASSES, LEVELS, METRICS, STAGES, STATUSES
 from .models import CAUSES, tune_threshold
 
-PROMPT_VERSION = 1
+PROMPT_VERSIONS = (1, 2, 3)
 CONTEXT = (
     "Automated quality control of a weekly retail sales table (store x product x week). "
     "A new version of the table was compared with the previous version; below is the "
@@ -44,16 +44,139 @@ QUESTIONS: dict[str, str] = {
 }
 assert set(QUESTIONS) == set(CAUSES)
 
+# Version 2: the labelling policy an annotator would be given, plus the feed's
+# declared configuration, go into the state; each question cites its definition.
+POLICY = (
+    "Label the causes of this refresh's changes. Most refreshes have one cause or none; "
+    "answer yes only when the evidence below supports that cause under these definitions.\n"
+    "- Missing stores / missing products: entities expected in the latest week are absent, "
+    "and the absence is material. Products that vanish with their missing stores are not a "
+    "separate missing-products cause.\n"
+    "- Entity merge: a candidate id merge or replacement was found. The removal of the old id "
+    "and the history of the new id are part of the merge.\n"
+    "- Backfill: a new store or product arrived together with past history.\n"
+    "- Reclassification: products moved between categories. A category emptied by the move, "
+    "and the revisions the move causes, are part of the reclassification.\n"
+    "- Historical correction: the source changed already-published history in a way lifecycle "
+    "events do not explain: history truncated, a material unexplained revision first appearing "
+    "at the source stage, or individual weeks materially revised. Revisions inside the "
+    "declared late-arrival window are expected and are not a correction.\n"
+    "- Coding error / warehouse error: an unexplained revision first appears at the coding / "
+    "warehouse stage of the pipeline, even if it is small.\n"
+    "- Schema failure: the new data failed its data contracts.\n"
+    "- Market movement: latest-week sales moved (latest-week anomalies or a category share "
+    "shift) and no other cause explains it."
+)
+DEFINITIONS: dict[str, str] = {
+    "MISSING_STORES": "Under the policy, is there a missing-stores cause?",
+    "MISSING_PRODUCTS": "Under the policy, is there a missing-products cause?",
+    "ENTITY_MERGE": "Under the policy, is there an entity-merge cause?",
+    "BACKFILL": "Under the policy, is there a backfill cause?",
+    "HISTORICAL_CORRECTION": "Under the policy, is there a historical-correction cause?",
+    "RECLASSIFICATION": "Under the policy, is there a reclassification cause?",
+    "CODING": "Under the policy, is there a coding-error cause?",
+    "WAREHOUSE": "Under the policy, is there a warehouse-error cause?",
+    "SCHEMA_FAILURE": "Under the policy, is there a schema-failure cause?",
+    "MARKET_MOVEMENT": "Under the policy, is there a market-movement cause?",
+}
+assert set(DEFINITIONS) == set(CAUSES)
+
 
 def _round(value: float) -> float:
     return float(f"{value:.4g}")
 
 
-def render_state(features: dict[str, float]) -> dict[str, Any]:
-    """The row's features as readable JSON; zero counts are omitted."""
-    f = features
+POLICY_V3 = (
+    "Label the causes of this refresh's changes. Most refreshes have one cause or none; "
+    "answer yes only when the evidence below supports that cause under these definitions.\n"
+    "- Missing stores / missing products: entities expected in the latest week are absent, "
+    "and the absence is material. Products that vanish with their missing stores are not a "
+    "separate missing-products cause.\n"
+    "- Entity merge: a candidate id merge or replacement was found. The removal of the old id "
+    "and the history of the new id are part of the merge.\n"
+    "- Backfill: a new store or product arrived together with past history.\n"
+    "- Reclassification: products moved between categories. A category emptied by the move, "
+    "and the revisions the move causes, are part of the reclassification.\n"
+    "- Historical correction: history was truncated, or the unexplained part of the revision "
+    "is material and first appears at the source stage, or individual weeks were materially "
+    "revised while no merge, backfill or reclassification explains them. Revisions inside the "
+    "declared late-arrival window are expected and are not a correction.\n"
+    "- Coding error / warehouse error: the unexplained change first appears at the coding / "
+    "warehouse stage (the 'first appears at' field), even if it is small. A change explained "
+    "by a reclassification, merge or backfill is not a coding or warehouse error.\n"
+    "- Schema failure: the new data failed its data contracts.\n"
+    "- Market movement: the engine flagged significant latest-week anomalies and no other cause "
+    "explains them. Small deviations that were not flagged are normal noise."
+)
+
+
+def _render_v3(f: dict[str, float], late_arrival_weeks: int) -> dict[str, Any]:
+    """Version 3: absence stated explicitly, judgments the engine already made spelled out."""
+    from qc.config import DatasetConfig
+
     status = next((s for s in STATUSES if f.get(f"status:{s}")), "UNKNOWN")
-    state: dict[str, Any] = {"context": CONTEXT, "refresh status": status}
+    state: dict[str, Any] = {
+        "context": CONTEXT,
+        "labelling policy": POLICY_V3,
+        "feed configuration": {"declared late-arrival window, weeks": late_arrival_weeks},
+        "refresh status": status,
+        "data contracts": "failed" if f.get("contracts_failed") else "passed",
+    }
+    events = {
+        name.lower().replace("_", " "): int(f[f"events:{name}"])
+        for name in EVENT_CLASSES
+        if f.get(f"events:{name}")
+    }
+    state["entity lifecycle events"] = events or "none"
+    state["candidate id merges or replacements"] = int(f.get("relationships", 0))
+    for entity in ("store", "product"):
+        share = f.get(f"missing_share:{entity}", 0.0)
+        state[f"{entity}s missing in latest week"] = (
+            {"share": _round(share), "material": bool(f.get(f"missing_material:{entity}"))} if share else "none"
+        )
+    if "revision_relative" in f:
+        unexplained_material = bool(f["revision_material"]) and (
+            f["explained_fraction"] < DatasetConfig().explained_fraction_threshold
+        )
+        state["revision of overlapping history"] = {
+            "total change, relative": _round(f["revision_relative"]),
+            "share explained by lifecycle events": _round(f["explained_fraction"]),
+            "unexplained part material": unexplained_material,
+        }
+    else:
+        state["revision of overlapping history"] = "none"
+    state["individual weeks materially revised"] = int(f.get("revision_weeks_material", 0))
+    origin = next((stage for stage in STAGES if f.get(f"origin:{stage}")), None)
+    state["unexplained change first appears at"] = origin or "no stage"
+    flagged = {
+        f"{level.removesuffix('_id')} {metric}": int(f[f"anomalies:{level}:{metric}"])
+        for level in LEVELS
+        for metric in METRICS
+        if f.get(f"anomalies:{level}:{metric}")
+    }
+    state["significant latest-week anomalies"] = flagged or "none"
+    failing = {prefix.replace("_", " "): int(f[f"fails:{prefix}"]) for prefix in CHECK_PREFIXES if f.get(f"fails:{prefix}")}
+    state["failing checks"] = failing or "none"
+    return state
+
+
+def render_state(
+    features: dict[str, float], version: int = 1, late_arrival_weeks: int = 0
+) -> dict[str, Any]:
+    """The row's features as readable JSON; zero counts are omitted.
+
+    Version 2 adds the labelling policy and the feed's declared late-arrival
+    window (operator configuration, known before the refresh arrives).
+    """
+    f = features
+    if version >= 3:
+        return _render_v3(f, late_arrival_weeks)
+    status = next((s for s in STATUSES if f.get(f"status:{s}")), "UNKNOWN")
+    state: dict[str, Any] = {"context": CONTEXT}
+    if version >= 2:
+        state["labelling policy"] = POLICY
+        state["feed configuration"] = {"declared late-arrival window, weeks": late_arrival_weeks}
+    state["refresh status"] = status
     if f.get("contracts_failed"):
         state["failed data contracts"] = int(f["contracts_failed"])
     events = {
@@ -121,11 +244,20 @@ def render_state(features: dict[str, float]) -> dict[str, Any]:
     return state
 
 
-def questions() -> dict[str, dict[str, Any]]:
+def questions(version: int = 1) -> dict[str, dict[str, Any]]:
+    texts = QUESTIONS if version == 1 else DEFINITIONS
     return {
         cause: {"type": "noul", "instructions": text, "criteria": {"false": "No", "true": "Yes"}}
-        for cause, text in QUESTIONS.items()
+        for cause, text in texts.items()
     }
+
+
+def row_state(row: dict[str, Any], version: int) -> dict[str, Any]:
+    """A dataset row's state for a prompt version (the window comes from its profile's config)."""
+    from .data import PROFILE_CONFIG
+
+    window = int(PROFILE_CONFIG[row["profile"]].get("restatement_weeks", 0))
+    return render_state(row["features"], version, window)
 
 
 def state_sha256(state: dict[str, Any]) -> str:
@@ -142,8 +274,8 @@ def load_probabilities(path: str | Path) -> dict[str, dict[str, float]]:
     for line in Path(path).read_text().splitlines():
         if line.strip():
             record = json.loads(line)
-            if record.get("prompt_version") != PROMPT_VERSION:
-                raise ValueError(f"{path}: prompt version {record.get('prompt_version')} != {PROMPT_VERSION}")
+            if record.get("prompt_version") not in PROMPT_VERSIONS:
+                raise ValueError(f"{path}: unknown prompt version {record.get('prompt_version')}")
             out[record["key"]] = record["probabilities"]
     return out
 
