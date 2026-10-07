@@ -1094,6 +1094,11 @@ class SeriesTemporalEvidence:
     share_impact: float | None = None
     share_n: int = 0
     share_method: str = ""
+    share_spread: float | None = None
+    # Smallest relative movement of this leaf's share that the refresh would
+    # flag on its own, with 50% / 80% power (``decide_anomalies``).
+    detectable_change: float | None = None
+    detectable_change_80: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1146,6 +1151,9 @@ class SeriesTemporalEvidence:
             "share_impact": self.share_impact,
             "share_n": self.share_n,
             "share_method": self.share_method,
+            "share_spread": self.share_spread,
+            "detectable_change": self.detectable_change,
+            "detectable_change_80": self.detectable_change_80,
         }
 
 
@@ -1174,7 +1182,26 @@ class TemporalResult:
             "unavailable": [dict(item) for item in self.unavailable],
             "calendar": dict(self.calendar),
             "metric_status": dict(self.metric_status),
+            "sensitivity": self.sensitivity(),
         }
+
+    def sensitivity(self) -> dict[str, Any]:
+        """Median detectable movement per level and measure (share-tested leaves)."""
+        groups: dict[tuple[str, str], list[SeriesTemporalEvidence]] = {}
+        for item in self.series:
+            if item.detectable_change is not None:
+                groups.setdefault((item.level, item.metric), []).append(item)
+        out: dict[str, Any] = {}
+        for (level, metric), items in sorted(groups.items()):
+            changes = sorted(float(i.detectable_change) for i in items if i.detectable_change is not None)
+            strong = sorted(float(i.detectable_change_80) for i in items if i.detectable_change_80 is not None)
+            out[f"{level}:{metric}"] = {
+                "leaves": len(items),
+                "median_detectable_change": float(np.median(changes)),
+                "median_detectable_change_80": float(np.median(strong)) if strong else None,
+                "least_sensitive": max(items, key=lambda i: float(i.detectable_change or 0.0)).series_id,
+            }
+        return out
 
 
 # Flags that record a decision (see ``decide_anomalies``): a significant,
@@ -1213,6 +1240,37 @@ def _betacf(a: float, b: float, x: float) -> float:
     return h
 
 
+def student_t_quantile(probability: float, df: int) -> float:
+    """Upper Student-t quantile: t with P(T <= t) = ``probability`` (> 0.5)."""
+    if not 0.5 < probability < 1.0:
+        raise ValueError("probability must be in (0.5, 1)")
+    target = 2.0 * (1.0 - probability)
+    low, high = 0.0, 1.0
+    while student_t_two_sided_p(high, df) > target:
+        high *= 2.0
+    for _ in range(80):
+        mid = (low + high) / 2.0
+        if student_t_two_sided_p(mid, df) > target:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2.0
+
+
+def detectable_change(spread: float, df: int, tests: int, q: float, power: float, method: str) -> float:
+    """Smallest relative share drop flagged with ``power`` when it is the refresh's only anomaly.
+
+    A lone anomaly among ``tests`` hypotheses is rejected by BH at level ``q``
+    when its two-sided p is at most ``q / tests``. The shift must reach that
+    critical t plus the t quantile of ``power`` (0 for 50%).
+    """
+    critical = student_t_quantile(1.0 - q / (2.0 * tests), df)
+    shift = critical + (student_t_quantile(power, df) if power > 0.5 else 0.0)
+    if method == "seasonal":
+        return 1.0 - math.exp(-shift * spread)
+    return min(1.0, shift * spread)
+
+
 def student_t_two_sided_p(t: float, df: int) -> float:
     """Two-sided Student-t p-value (exact, via the incomplete beta function)."""
     if not math.isfinite(t):
@@ -1242,6 +1300,9 @@ class ShareTest(NamedTuple):
     impact: float
     n: int
     method: str
+    # Predictive spread on a relative scale (log share for ``seasonal``,
+    # spread over the trailing mean for ``trailing``): what one t unit is worth.
+    spread: float = math.nan
 
 
 def _trailing_baseline(values: np.ndarray) -> tuple[float, float, int] | None:
@@ -1314,7 +1375,10 @@ def share_shift_test(
         candidates.append(
             (
                 spread / abs(mean) if mean else math.inf,
-                ShareTest(t, student_t_two_sided_p(t, n - 1), (observed - mean) * parent_actual, n, "trailing"),
+                ShareTest(
+                    t, student_t_two_sided_p(t, n - 1), (observed - mean) * parent_actual, n, "trailing",
+                    spread / abs(mean) if mean else math.inf,
+                ),
             )
         )
 
@@ -1346,7 +1410,9 @@ def share_shift_test(
             candidates.append(
                 (
                     spread,
-                    ShareTest(t, student_t_two_sided_p(t, n - 1), (observed - expected) * parent_actual, n, "seasonal"),
+                    ShareTest(
+                        t, student_t_two_sided_p(t, n - 1), (observed - expected) * parent_actual, n, "seasonal", spread,
+                    ),
                 )
             )
     if not candidates:
@@ -1384,6 +1450,7 @@ def _attach_share_tests(
         if tested is not None:
             leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested[:4]
             leaf.share_method = tested.method
+            leaf.share_spread = float(tested.spread)
 
 
 def decide_anomalies(
@@ -1437,6 +1504,16 @@ def decide_anomalies(
         entry.anomaly = bool(is_significant and material)
         if entry.anomaly:
             entry.flags.append(decided)
+        if tested and entry.share_spread is not None and math.isfinite(entry.share_spread) and entry.share_n > 1:
+            # What this refresh could see: the larger of the statistical limit
+            # (lone anomaly, this family's size and q) and the materiality floor.
+            floor = entry.materiality / abs(entry.forecast_median) if entry.forecast_median else 0.0
+            q = config.temporal_fdr_q
+            family = len(series) if config.temporal_fdr_enabled else 1
+            entry.detectable_change, entry.detectable_change_80 = (
+                max(floor, detectable_change(entry.share_spread, entry.share_n - 1, family, q, power, entry.share_method))
+                for power in (0.5, 0.8)
+            )
 
 
 def new_period_adjustments(

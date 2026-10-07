@@ -405,3 +405,31 @@ def test_sparse_leaf_uses_labelled_parent_share_fallback():
     assert parent_share[0]["share"] == pytest.approx(1.0 / 3.0)
     assert parent_share[0]["basis"] == "historical_share"
 
+
+
+def test_student_t_quantile_and_detectable_change():
+    from qc.temporal import detectable_change, student_t_quantile
+
+    assert student_t_quantile(0.975, 25) == pytest.approx(2.0595, abs=1e-3)
+    assert student_t_quantile(0.975, 10_000) == pytest.approx(1.960, abs=1e-3)
+    base = detectable_change(0.035, 25, 47, 0.01, 0.5, "seasonal")
+    # More tests or more noise make the refresh less sensitive; power costs more.
+    assert detectable_change(0.035, 25, 10, 0.01, 0.5, "seasonal") < base
+    assert detectable_change(0.07, 25, 47, 0.01, 0.5, "seasonal") > base
+    assert detectable_change(0.035, 25, 47, 0.01, 0.8, "seasonal") > base
+    assert 0.10 < base < 0.16  # ~4.3 critical t times a 3.5% log spread
+
+
+def test_share_tested_leaves_report_what_they_could_detect(tmp_path):
+    from qc.run import run_qc
+    from qcgen.config import suite_config
+    from qcgen.scenarios import build_scenario
+    from qcgen.sources import ScenarioSource
+
+    built = build_scenario(suite_config("small"), 0, tmp_path, "clean", ("source", "coded", "warehouse", "report"))
+    result = run_qc(ScenarioSource(built.directory), "V0002", "V0001")
+    leaves = [s for s in result.temporal.series if s.share_p is not None]
+    assert leaves and all(0.0 < s.detectable_change < s.detectable_change_80 <= 1.0 for s in leaves)
+    summary = result.temporal.to_dict()["sensitivity"]
+    assert "commodity_id:dollar" in summary
+    assert 0.0 < summary["commodity_id:dollar"]["median_detectable_change"] < 1.0

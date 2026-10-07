@@ -153,6 +153,45 @@ one on both the cohort and the `small` sweep after the share-test change.
 - **Late arrival must be declared.** The engine cannot tell late arrival from
   a restatement fault within one version pair.
 
+## Sensitivity: what a refresh could not have seen
+
+A 10% single-category drop on `realistic` is caught 2/20 times. A diagnosis on
+the development seeds (6001-6005) showed this is the noise floor, not a broken
+detector:
+
+- **The baseline is calibrated.** On clean refreshes the share t-statistics
+  have SD 1.01.
+- **A 10% drop sits at about the category noise.** It gives |t| ≈ 2.4-3.4,
+  roughly what this world's 3% weekly category shocks allow.
+- **The false-alarm budget sets the bar.** About 47 tests share it at
+  q = 0.01, so a lone anomaly needs |t| ≈ 4.3.
+
+A better seasonal model would buy about 15% more t. Raising q buys false
+alarms.
+
+So the engine reports its own limit instead. After the BH decision, every
+share-tested leaf gets `detectable_change` (and `detectable_change_80`): the
+smallest share drop it would flag with 50% (80%) power if it were the
+refresh's only anomaly. That is the critical t for the refresh's family size
+and q, times the leaf's own predictive spread, floored at materiality. The
+machine record's `latest_week.sensitivity` gives the median per level and
+measure, and the least sensitive leaf.
+
+**Registered before the calibration run** (`experiments/sensitivity/calibration.py`):
+market movements of 5-40% on seeds 5001-5010, both profiles, scoring the
+affected category's dollar and units leaves (240 series). Each predicts its
+own chance of being flagged:
+
+1. The mean predicted probability is within 0.08 of the observed rate.
+2. In each predicted-probability bin ([0, 0.2), [0.2, 0.5), [0.5, 0.8),
+   [0.8, 1]), the bin's mean prediction lies inside the Wilson 95% interval
+   of its observed rate.
+3. The Brier score is lower than that of a constant prediction at the
+   observed rate.
+4. The prediction is not optimistic: the observed rate is at least the mean
+   prediction minus 0.02. The lone-anomaly threshold is conservative when
+   other series in the refresh are significant too.
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not
