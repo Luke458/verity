@@ -115,7 +115,7 @@ def caldata(model_dir: Path, data_dir: Path, out: Path, rows: int, cols: int, se
     print(f"{len(prompts)} prompts, {len(stream)} tokens -> {count} rows x {cols} -> {out}")
 
 
-class _Exl3Backend:
+class Exl3Backend:
     """Lux's head over the final hidden states of an EXL3 backbone (ExLlamaV3)."""
 
     def __init__(self, model_dir: Path, exl3_dir: Path):
@@ -148,23 +148,33 @@ class _Exl3Backend:
             x = module.forward(x, params)
         raise RuntimeError("final norm not reached")
 
-    def answer(self, state: dict[str, Any], version: int) -> dict[str, float]:
+    def ask(self, state: Any, questions: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """System One answers (Lux's own answer shapes) for any noul/choice questions."""
         torch = self.torch
+        decision_model, infer = _vendored(self.model_dir)
+        metadata = json.loads((self.model_dir / "decision_config.json").read_text())
+        encode = decision_model.encoder_for(metadata)
+        cap = json.loads((self.model_dir / "MODEL_MANIFEST.json").read_text())["max_input_tokens"]
+        item = {"id": "request", "state": state}
         out = {}
         with torch.inference_mode():
-            for cause, row, encoded in _encoded_questions(self.model_dir, self.tokenizer, state, version):
+            for qid, question in questions.items():
+                row = infer.question_to_row(item, qid, question)
+                encoded = encode(row, self.tokenizer, cap)
                 hidden = self.hidden(encoded["ids"])
                 candidates = hidden[torch.tensor(encoded["candidate_positions"], device=hidden.device)]
                 query = hidden[encoded["query_position"]]
                 logits = self.head(candidates[None], query[None])[0].float().cpu().tolist()
-                answer = self.infer.product_answer(
-                    "noul", encoded["keys"], logits, 1.0, [o["description"] for o in row["options"]]
+                out[qid] = infer.product_answer(
+                    row["task_type"], encoded["keys"], logits, 1.0, [o["description"] for o in row["options"]]
                 )
-                out[cause] = float(answer["noul"])
         return out
 
+    def answer(self, state: dict[str, Any], version: int) -> dict[str, float]:
+        return {cause: float(a["noul"]) for cause, a in self.ask(state, questions(version)).items()}
 
-class _ReferenceBackend:
+
+class ReferenceBackend:
     """The published runtime, unmodified (CPU, fp32)."""
 
     def __init__(self, model_dir: Path, threads: int):
@@ -174,18 +184,20 @@ class _ReferenceBackend:
 
         self.model = Decision2.from_pretrained(str(model_dir), device="cpu", threads=threads)
 
+    def ask(self, state: Any, questions: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        return dict(self.model.system_one(state=state, questions=questions)["answers"])
+
     def answer(self, state: dict[str, Any], version: int) -> dict[str, float]:
-        response = self.model.system_one(state=state, questions=questions(version))
-        answers = response["answers"]
+        answers = self.ask(state, questions(version))
         return {cause: float(answers[cause]["noul"]) for cause in CAUSES}
 
 
 def infer(args: argparse.Namespace) -> None:
     model_dir = Path(args.model).expanduser()
     backend: Any = (
-        _Exl3Backend(model_dir, Path(args.exl3).expanduser())
+        Exl3Backend(model_dir, Path(args.exl3).expanduser())
         if args.backend == "exl3"
-        else _ReferenceBackend(model_dir, args.threads)
+        else ReferenceBackend(model_dir, args.threads)
     )
     label = args.label or (f"exl3:{Path(args.exl3).name}" if args.backend == "exl3" else "reference-cpu-fp32")
     out = Path(args.out)
