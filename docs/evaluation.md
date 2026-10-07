@@ -192,6 +192,29 @@ own chance of being flagged:
    prediction minus 0.02. The lone-anomaly threshold is conservative when
    other series in the refresh are significant too.
 
+**Run 1 (seeds 5001-5010): two of four failed.**
+[`results/sensitivity-run1.json`](results/sensitivity-run1.json)
+
+| | Result |
+|---|---|
+| 1. Mean predicted within 0.08 of observed | 0.654 vs 0.629: **held** |
+| 2. Each bin's prediction inside its observed interval | top bin 0.99 vs 133/136 (interval tops out at 0.99): **failed** |
+| 3. Brier below a constant | 0.058 vs 0.233: **held** |
+| 4. Not optimistic (observed ≥ predicted - 0.02) | 0.629 vs 0.634: **failed** (optimistic, mostly on `realistic`) |
+
+The cause was a modelling error, not noise. A category that drops by m does
+not lose m of its share, because the national total drops too. With share c,
+the share moves by (1 - m)/(1 - mc): a 20% drop in a category holding 15% of
+sales moves its share 17.5%. The prediction treated c as 0.
+
+The fix changes what is reported. `detectable_change` is now the drop in the
+**leaf's own value** (others unchanged), converted from the share drop with
+the share the baseline expects, which is what an analyst means by "this
+category could fall 20% unnoticed". The calibration converts the same way.
+
+**Run 2 registered (unseen seeds 7001-7010), same four predictions and
+thresholds.**
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

@@ -23,7 +23,6 @@ from typing import Any
 
 from qc.conformal import wilson_interval
 
-SEEDS = range(5001, 5011)
 MAGNITUDES = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4)
 PROFILES: dict[str, dict[str, Any]] = {"small": {}, "realistic": {"restatement_weeks": 2}}
 BINS = ((0.0, 0.2), (0.2, 0.5), (0.5, 0.8), (0.8, 1.01))
@@ -44,7 +43,10 @@ def predicted_probability(leaf: Any, magnitude: float, tests: int, q: float) -> 
     floor = leaf.materiality / abs(leaf.forecast_median) if leaf.forecast_median else 0.0
     if magnitude < floor:
         return 0.0
-    shift = (-math.log(1.0 - magnitude) if leaf.share_method == "seasonal" else magnitude) / leaf.share_spread
+    from qc.temporal import share_drop
+
+    drop = share_drop(magnitude, leaf.share_level if leaf.share_level is not None else 0.0)
+    shift = (-math.log(1.0 - drop) if leaf.share_method == "seasonal" else drop) / leaf.share_spread
     critical = student_t_quantile(1.0 - q / (2.0 * tests), df)
     return 1.0 - _t_cdf(critical - shift, df)
 
@@ -116,8 +118,10 @@ def main() -> None:
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--workdir", default="reports/sensitivity-work")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--seeds", default="5001-5010", help="inclusive range, e.g. 7001-7010")
     args = parser.parse_args()
-    jobs = [(p, s, m, args.workdir) for p in PROFILES for s in SEEDS for m in MAGNITUDES]
+    first, last = (int(x) for x in args.seeds.split("-"))
+    jobs = [(p, s, m, args.workdir) for p in PROFILES for s in range(first, last + 1) for m in MAGNITUDES]
     if args.jobs > 1:
         with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool:
             rows = [row for case in pool.map(run_case, jobs) for row in case]

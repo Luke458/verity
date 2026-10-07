@@ -1095,6 +1095,7 @@ class SeriesTemporalEvidence:
     share_n: int = 0
     share_method: str = ""
     share_spread: float | None = None
+    share_level: float | None = None
     # Smallest relative movement of this leaf's share that the refresh would
     # flag on its own, with 50% / 80% power (``decide_anomalies``).
     detectable_change: float | None = None
@@ -1152,6 +1153,7 @@ class SeriesTemporalEvidence:
             "share_n": self.share_n,
             "share_method": self.share_method,
             "share_spread": self.share_spread,
+            "share_level": self.share_level,
             "detectable_change": self.detectable_change,
             "detectable_change_80": self.detectable_change_80,
         }
@@ -1257,18 +1259,31 @@ def student_t_quantile(probability: float, df: int) -> float:
     return (low + high) / 2.0
 
 
-def detectable_change(spread: float, df: int, tests: int, q: float, power: float, method: str) -> float:
-    """Smallest relative share drop flagged with ``power`` when it is the refresh's only anomaly.
+def share_drop(leaf_drop: float, share: float) -> float:
+    """Relative share drop when a leaf holding ``share`` of its parent drops by ``leaf_drop``.
+
+    The parent drops too, by ``share * leaf_drop``, so the share moves less
+    than the leaf: (1 - d) / (1 - d c).
+    """
+    return 1.0 - (1.0 - leaf_drop) / (1.0 - leaf_drop * share)
+
+
+def detectable_change(
+    spread: float, df: int, tests: int, q: float, power: float, method: str, share: float = 0.0
+) -> float:
+    """Smallest drop of the leaf's own value flagged with ``power`` as the refresh's only anomaly.
 
     A lone anomaly among ``tests`` hypotheses is rejected by BH at level ``q``
-    when its two-sided p is at most ``q / tests``. The shift must reach that
-    critical t plus the t quantile of ``power`` (0 for 50%).
+    when its two-sided p is at most ``q / tests``. The share shift must reach
+    that critical t plus the t quantile of ``power`` (0 for 50%); the share
+    drop is then converted to the leaf's own drop (others unchanged) using its
+    ``share`` of the parent.
     """
     critical = student_t_quantile(1.0 - q / (2.0 * tests), df)
     shift = critical + (student_t_quantile(power, df) if power > 0.5 else 0.0)
-    if method == "seasonal":
-        return 1.0 - math.exp(-shift * spread)
-    return min(1.0, shift * spread)
+    drop = 1.0 - math.exp(-shift * spread) if method == "seasonal" else min(1.0, shift * spread)
+    share = min(max(share, 0.0), 1.0)
+    return min(1.0, drop / (1.0 - share + share * drop)) if drop < 1.0 else 1.0
 
 
 def student_t_two_sided_p(t: float, df: int) -> float:
@@ -1303,6 +1318,8 @@ class ShareTest(NamedTuple):
     # Predictive spread on a relative scale (log share for ``seasonal``,
     # spread over the trailing mean for ``trailing``): what one t unit is worth.
     spread: float = math.nan
+    # The share the baseline expects this period (the leaf's weight in its parent).
+    level: float = math.nan
 
 
 def _trailing_baseline(values: np.ndarray) -> tuple[float, float, int] | None:
@@ -1377,7 +1394,7 @@ def share_shift_test(
                 spread / abs(mean) if mean else math.inf,
                 ShareTest(
                     t, student_t_two_sided_p(t, n - 1), (observed - mean) * parent_actual, n, "trailing",
-                    spread / abs(mean) if mean else math.inf,
+                    spread / abs(mean) if mean else math.inf, mean,
                 ),
             )
         )
@@ -1412,6 +1429,7 @@ def share_shift_test(
                     spread,
                     ShareTest(
                         t, student_t_two_sided_p(t, n - 1), (observed - expected) * parent_actual, n, "seasonal", spread,
+                        expected,
                     ),
                 )
             )
@@ -1451,6 +1469,7 @@ def _attach_share_tests(
             leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested[:4]
             leaf.share_method = tested.method
             leaf.share_spread = float(tested.spread)
+            leaf.share_level = float(tested.level)
 
 
 def decide_anomalies(
@@ -1511,7 +1530,10 @@ def decide_anomalies(
             q = config.temporal_fdr_q
             family = len(series) if config.temporal_fdr_enabled else 1
             entry.detectable_change, entry.detectable_change_80 = (
-                max(floor, detectable_change(entry.share_spread, entry.share_n - 1, family, q, power, entry.share_method))
+                max(floor, detectable_change(
+                    entry.share_spread, entry.share_n - 1, family, q, power, entry.share_method,
+                    entry.share_level if entry.share_level is not None and math.isfinite(entry.share_level) else 0.0,
+                ))
                 for power in (0.5, 0.8)
             )
 

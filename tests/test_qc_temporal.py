@@ -418,6 +418,15 @@ def test_student_t_quantile_and_detectable_change():
     assert detectable_change(0.07, 25, 47, 0.01, 0.5, "seasonal") > base
     assert detectable_change(0.035, 25, 47, 0.01, 0.8, "seasonal") > base
     assert 0.10 < base < 0.16  # ~4.3 critical t times a 3.5% log spread
+    # A leaf with a large share must fall further than its share does.
+    assert detectable_change(0.035, 25, 47, 0.01, 0.5, "seasonal", share=0.3) > base
+
+
+def test_share_drop_accounts_for_the_parent_falling_too():
+    from qc.temporal import share_drop
+
+    assert share_drop(0.2, 0.0) == pytest.approx(0.2)
+    assert share_drop(0.2, 0.15) == pytest.approx(1 - 0.8 / 0.97)
 
 
 def test_share_tested_leaves_report_what_they_could_detect(tmp_path):
