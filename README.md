@@ -61,9 +61,12 @@ uv pip install --python .venv/bin/python -e ".[test,delta]"
   --store data/qc.db --out reports/weekly --notify sinks.json
 .venv/bin/qc explain --store data/qc.db --dataset retail
 
+# Match free-text change notices to observed changes; draft (unapproved) registry entries
+.venv/bin/qc notices --scenario-dir data/suites/demo/scenario-0003 --notices inbox.txt --out drafts.json
+
 # Tests and gates
 .venv/bin/python -m pytest
-.venv/bin/ruff check qc qcgen tests optional
+.venv/bin/ruff check qc qcgen tests optional experiments
 .venv/bin/mypy
 ```
 
@@ -91,6 +94,7 @@ DATA_CONTRACT_FAILURE, 4 for INCOMPLETE, 75 when locked and 1 on error.
 | Delta source and onboarding | plumbing |
 | Fault-size sweep and realistic profile | validated on synthetic data |
 | Cohort evaluation | validated on synthetic data |
+| Notice drafting (`qc notices`) | validated on synthetic notices; drafts need approval |
 
 "Validated on synthetic data" means measured through the full engine against
 the generator's oracle; it is not a real-world accuracy claim.

@@ -18,32 +18,12 @@ from typing import Any
 
 import numpy as np
 
-# Change types with a notice template, and the engine classifications that
-# observe each one.
-ACCEPTS: dict[str, frozenset[str]] = {
-    "missing_stores": frozenset({"LATEST_WEEK_MISSING"}),
-    "missing_products": frozenset({"LATEST_WEEK_MISSING"}),
-    "new_store_backfill": frozenset({"NEW_ENTITY_HISTORICAL_BACKFILL"}),
-    "history_truncation": frozenset({"ENTITY_HISTORY_TRUNCATED", "ENTITY_REMOVED"}),
-    "commodity_remap": frozenset({"POSSIBLE_RECLASSIFICATION"}),
-    "entity_merge": frozenset({"ENTITY_REPLACED", "ENTITY_REMOVED", "NEW_ENTITY_HISTORICAL_BACKFILL"}),
-}
+from qc.notices import ACCEPTS, Candidate
+from qc.notices import candidates as engine_candidates
+
 CHANGE_TYPES = tuple(ACCEPTS)
 DISTRACTOR_KINDS = ("wrong_entity", "wrong_change", "wrong_weeks", "other_dataset", "chatter")
 OTHER_DATASETS = ("Loyalty panel", "Script volumes (PBS)", "Online orders", "Wholesale shipments")
-PLURALS = {"store": "stores", "product": "products", "commodity": "categories"}
-CLASS_PHRASES = {
-    "LATEST_WEEK_MISSING": "missing in the latest week",
-    "NEW_ENTITY_HISTORICAL_BACKFILL": "new, arrived with past history",
-    "NEW_ENTITY_RECENT": "new, recent weeks only",
-    "ENTITY_REMOVED": "removed entirely",
-    "ENTITY_HISTORY_EXTENDED": "history extended",
-    "ENTITY_HISTORY_TRUNCATED": "history truncated",
-    "POSSIBLE_RECLASSIFICATION": "products moved between categories",
-    "ENTITY_REPLACED": "id replaced by another",
-}
-
-
 @dataclass(frozen=True)
 class World:
     """What a notice writer would know about the dataset."""
@@ -53,16 +33,6 @@ class World:
     stores: dict[str, dict[str, Any]]
     products: dict[str, dict[str, Any]]
     commodities: dict[str, str]
-
-
-@dataclass
-class Candidate:
-    key: str
-    classification: str
-    entity_type: str
-    entity_ids: list[str]
-    weeks: list[int]
-    description: str = ""
 
 
 @dataclass
@@ -78,58 +48,14 @@ class Notice:
 
 
 # ---------------------------------------------------------------------------
-# Candidates (engine side)
+# Candidates (engine side: qc.notices)
 # ---------------------------------------------------------------------------
 
 
-def _span(weeks: list[int]) -> str:
-    if not weeks:
-        return ""
-    return f"week {weeks[0]}" if len(weeks) == 1 else f"weeks {min(weeks)}-{max(weeks)}"
-
-
-def _entity_label(world: World, entity_type: str, entity_id: str) -> str:
-    if entity_type == "store" and entity_id in world.stores:
-        return f"{entity_id} ({world.stores[entity_id]['store_name']})"
-    if entity_type == "commodity":
-        parts = entity_id.split("->")
-        return " -> ".join(f"{p} ({world.commodities.get(p, p)})" for p in parts)
-    return entity_id
-
-
 def candidates(result: Any, world: World) -> list[Candidate]:
-    """The engine's observed lifecycle changes, grouped by classification and entity type."""
-    groups: dict[tuple[str, str], Candidate] = {}
-    for event in result.events or ():
-        group = groups.setdefault(
-            (event.classification, event.entity_type),
-            Candidate("", event.classification, event.entity_type, [], []),
-        )
-        group.entity_ids.append(str(event.entity_id))
-        weeks = list(event.historical_weeks_added) + list(event.historical_weeks_removed)
-        if event.classification == "LATEST_WEEK_MISSING":
-            weeks = [world.latest_week]
-        group.weeks = sorted(set(group.weeks) | {int(w) for w in weeks})
-    for relationship in result.relationships or ():
-        if relationship.relationship in ("replaced_by", "merged_into", "superseded_by"):
-            group = groups.setdefault(("ENTITY_REPLACED", "store"), Candidate("", "ENTITY_REPLACED", "store", [], []))
-            group.entity_ids += [str(relationship.source_id), str(relationship.target_id)]
-    out = []
-    for index, (_, group) in enumerate(sorted(groups.items())):
-        group.key = f"c{index}"
-        labels = [_entity_label(world, group.entity_type, e) for e in group.entity_ids]
-        if group.classification == "ENTITY_REPLACED":
-            names = " replaced by ".join(labels)
-        else:
-            names = ", ".join(labels[:6]) + (f" and {len(labels) - 6} more" if len(labels) > 6 else "")
-        span = _span(group.weeks)
-        group.description = (
-            f"{PLURALS.get(group.entity_type, group.entity_type + 's')} "
-            f"{CLASS_PHRASES.get(group.classification, group.classification)}: {names}"
-            + (f" ({span})" if span else "")
-        )
-        out.append(group)
-    return out
+    """The engine's observed changes, labelled with store and category names."""
+    names = {sid: str(row["store_name"]) for sid, row in world.stores.items()} | dict(world.commodities)
+    return engine_candidates(result, names)
 
 
 def observed_ids(cands: list[Candidate]) -> set[str]:

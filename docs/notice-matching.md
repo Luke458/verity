@@ -1,6 +1,8 @@
 # Experiment: matching free-text notices to findings
 
-**Status: done (`experiments/notices/`); test results at the end.**
+**Status: done; test results at the end. Shipped as `qc notices`**
+([weekly-run.md](weekly-run.md#drafting-explanations-from-notices)); the sandbox
+is `experiments/notices/`.
 Research sandbox; nothing here changes how the engine decides a status.
 
 ## The gap

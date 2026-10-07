@@ -5,6 +5,7 @@
     python -m experiments.labeller.lux infer --model ... --backend exl3 --exl3 ~/models/lux-backbone-exl3-4.0 \\
         --data reports/labeller --splits dev test --out reports/labeller/lux-exl3-4.0.jsonl
     python -m experiments.labeller.lux infer --model ... --backend reference --threads 4 --limit 30 ...
+    python -m experiments.labeller.lux serve --model ... --exl3 ... --port 8090   # POST /v1/systemone
 
 ``reference`` runs the published runtime unmodified (CPU, fp32). ``exl3`` keeps
 Lux's prompt encoding, decision head and answer normalization but takes the
@@ -224,6 +225,35 @@ def infer(args: argparse.Namespace) -> None:
             print(f"{position + 1}/{len(rows)} {record['key']}", flush=True)
 
 
+def serve(args: argparse.Namespace) -> None:
+    """``POST /v1/systemone`` over the EXL3 backend (loopback only), for ``qc notices``."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    backend = Exl3Backend(Path(args.model).expanduser(), Path(args.exl3).expanduser())
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            if self.path.rstrip("/") != "/v1/systemone":
+                self.send_error(404)
+                return
+            try:
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                answers = backend.ask(body["state"], body["questions"])
+                payload, code = {"model": body.get("model", "lux"), "answers": answers}, 200
+            except (KeyError, ValueError, TypeError) as exc:
+                payload, code = {"error": str(exc)}, 400
+            data_out = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data_out)))
+            self.end_headers()
+            self.wfile.write(data_out)
+
+    server = HTTPServer(("127.0.0.1", args.port), Handler)
+    print(f"serving /v1/systemone on http://127.0.0.1:{args.port}", flush=True)
+    server.serve_forever()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -247,7 +277,14 @@ def main() -> None:
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--label", default=None)
     p.add_argument("--prompt", type=int, choices=(1, 2, 3), default=1, help="prompt version (service.py)")
+    p = sub.add_parser("serve")
+    p.add_argument("--model", required=True)
+    p.add_argument("--exl3", required=True)
+    p.add_argument("--port", type=int, default=8090)
     args = parser.parse_args()
+    if args.command == "serve":
+        serve(args)
+        return
     if args.command == "shim":
         shim(Path(args.model).expanduser(), Path(args.out).expanduser())
     elif args.command == "caldata":

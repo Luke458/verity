@@ -184,6 +184,56 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _scenario_names(scenario_dir: Path, version: str) -> dict[str, str]:
+    """Store and category display names from a scenario's dimension tables, if present."""
+    import pandas as pd
+
+    names: dict[str, str] = {}
+    dims = scenario_dir / "versions" / version / "dims"
+    for table, key, label in (("stores", "store_id", "store_name"), ("commodities", "commodity_id", "commodity_name")):
+        path = dims / f"{table}.parquet"
+        if path.exists():
+            frame = pd.read_parquet(path, columns=[key, label])
+            names.update(zip(frame[key].astype(str), frame[label].astype(str), strict=True))
+    return names
+
+
+def _cmd_notices(args: argparse.Namespace) -> int:
+    from .events import save_registry
+    from .notices import PatternMatcher, SystemOneMatcher, draft, load_notices
+
+    if args.matcher == "systemone" and not args.endpoint:
+        raise SystemExit("--matcher systemone needs --endpoint")
+    config = load_dataset_config(args.config) if args.config else DatasetConfig()
+    result = _run_scenario(args, config)
+    matcher: Any = (
+        SystemOneMatcher(args.endpoint, args.model, threshold=args.threshold)
+        if args.matcher == "systemone"
+        else PatternMatcher()
+    )
+    current = result.version_pair.current_id if result.version_pair is not None else ""
+    report = draft(result, load_notices(args.notices), matcher, _scenario_names(Path(args.scenario_dir), current))
+    if args.out:
+        save_registry(report["registry_drafts"], args.out)
+    if args.json:
+        print(_json_dumps(report, indent=2, default=_json_default))
+        return 0
+    print(f"NOTICES dataset={report['dataset']} status={report['status']} matcher={report['matcher']}")
+    for item in report["matches"]:
+        notice, cand = item["notice"], item["candidate"]
+        target = cand["description"] if cand else "no observed change"
+        checks = item["details"].get("checks")
+        weakest = f"  (weakest check {min(checks, key=checks.get)} {min(checks.values()):.2f})" if checks else ""
+        print(f"  {notice['id']:<12} {item['action']:<15} {target}{weakest}")
+        print(f"  {'':<12} {notice['text']}")
+    drafts = report["registry_drafts"]
+    if drafts:
+        where = f" in {args.out}" if args.out else " (pass --out to save them)"
+        print(f"{len(drafts)} draft registry entr{'y' if len(drafts) == 1 else 'ies'}{where}: unapproved; "
+              "set approved_by, approved_at and confirmed before passing them as --registry.")
+    return 0
+
+
 def _cmd_shadow(args: argparse.Namespace) -> int:
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     summary = run_shadow(
@@ -739,6 +789,20 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-id", default=None)
     run.add_argument("--json", action="store_true")
     run.set_defaults(func=_cmd_run)
+
+    notices = subparsers.add_parser(
+        "notices", help="match free-text change notices to observed changes; draft registry entries"
+    )
+    _add_scenario_arguments(notices)
+    notices.add_argument("--notices", required=True, help="notices: JSON list, JSONL or one per line")
+    notices.add_argument("--matcher", choices=("patterns", "systemone"), default="patterns")
+    notices.add_argument("--endpoint", default=None, help="System One service base URL (https, or http to loopback)")
+    notices.add_argument("--model", default="decision", help="model name sent to the service")
+    notices.add_argument("--threshold", type=float, default=0.5, help="minimum probability for every check")
+    notices.add_argument("--out", default=None, help="write the unapproved drafts as a registry file")
+    notices.add_argument("--run-id", default=None)
+    notices.add_argument("--json", action="store_true")
+    notices.set_defaults(func=_cmd_notices)
 
     shadow = subparsers.add_parser(
         "shadow", help="run the engine over a suite and score outcomes"

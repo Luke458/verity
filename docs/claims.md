@@ -47,6 +47,7 @@ rate (its only control was a genuine movement), and clean refreshes alarmed on
 | Delta source and onboarding | `plumbing-only` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. |
 | Fault-size sweep and realistic profile | `validated-synthetic` | `qc sweep`: detection curves over fault size (paired seeds), two-fault refreshes and clean false alarms per profile; results for engine `7d122859c6bd` in `docs/results/` and [evaluation.md](evaluation.md), including unseen seeds 7001-7010. Clean false alarms 3/60 (`small`), 3/60 and 4/60 (`realistic`). `tests/test_benchmark_realism.py`. |
 | Cohort evaluation | `validated-synthetic` | Registered, hash-pinned plan with independently sized clean controls; exits 3 on gate failure. |
+| Notice drafting (`qc notices`) | `validated-synthetic` | Drafts are unapproved and explain nothing until a person approves them; an approved draft clears only the findings its change raises (`tests/test_qc_notices.py`). Matching measured on synthetic notices ([notice-matching.md](notice-matching.md)): on LLM-reworded notices the patterns find 52% of true matches, and a System One service (Decision-2.0-Lux-9B) finds 89%, but with 11% false explanations, so about four in ten suggestions are wrong. Closures and category moves are annotations only, because the registry cannot express them. |
 
 ## Not claimed
 

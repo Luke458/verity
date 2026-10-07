@@ -109,6 +109,46 @@ never follow redirects, and read their bearer token from the named environment
 variable. Delivery is fail-soft: a failed sink is reported on stderr and cannot
 change the status, exit code or report. There is no retry queue.
 
+## Drafting explanations from notices
+
+Change notices usually arrive as text ("S012 closed for refit from week 118").
+`qc notices` matches each one to a change the refresh shows and drafts the
+registry entry that would explain it:
+
+```sh
+qc notices --scenario-dir data/suites/demo/scenario-0003 \
+  --notices inbox.txt --out drafts.json                 # deterministic patterns
+qc notices --scenario-dir ... --notices inbox.txt --out drafts.json \
+  --matcher systemone --endpoint http://127.0.0.1:8090 --model lux
+```
+
+Notices are a JSON list, JSONL (`{"id", "text"}`) or one per line. Each is
+matched to one observed lifecycle change, or to none. A match becomes a draft
+registry entry only where the registry can express the change: a new entity
+with history, a removal, or history extended or truncated. An entity
+replacement drafts both its removal and its backfill. A closure (latest week
+missing) or a category move is reported as an annotation: the registry cannot
+explain those today. One draft is written per observed change, citing every
+notice that supports it.
+
+Drafts are **unapproved** (`approved_by: null`, `confirmed: false`) and explain
+nothing until a person fills in `approved_by` and `approved_at` (before the
+assessment's observation cutoff) and sets `confirmed`. Only then does
+`qc run --registry drafts.json` count them. They explain only the findings
+that change raises: in the tests, an approved backfill draft turns the
+historical-revision findings into HUMAN_APPROVED, while an unrelated temporal
+anomaly stays unexplained.
+
+`--matcher systemone` asks any service speaking the System One protocol
+(`POST /v1/systemone`, for example `experiments/labeller/lux.py serve` or a
+llama.cpp server). It asks one choice question and four yes/no checks, and
+keeps a match only when every check clears `--threshold`. The human output
+shows each match's weakest check. Endpoints follow the webhook rules: https,
+or http to loopback, and no redirects. On synthetic notices reworded by an
+LLM, this found 89% of true matches against 52% for the patterns, but about
+four in ten of its suggestions were wrong, mostly notices about another
+dataset ([notice-matching.md](notice-matching.md)). Review every draft.
+
 ## Scheduling
 
 `deployment/weekly.sh` maps `QC_URI`, `QC_STORE`, `QC_CONFIG`, `QC_NOTIFY`,

@@ -188,6 +188,8 @@ structural fingerprints for later comparison.
 `load_registry` / `save_registry` read and write registry entries. `propose_expected_events` drafts entries from observed historical
 backfills; drafts are marked `confirmed: false` and must be confirmed before
 they are trusted. `qc run --registry path` uses a registry file; blind runs use none.
+`qc notices` (`qc/notices.py`) drafts entries the same way from free-text change notices
+([weekly-run.md](weekly-run.md#drafting-explanations-from-notices)).
 
 ## Shadow mode
 
