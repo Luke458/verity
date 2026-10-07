@@ -186,8 +186,12 @@ suggestions are still wrong, so it drafts and a person approves.
 
 ## 7. What it still cannot do
 
-- Category drops of 10% or less on seasonal data are within noise when ~52
+- Category drops of 10% or less on seasonal data are within noise when ~47
   series are tested per refresh at a 1% false-alarm budget (2/20 detected).
+  The weekly category noise is 3%, and a lone anomaly needs |t| ≈ 4.3. So each
+  refresh now reports, per category, the smallest drop it could have caught.
+  Two registered calibration runs (the first found a modelling error) show
+  that number is a safe, conservative bound.
 - Late arrival must be declared; within one version pair the engine cannot
   tell it from a restatement fault.
 - A market movement is never given a cause, so pairs involving one are named

@@ -266,6 +266,14 @@ their share because most week-to-week variance in retail series is a common
 market movement: a market-wide swing moves the national series, not every
 leaf. Robust, seasonal and EWMA z-scores and change points ignore trend,
 seasonality and multiplicity, so they are reported as evidence and never decide.
+Each share-tested leaf also reports what the refresh could not have seen:
+`detectable_change` (and `detectable_change_80`) is the drop in the leaf's own
+value that would be flagged with 50% (80%) power as the refresh's only anomaly.
+It comes from the critical t for this family's size and q, the leaf's
+predictive spread and expected share, and the materiality floor.
+`latest_week.sensitivity` gives the median per level and measure. It is a
+conservative bound: simultaneous movements, such as dollars and units of one
+category, face a more lenient BH threshold ([evaluation.md](evaluation.md#sensitivity-what-a-refresh-could-not-have-seen)).
 Sparse leaves fall back to parent expectation
 times a historically estimated child share and are labelled `parent_share`.
 Structural additions from newly appearing entities are subtracted from the

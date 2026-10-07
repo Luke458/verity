@@ -215,6 +215,28 @@ category could fall 20% unnoticed". The calibration converts the same way.
 **Run 2 registered (unseen seeds 7001-7010), same four predictions and
 thresholds.**
 
+**Run 2: three of four held.**
+[`results/sensitivity-run2.json`](results/sensitivity-run2.json)
+
+| | Result |
+|---|---|
+| 1. Mean predicted within 0.08 of observed | 0.624 vs 0.679: **held** |
+| 2. Each bin's prediction inside its observed interval | [0, 0.2): 0.04 vs 0.07 held; [0.8, 1]: 0.99 vs 0.99 held; [0.2, 0.5): 0.29 vs 0.61 (n = 23) and [0.5, 0.8): 0.65 vs 1.00 (n = 10): **failed** |
+| 3. Brier below a constant | 0.060 vs 0.218: **held** |
+| 4. Not optimistic | 0.679 vs 0.604: **held** |
+
+What is left is the conservatism prediction 4 anticipated, larger than
+assumed. A category movement moves dollars and units together, and two
+simultaneous discoveries face a BH threshold twice as lenient as a lone one.
+So movements are caught earlier than the lone-anomaly bound says. Run 1's
+share-conversion error was optimistic and hid this.
+
+**Reading `detectable_change`:** it is a **conservative bound**, not a
+calibrated probability. Below about 0.2 predicted, leaves were flagged 7% of
+the time; above 0.8, 99%. In between it under-states detection (0.29
+predicted, 0.61 observed). It never over-states it. No further tuning was
+done on these seeds; a third model change would be fitting the evaluation.
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

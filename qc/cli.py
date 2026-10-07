@@ -138,6 +138,15 @@ def _print_human(result: QCRunResult) -> None:
                 f"median={item.forecast_median:,.0f} "
                 f"pct={percentile_text} flags={item.flags}"
             )
+        sensitivity = result.temporal.sensitivity()
+        if sensitivity:
+            print("SENSITIVITY (median drop a lone leaf needs to be flagged, 50% power; conservative)")
+            for key, entry in sensitivity.items():
+                print(
+                    f"  {key:<24} {entry['median_detectable_change']:.0%} "
+                    f"(80% power {entry['median_detectable_change_80']:.0%}; "
+                    f"least sensitive {entry['least_sensitive']})"
+                )
     _print_decisions(result.decisions)
     if result.reasons:
         print("REASONS")
