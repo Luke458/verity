@@ -249,6 +249,77 @@ for a 10% drop (|t| ≈ 2.8). None of these is implemented. At this
 false-alarm budget, detection on this world is at its limit; the report of
 that limit is the improvement.
 
+## Clean false alarms on `realistic`
+
+The sweeps flag 3/60 and 4/60 clean `realistic` refreshes. A rerun of the 60
+clean refreshes of seeds 5001-5010 with every finding recorded flags 3:
+
+- **One latest-week share flag** (a banner's units and stock). This is the
+  false-alarm budget the BH family spends.
+- **Two single-product absences** escalated by `missing_entity_impact`. Each
+  product carried just over `materiality_ratio` (0.1%) of the period: 0.11%
+  and 0.17%. One had sold in 97 of 103 previous weeks; the other in all 103.
+
+Neither is late-arriving data, which the declared window absorbs. To stop the
+absences, the engine would have to tell a natural product exit from a lost
+product. The `missing_products` fault removes products that look the same:
+of 70 injected absences on the same seeds, 65 had sold in every previous
+week, and 11 carried no more than 0.2% of the period. A long-run
+reliability cut-off would remove one of the two alarms (the 97/103 product),
+a cut-off fitted to one case. Raising the absence materiality above 0.17%
+would trade 2 false alarms in 60 for hiding 11 of 70 injected absences.
+Neither change is made;
+an operator who expects product churn should raise `materiality_ratio` for
+that dataset knowingly.
+
+## Approving closures and category moves
+
+The registry can explain store closures (`LATEST_WEEK_MISSING`) and category
+moves (`POSSIBLE_RECLASSIFICATION`), scoped to the weeks they are in effect
+([engine.md](engine.md#expected-event-registry)). An approval restates the
+refresh like-for-like before the latest-week test: closed stores are left out
+of every week, and moved products' history is assigned to their new category.
+The risk is that an approval hides a fault it did not cause, so the
+measurement pairs each change with a second fault.
+
+`python -m experiments.approvals.run` builds, per profile and seed:
+
+- each change alone, assessed blind and with the entry `qc notices` drafts
+  for it, approved;
+- each change with a second fault (coding error, warehouse transform error,
+  market movement, one-week restatement), approved;
+- each second fault alone, and a clean refresh.
+
+The pair injects the second fault first, so it shares the world and the
+fault's parameters with the solo run. A market movement's category is drawn
+at injection, though, so it can differ. A missed market movement is
+therefore judged against the engine's own reported 80%-power
+`detectable_change` for that category in the run that missed it.
+
+Developed on seeds 6101-6105, which found two problems and fixed them before
+registration:
+
+- A product sold only in a closed store also goes missing. Absences are now
+  re-checked like-for-like.
+- A move explains none of a revision, so on `realistic` the immaterial
+  late-arrival residual escalated every approved move. A refresh whose only
+  structural changes are approved moves now judges its residual as if it had
+  none.
+
+### Registered predictions (seeds 6201-6220, both profiles)
+
+1. **Blind, every change alone is flagged** (20/20 per change and profile).
+2. **Approved, a change alone is explained:** PASS_WITH_EXPLANATION in at least
+   17/20 per change and profile. No approved run leaves the change's own
+   findings unexplained (`historical_revision`, `absence_event` or
+   `historical_event`).
+3. **Approvals do not hide large faults:** for coding errors, warehouse transform
+   errors and one-week restatements, the approved pair is flagged in at least
+   as many seeds as the second fault alone, minus one.
+4. **Approvals hide nothing the engine claims it can see:** no missed market
+   movement in an approved pair is at or above that run's reported 80%-power
+   `detectable_change`.
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

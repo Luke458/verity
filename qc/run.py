@@ -24,6 +24,7 @@ from .attribution import (
     WeekRevision,
     classify_run,
     explain_revision,
+    like_for_like,
     week_revisions,
 )
 from .config import DatasetConfig
@@ -418,7 +419,7 @@ def run_qc(
         except (KeyError, ValueError, TypeError):
             return False
     approved_events = [item for item in registry.events() if approval_available(item)]
-    attribution = explain_revision(cubes["base"], events, approved_events, config)
+    attribution = explain_revision(cubes["base"], events, approved_events, config, pair.current_max_week)
     revisions_by_week = week_revisions(cubes["base"], events, config)
     counterfactual = reconstruct_counterfactual(previous, current, events, config)
     reconciliation = run_reconciliation(
@@ -439,15 +440,25 @@ def run_qc(
         if reference_frame is not None and reference_spec is not None
         else None
     )
+    # Approved closures and moves restate both versions like-for-like. An
+    # absence that only follows from an approved closure (a product sold only
+    # in the closed store) is not a further absence like-for-like.
+    temporal_previous, temporal_current, restatement = like_for_like(previous, current, events, attribution)
+    absences = (
+        classify_entity_changes(temporal_previous, temporal_current, pair, config)
+        if restatement["excluded"]
+        else None
+    )
     historical_status = classify_run(
         contracts.status,
         events,
         attribution,
         config,
         reconstruction_score=counterfactual.reconciliation_score,
+        absences=absences,
     )
     try:
-        temporal = run_temporal_qc(previous, current, pair, config, events)
+        temporal = run_temporal_qc(temporal_previous, temporal_current, pair, config, events)
     except Exception as exc:  # noqa: BLE001 - preserve completed deterministic checks
         temporal = TemporalResult(
             target_week=pair.current_max_week, anomaly=False, flags=[],
@@ -515,7 +526,7 @@ def run_qc(
                 temporal,
                 relationships,
                 reference_report,
-            ),
+            ) | {"like_for_like": restatement},
         ),
         config,
         prior_refreshes,

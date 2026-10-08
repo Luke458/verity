@@ -24,12 +24,22 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from .lifecycle import EXTENDED, NEW_BACKFILL, REMOVED, TRUNCATED
+from .lifecycle import (
+    EXTENDED,
+    LATEST_MISSING,
+    NEW_BACKFILL,
+    RECLASSIFIED,
+    REMOVED,
+    TRUNCATED,
+)
 
 NONE = "none"
 REPLACED = "ENTITY_REPLACED"
-# Classifications the registry can explain (they carry historical weeks).
-REGISTRY_CLASSES = frozenset({NEW_BACKFILL, REMOVED, EXTENDED, TRUNCATED})
+# Historical changes: the registry scopes them by the weeks they rewrite.
+HISTORY_CLASSES = frozenset({NEW_BACKFILL, REMOVED, EXTENDED, TRUNCATED})
+# Closures and category moves: scoped by the weeks they are in effect.
+EFFECT_CLASSES = frozenset({LATEST_MISSING, RECLASSIFIED})
+REGISTRY_CLASSES = HISTORY_CLASSES | EFFECT_CLASSES
 PLURALS = {"store": "stores", "product": "products", "commodity": "categories"}
 CLASS_PHRASES = {
     "LATEST_WEEK_MISSING": "missing in the latest week",
@@ -62,6 +72,7 @@ class Candidate:
     entity_ids: list[str]
     weeks: list[int]
     description: str = ""
+    product_ids: list[str] = field(default_factory=list)  # category moves: the products moved
 
 
 def _span(weeks: Sequence[int]) -> str:
@@ -89,6 +100,7 @@ def candidates(result: Any, names: Mapping[str, str] | None = None) -> list[Cand
             Candidate("", event.classification, event.entity_type, [], []),
         )
         group.entity_ids.append(str(event.entity_id))
+        group.product_ids += [str(p) for p in event.details.get("products", [])]
         weeks = list(event.historical_weeks_added) + list(event.historical_weeks_removed)
         if event.classification == "LATEST_WEEK_MISSING" and latest is not None:
             weeks = [latest]
@@ -336,19 +348,30 @@ def load_notices(path: str | Path) -> list[dict[str, str]]:
     return notices
 
 
-def registry_draft(cand: Candidate, dataset: str) -> dict[str, Any] | None:
-    """An unapproved registry entry for an observed change the registry can express."""
-    if cand.classification not in REGISTRY_CLASSES or not cand.weeks:
+def registry_draft(cand: Candidate, dataset: str, latest_week: int | None = None) -> dict[str, Any] | None:
+    """An unapproved registry entry for an observed change the registry can express.
+
+    A historical change is scoped to the weeks it rewrote. A closure or a
+    category move is scoped to the refresh's latest week; the reviewer widens
+    ``effective_to_week`` if the change is known to last. A move also lists
+    the products observed moving, so the approval covers no others.
+    """
+    if cand.classification in HISTORY_CLASSES and cand.weeks:
+        scope: dict[str, Any] = {"expected_history_start": min(cand.weeks), "expected_history_end": max(cand.weeks)}
+    elif cand.classification in EFFECT_CLASSES and latest_week is not None:
+        scope = {"effective_from_week": latest_week, "effective_to_week": latest_week}
+        if cand.classification == RECLASSIFIED:
+            scope["product_ids"] = sorted(cand.product_ids)
+    else:
         return None
-    identity = f"{dataset}|{cand.classification}|{cand.entity_type}|{sorted(cand.entity_ids)}|{cand.weeks}"
+    identity = f"{dataset}|{cand.classification}|{cand.entity_type}|{sorted(cand.entity_ids)}|{cand.weeks}|{latest_week}"
     return {
         "event_id": f"draft-{hashlib.sha256(identity.encode()).hexdigest()[:12]}",
         "dataset": dataset,
         "classification": cand.classification,
         "entity_type": cand.entity_type,
         "entity_ids": list(cand.entity_ids),
-        "expected_history_start": min(cand.weeks),
-        "expected_history_end": max(cand.weeks),
+        **scope,
         "description": cand.description,
         "notices": [],
         "confirmed": False,
@@ -377,12 +400,12 @@ def draft(
         if cand is not None and cand.classification == REPLACED:
             # A replacement is explained by its removal and its backfill.
             ids = {part for e in cand.entity_ids for part in e.split("->")}
-            targets = [c for c in cands if c.classification in REGISTRY_CLASSES and set(c.entity_ids) & ids]
+            targets = [c for c in cands if c.classification in HISTORY_CLASSES and set(c.entity_ids) & ids]
         elif cand is not None:
             targets = [cand]
         drafted = []
         for target in targets:
-            entry = registry_draft(target, result.dataset)
+            entry = registry_draft(target, result.dataset, latest)
             if entry is None:
                 continue
             entry = drafts.setdefault(entry["event_id"], entry)

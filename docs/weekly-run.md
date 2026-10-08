@@ -124,20 +124,22 @@ qc notices --scenario-dir ... --notices inbox.txt --out drafts.json \
 
 Notices are a JSON list, JSONL (`{"id", "text"}`) or one per line. Each is
 matched to one observed lifecycle change, or to none. A match becomes a draft
-registry entry only where the registry can express the change: a new entity
-with history, a removal, or history extended or truncated. An entity
-replacement drafts both its removal and its backfill. A closure (latest week
-missing) or a category move is reported as an annotation: the registry cannot
-explain those today. One draft is written per observed change, citing every
-notice that supports it.
+registry entry: a new entity with history, a removal, or history extended or
+truncated is scoped to the weeks it rewrote; a closure (latest week missing)
+or a category move is scoped to this refresh's latest week, and a move lists
+the products observed moving. Widen `effective_to_week` when a closure is
+known to last. An entity replacement drafts both its removal and its
+backfill. Other matches (a new entity with no history) are annotations. One
+draft is written per observed change, citing every notice that supports it.
 
 Drafts are **unapproved** (`approved_by: null`, `confirmed: false`) and explain
 nothing until a person fills in `approved_by` and `approved_at` (before the
 assessment's observation cutoff) and sets `confirmed`. Only then does
 `qc run --registry drafts.json` count them. They explain only the findings
 that change raises: in the tests, an approved backfill draft turns the
-historical-revision findings into HUMAN_APPROVED, while an unrelated temporal
-anomaly stays unexplained.
+historical-revision findings into HUMAN_APPROVED, an approved closure or move
+also clears the latest-week findings of the banners or categories it moved,
+and an unrelated temporal anomaly stays unexplained.
 
 `--matcher systemone` asks any service speaking the System One protocol
 (`POST /v1/systemone`, for example `experiments/labeller/lux.py serve` or a

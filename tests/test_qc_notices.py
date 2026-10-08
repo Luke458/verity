@@ -62,17 +62,64 @@ def test_backfill_notice_drafts_an_entry_that_explains_once_approved(tmp_path, c
     }
 
 
-def test_closure_notice_is_an_annotation_without_a_draft(tmp_path, capsys):
-    built, case = _scenario(tmp_path, "missing_stores")
-    stores = " and ".join(case["affected"]["stores"])
-    notices = tmp_path / "notices.json"
-    notices.write_text(json.dumps([{"id": "n1", "text": f"{stores} closed for refit from week {case['weeks'][0]}."}]))
+def _run(capsys, scenario_dir, *extra):
     capsys.readouterr()
-    assert main(["notices", "--scenario-dir", str(built.directory), "--notices", str(notices), "--json"]) == 0
+    assert main(["run", "--scenario-dir", str(scenario_dir), "--json", "--no-decisions", *extra]) in (0, 1)
+    return json.loads(capsys.readouterr().out)
+
+
+def _approve(path):
+    entries = json.loads(path.read_text())["events"]
+    for entry in entries:
+        entry.update(approved_by="analyst", approved_at="2000-01-01T00:00:00+00:00", confirmed=True)
+    path.write_text(json.dumps({"events": entries}))
+    return entries
+
+
+@pytest.mark.parametrize(
+    ("family", "text", "explained_check"),
+    [
+        ("missing_stores", "{stores} closed for refit from week {week}.", "absence_event"),
+        ("commodity_remap", "Products in {commodities} reclassified (range review).",
+         "historical_event"),
+    ],
+)
+def test_closure_and_move_notices_draft_entries_that_explain_once_approved(tmp_path, capsys, family, text, explained_check):
+    built, case = _scenario(tmp_path, family)
+    affected = case["affected"]
+    notices = tmp_path / "notices.json"
+    notices.write_text(json.dumps([{"id": "n1", "text": text.format(
+        stores=" and ".join(affected.get("stores", [])),
+        commodities=" and ".join(affected.get("commodities", [])),
+        week=(case.get("weeks") or [""])[0],
+    )}]))
+    drafts = tmp_path / "drafts.json"
+    capsys.readouterr()
+    assert main(["notices", "--scenario-dir", str(built.directory), "--notices", str(notices),
+                 "--out", str(drafts), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["matches"][0]["action"] == "annotation"
-    assert report["matches"][0]["candidate"]["classification"] == "LATEST_WEEK_MISSING"
-    assert report["registry_drafts"] == []
+    assert report["matches"][0]["action"] == "registry_draft"
+    blind = _run(capsys, built.directory)
+    assert blind["status"] == "INVESTIGATE"
+    assert _run(capsys, built.directory, "--registry", str(drafts))["status"] == "INVESTIGATE"
+
+    entries = _approve(drafts)
+    assert entries[0]["effective_from_week"] == entries[0]["effective_to_week"] == report["latest_week"]
+    approved = _run(capsys, built.directory, "--registry", str(drafts))
+
+    def unexplained(report):
+        return {(f["check"], f["scope"], f["metric"]) for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"}
+
+    # The approval clears the change's own findings (its approval finding, the
+    # historical status and the affected banners' or categories' latest week)
+    # and nothing it did not cause; what remains was already flagged blind.
+    affected = {f"banner_id:{b}" for b in affected.get("banners", [])} | {
+        f"commodity_id:{c}" for c in affected.get("commodities", [])}
+    remaining = unexplained(approved)
+    assert remaining <= unexplained(blind)
+    assert not {item for item in remaining if item[0] == "historical_revision" or item[1] in affected}
+    assert any(f["check"] == explained_check and f["disposition"] == "HUMAN_APPROVED" for f in approved["findings"])
+    assert approved["status"] == ("INVESTIGATE" if remaining else "PASS_WITH_EXPLANATION")
 
 
 class _Service(BaseHTTPRequestHandler):

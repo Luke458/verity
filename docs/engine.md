@@ -87,8 +87,9 @@ final status policy, not the final assessment:
 | Condition | Status |
 |---|---|
 | contract failure | `DATA_CONTRACT_FAILURE` |
-| missing entities of one type expected to carry more than `materiality_ratio` of the period (`lifecycle.missing_entity_impact`) | `INVESTIGATE` |
+| missing entities of one type, not explained by an approved closure, expected to carry more than `materiality_ratio` of the period (`lifecycle.missing_entity_impact`; re-checked like-for-like when closures are approved) | `INVESTIGATE` |
 | structural events, all matched by the expected-event registry and explained fraction >= threshold | `PASS_WITH_EXPLANATION` |
+| structural events are only category moves, all matched, and the residual escalates by neither rule below | `PASS_WITH_EXPLANATION` |
 | structural events not matched by the registry | `INVESTIGATE` |
 | material residual unexplained | `INVESTIGATE` (`unexplained_value_change`) |
 | immaterial residual but changes spread across > `broad_recalculation_breadth` of rows | `INVESTIGATE` (`broad_historical_recalculation`) |
@@ -188,6 +189,26 @@ structural fingerprints for later comparison.
 `load_registry` / `save_registry` read and write registry entries. `propose_expected_events` drafts entries from observed historical
 backfills; drafts are marked `confirmed: false` and must be confirmed before
 they are trusted. `qc run --registry path` uses a registry file; blind runs use none.
+
+An entry is used only when `approved_by` is set, `confirmed` is `true`, its
+`dataset` is the dataset under test and `approved_at` is no later than the
+assessment's observation time. It explains an event of its `classification`
+for one of its `entity_ids` (of its `entity_type`), and only within its scope:
+
+| Classification | Scope | Also required |
+|---|---|---|
+| `NEW_ENTITY_HISTORICAL_BACKFILL`, `ENTITY_REMOVED`, `ENTITY_HISTORY_TRUNCATED` | every rewritten week inside `expected_history_start`..`expected_history_end` | |
+| `LATEST_WEEK_MISSING` (a closure) | the latest week inside `effective_from_week`..`effective_to_week` | |
+| `POSSIBLE_RECLASSIFICATION` (a category move, id `from->to`) | the latest week inside `effective_from_week`..`effective_to_week` | the moved value is conserved (`conservation_ratio` >= `explained_fraction_threshold`); if `product_ids` is given, no other product moved |
+
+An approved closure or move also restates the refresh like-for-like before the
+latest-week test (`attribution.like_for_like`): the closed entities leave every
+week of both versions, and the moved products' previous rows take their new
+category. A store that is present is never excluded, and products the entry
+does not cover are never re-assigned. The restatement is recorded in the
+machine output as `like_for_like`; each explained absence is an
+`absence_event` finding with its approval. The effect on detection is
+measured in [evaluation.md](evaluation.md#approving-closures-and-category-moves).
 `qc notices` (`qc/notices.py`) drafts entries the same way from free-text change notices
 ([weekly-run.md](weekly-run.md#drafting-explanations-from-notices)).
 

@@ -17,6 +17,7 @@ from .config import DatasetConfig
 from .lifecycle import (
     EXPLAINABLE_CLASSES,
     EXTENDED,
+    LATEST_MISSING,
     NEW_BACKFILL,
     NEW_RECENT,
     RECLASSIFIED,
@@ -56,6 +57,10 @@ class AttributionResult:
     unmatched_events: list[LifecycleEvent] = field(default_factory=list)
     matched_event_ids: list[str] = field(default_factory=list)
     approval_coverage: list[dict[str, Any]] = field(default_factory=list)
+    # Latest-week absences explained by an approved closure: "type:id" -> approval.
+    matched_absences: dict[str, str] = field(default_factory=dict)
+    # Category moves explained by an approved entry: "from->to" -> approval.
+    matched_moves: dict[str, str] = field(default_factory=dict)
     per_metric: dict[str, float] = field(default_factory=dict)
     cross_metric_flags: list[str] = field(default_factory=list)
     conservation: dict[str, float] = field(default_factory=dict)
@@ -79,31 +84,83 @@ class AttributionResult:
             "structural_events": [event.to_dict() for event in self.structural_events],
             "unmatched_events": [event.to_dict() for event in self.unmatched_events],
             "matched_event_ids": list(self.matched_event_ids),
+            "matched_absences": dict(self.matched_absences),
+            "matched_moves": dict(self.matched_moves),
             "per_metric": dict(self.per_metric),
             "cross_metric_flags": list(self.cross_metric_flags),
             "conservation": dict(self.conservation),
         }
 
 
+def _usable(item: dict[str, Any], config: DatasetConfig) -> bool:
+    return bool(item.get("approved_by")) and item.get("confirmed") is True and item.get("dataset") == config.name
+
+
+def _in_effect(item: dict[str, Any], week: int | None) -> bool:
+    start, end = item.get("effective_from_week"), item.get("effective_to_week")
+    return week is not None and type(start) is int and type(end) is int and start <= week <= end
+
+
 def _match_expected(
-    event: LifecycleEvent, registry: list[dict[str, Any]], config: DatasetConfig
+    event: LifecycleEvent,
+    registry: list[dict[str, Any]],
+    config: DatasetConfig,
+    latest_week: int | None = None,
 ) -> str | None:
+    """The approved registry entry that explains ``event``, if exactly scoped.
+
+    Historical changes (backfill, removal, truncation) must fall inside the
+    entry's ``expected_history_start``..``expected_history_end``. A closure
+    (``LATEST_WEEK_MISSING``) and a category move (``POSSIBLE_RECLASSIFICATION``)
+    have no historical weeks; the refresh's latest week must fall inside the
+    entry's ``effective_from_week``..``effective_to_week``. A move must also
+    conserve the moved value and, when the entry lists ``product_ids``, move
+    only those products.
+    """
     for item in registry:
-        if not item.get("approved_by") or item.get("confirmed") is not True or item.get("dataset") != config.name:
+        if not _usable(item, config):
             continue
         expected_class = item.get("classification")
         if expected_class is None and item.get("event_type") in ("new_store_historical_backfill", "new_entity_historical_backfill"):
             expected_class = NEW_BACKFILL
+        entity_ids = [str(value) for value in item.get("entity_ids", [])]
+        if event.entity_type != str(item.get("entity_type")) or event.entity_id not in entity_ids:
+            continue
+        if expected_class == LATEST_MISSING:
+            if LATEST_MISSING in (event.classifications or (event.classification,)) and _in_effect(item, latest_week):
+                return str(item.get("event_id"))
+            continue
         if expected_class != event.classification:
+            continue
+        if expected_class == RECLASSIFIED:
+            products = {str(value) for value in event.details.get("products", [])}
+            listed = item.get("product_ids")
+            conserved = float(event.details.get("conservation_ratio", 0.0)) >= config.explained_fraction_threshold
+            if _in_effect(item, latest_week) and conserved and (listed is None or products <= {str(v) for v in listed}):
+                return str(item.get("event_id"))
             continue
         weeks = (*event.historical_weeks_added, *event.historical_weeks_removed)
         start, end = item.get("expected_history_start"), item.get("expected_history_end")
-        if not weeks or type(start) is not int or type(end) is not int or not all(start <= w <= end for w in weeks):
-            continue
-        entity_ids = [str(value) for value in item.get("entity_ids", [])]
-        if event.entity_type == str(item.get("entity_type")) and event.entity_id in entity_ids:
+        if weeks and type(start) is int and type(end) is int and all(start <= w <= end for w in weeks):
             return str(item.get("event_id"))
     return None
+
+
+def match_absences(
+    events: list[LifecycleEvent],
+    registry: list[dict[str, Any]],
+    config: DatasetConfig,
+    latest_week: int | None,
+) -> dict[tuple[str, str], str]:
+    """Latest-week absences an approved closure explains: (type, id) -> approval."""
+    matched: dict[tuple[str, str], str] = {}
+    for event in events:
+        if LATEST_MISSING not in (event.classifications or (event.classification,)):
+            continue
+        event_id = _match_expected(event, registry, config, latest_week)
+        if event_id:
+            matched[(event.entity_type, event.entity_id)] = event_id
+    return matched
 
 
 def _contributors(
@@ -256,6 +313,7 @@ def explain_revision(
     events: list[LifecycleEvent],
     expected_events: list[dict[str, Any]],
     config: DatasetConfig,
+    latest_week: int | None = None,
 ) -> AttributionResult:
     metric = config.primary_metric
     delta_column = f"{metric}_delta"
@@ -313,12 +371,13 @@ def explain_revision(
     unmatched: list[LifecycleEvent] = []
     matched: list[str] = []
     coverage: list[dict[str, Any]] = []
+    moves: dict[str, str] = {}
     conservation: dict[str, float] = {}
 
     for event in structural:
         # Every structural event must be registry-matched, whatever grain it
         # sits at; only the primary grain contributes to the explained sum.
-        event_id = _match_expected(event, expected_events or [], config)
+        event_id = _match_expected(event, expected_events or [], config, latest_week)
         if event_id:
             matched.append(event_id)
             coverage.append({"check": "historical_event", "scope": f"{event.entity_type}:{event.entity_id}:{event.classification}",
@@ -327,6 +386,8 @@ def explain_revision(
             unmatched.append(event)
 
         if event.classification == RECLASSIFIED:
+            if event_id:
+                moves[event.entity_id] = event_id
             conservation[event.entity_id] = float(
                 event.details.get("conservation_ratio", 1.0)
             )
@@ -346,6 +407,12 @@ def explain_revision(
             explanations.append(
                 f"{event.classification.lower()}:{event.entity_type}:{event.entity_id}"
             )
+
+    absences = match_absences(events, expected_events or [], config, latest_week)
+    for (entity_type, entity_id), event_id in sorted(absences.items()):
+        matched.append(event_id)
+        coverage.append({"check": "absence_event", "scope": f"{entity_type}:{entity_id}:{LATEST_MISSING}",
+                         "approval_id": event_id, "weeks": [latest_week]})
 
     explained = explained_added - explained_removed
     unexplained = raw_delta - explained
@@ -389,6 +456,8 @@ def explain_revision(
         unmatched_events=unmatched,
         matched_event_ids=matched,
         approval_coverage=coverage,
+        matched_absences={f"{t}:{i}": a for (t, i), a in sorted(absences.items())},
+        matched_moves=moves,
         per_metric=per_metric,
         cross_metric_flags=_cross_metric_flags(
             overlap, per_metric, previous_total, config
@@ -397,32 +466,86 @@ def explain_revision(
     )
 
 
+def like_for_like(
+    previous: pd.DataFrame,
+    current: pd.DataFrame,
+    events: list[LifecycleEvent],
+    attribution: AttributionResult,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Restate both versions so approved changes do not move the latest week.
+
+    An approved closure removes the closed entities from every week, so the
+    latest week is compared with the history of the entities still trading.
+    An approved category move assigns the moved products' previous rows to
+    their new category, so both categories are compared on the current
+    mapping. Only changes the registry matched in this refresh are applied;
+    with no approvals the frames are returned unchanged.
+    """
+    excluded: list[dict[str, str]] = []
+    restated: list[dict[str, Any]] = []
+    for key, approval in attribution.matched_absences.items():
+        entity_type, entity_id = key.split(":", 1)
+        column = f"{entity_type}_id"
+        if column in previous.columns and column in current.columns:
+            previous = previous.loc[previous[column].astype(str) != entity_id]
+            current = current.loc[current[column].astype(str) != entity_id]
+            excluded.append({"entity": key, "approval_id": approval})
+    if {"product_id", "commodity_id"} <= set(previous.columns):
+        for event in events:
+            moved_by = attribution.matched_moves.get(event.entity_id) if event.classification == RECLASSIFIED else None
+            if moved_by is None:
+                continue
+            products = {str(p) for p in event.details.get("products", [])}
+            rows = previous["product_id"].astype(str).isin(products) & (
+                previous["commodity_id"].astype(str) == str(event.details["from_commodity"])
+            )
+            previous = previous.copy()
+            previous.loc[rows, "commodity_id"] = event.details["to_commodity"]
+            restated.append({"move": event.entity_id, "products": len(products), "approval_id": moved_by})
+    return previous, current, {"excluded": excluded, "restated": restated}
+
+
 def classify_run(
     contract_status: str,
     events: list[LifecycleEvent],
     attribution: AttributionResult,
     config: DatasetConfig,
     reconstruction_score: float | None = None,
+    absences: list[LifecycleEvent] | None = None,
 ) -> str:
+    """Historical status. ``absences`` replaces ``events`` for the missing-entity
+    check when approved closures restated the data (see ``like_for_like``)."""
     if contract_status == "DATA_CONTRACT_FAILURE":
         return "DATA_CONTRACT_FAILURE"
-    if any(entry["material"] for entry in missing_entity_impact(events, config).values()):
+    unexplained_absences = [
+        event for event in (events if absences is None else absences)
+        if f"{event.entity_type}:{event.entity_id}" not in attribution.matched_absences
+    ]
+    if any(entry["material"] for entry in missing_entity_impact(unexplained_absences, config).values()):
         return "INVESTIGATE"
     if attribution.structural_events:
-        explained_enough = (
-            attribution.explained_fraction >= config.explained_fraction_threshold
-            and not attribution.over_explained
-        )
-        all_matched = bool(attribution.matched_event_ids) and not attribution.unmatched_events
+        all_matched = not attribution.unmatched_events
         reconstructed_enough = (
             reconstruction_score is not None
             and reconstruction_score >= config.reconstruction_score_threshold
         )
+        if all(event.classification == RECLASSIFIED for event in attribution.structural_events):
+            # A category move relabels value without changing it, so it
+            # explains none of the revision; whatever revision remains is
+            # judged as if there were no structural change.
+            explained_enough = not _residual_escalates(attribution, config)
+        else:
+            explained_enough = (
+                attribution.explained_fraction >= config.explained_fraction_threshold
+                and not attribution.over_explained
+            )
         if all_matched and explained_enough and reconstructed_enough:
             return "PASS_WITH_EXPLANATION"
         return "INVESTIGATE"
+    return "INVESTIGATE" if _residual_escalates(attribution, config) else "PASS"
+
+
+def _residual_escalates(attribution: AttributionResult, config: DatasetConfig) -> bool:
     if attribution.material and attribution.explained_fraction < config.explained_fraction_threshold:
-        return "INVESTIGATE"
-    if not attribution.material and attribution.breadth > config.broad_recalculation_breadth:
-        return "INVESTIGATE"
-    return "PASS"
+        return True
+    return not attribution.material and attribution.breadth > config.broad_recalculation_breadth

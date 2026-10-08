@@ -72,7 +72,7 @@ def scope_kind_for(check: str) -> str:
         return SCOPE_HIERARCHY
     if check.startswith("lineage"):
         return SCOPE_LINEAGE
-    if check.startswith("historical_event"):
+    if check.startswith(("historical_event", "absence_event")):
         return SCOPE_APPROVAL
     return _CHECK_SCOPE_KINDS.get(check, check.split(":", 1)[0] or "unknown")
 
