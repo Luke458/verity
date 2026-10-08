@@ -184,6 +184,22 @@ reworded by a second local model, it found 89% of the true matches, against
 ([notice-matching.md](notice-matching.md)). About four in ten of its
 suggestions are still wrong, so it drafts and a person approves.
 
+Drafting exposed a gap. The registry could not express two of the commonest
+notices, a store closure and a category move, so the model's correct matches
+were dead ends. Both are now registry entries, scoped to the weeks they are in
+effect. An approved one restates the refresh like-for-like before the
+latest-week test: closed stores leave every week, and moved products keep their
+history in their new category. The risk is an approval hiding a fault it did
+not cause, so the test paired each change with a second fault, and its
+predictions were registered first. Two of four failed:
+- **A real defect.** A move that empties a category also looked like that
+  category's removal, which no approval covered. Fixed after the test.
+- **A prediction too strict for an 80%-power limit.**
+
+No large fault was hidden, and market movements were caught as often with an
+approved change as without one
+([evaluation.md](evaluation.md#approving-closures-and-category-moves)).
+
 ## 7. What it still cannot do
 
 - Category drops of 10% or less on seasonal data are within noise when ~47
@@ -194,6 +210,10 @@ suggestions are still wrong, so it drafts and a person approves.
   that number is a safe, conservative bound.
 - Late arrival must be declared; within one version pair the engine cannot
   tell it from a restatement fault.
+- A product that stops selling naturally looks exactly like a lost product.
+  Two of the three clean `realistic` refreshes flagged in 60 are single
+  products just over the 0.1% absence materiality; the third is the share
+  test's false-alarm budget.
 - A market movement is never given a cause, so pairs involving one are named
   only in part.
 - Every number above comes from a generator written alongside the engine; the

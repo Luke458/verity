@@ -320,6 +320,54 @@ registration:
    movement in an approved pair is at or above that run's reported 80%-power
    `detectable_change`.
 
+### Test results (seeds 6201-6220)
+
+| | `small` | `realistic` |
+|---|---|---|
+| Closure / move alone, flagged blind | 20/20, 20/20 | 20/20, 20/20 |
+| Closure / move alone, approved: PASS_WITH_EXPLANATION | 19/20, 20/20 | 17/20, **16/20** |
+| Coding, warehouse, one-week restatement + approved change: flagged | 20/20 in every cell (alone 20/20) | 20/20 in every cell (alone 20/20) |
+| Market movement + approved closure / move: flagged | 20/20, 20/20 (alone 20/20) | 11/20, 9/20 (alone 10/20) |
+| Missed market movements at or above the 80% limit | 0 | **1 and 1** of 11 and 13 missed (alone 0 of 12) |
+| Clean refreshes flagged | 0/20 | 3/20 |
+
+1. **Held.**
+2. **Failed** on `realistic`: moves 16/20 against the 17 required, and four
+   approved runs left a change's own finding (`historical_revision`)
+   unexplained.
+   - **Three of the four are the world.** Seed 6206 (move) and seed 6211
+     (closure and move) carry a natural single-product absence
+     ([above](#clean-false-alarms-on-realistic)), and the same seed's clean
+     refresh is flagged for it too.
+   - **The fourth (seed 6220) was a defect.** The move took every product out
+     of C07, and the engine also saw that as "C07 removed", which no approval
+     covered. Every overlap week then failed its revision check, because the
+     removal was subtracted from weeks whose total had not changed.
+   - **The other unexplained runs are latest-week flags of their world.**
+     Seed 6216 shows the same C07 scripts flag as its clean refresh. Seed
+     6206's closure leaves a C05 units/stock flag that its clean refresh does
+     not show, so it may be noise or the restatement.
+3. **Held.**
+4. **Failed, twice.** The prediction was too strict for an 80%-power limit, at
+   which about one movement in five is missed. The two misses were drops of
+   0.257 and 0.269 against limits of 0.227 and 0.261. In the larger one (seed
+   6215) the hit category had a seasonal up-week, so a 25.7% cut showed as an
+   18% share drop, under that run's 50% limit. Detection with an approved
+   change (11/20, 9/20) matches detection without one (10/20). These are
+   different categories on the same worlds, so this is not a paired test.
+
+**Fix after the test (not registered):** a category that approved moves
+empty or create, with the value those moves carried, is now the moves'
+consequence. It is covered by their approval and left out of the revision
+sums and the counterfactual (`attribution._move_consequences`). Rerun on the
+same seeds: realistic moves are explained in 17/20, and seed 6220 now passes
+with its explanation. Nothing else changed; the two remaining move runs with an
+unexplained `historical_revision` are the natural product absences above.
+
+Results: [`results/approvals-test.json`](results/approvals-test.json)
+(registered run) and
+[`results/approvals-test-after-fix.json`](results/approvals-test-after-fix.json).
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

@@ -420,8 +420,10 @@ def run_qc(
             return False
     approved_events = [item for item in registry.events() if approval_available(item)]
     attribution = explain_revision(cubes["base"], events, approved_events, config, pair.current_max_week)
-    revisions_by_week = week_revisions(cubes["base"], events, config)
-    counterfactual = reconstruct_counterfactual(previous, current, events, config)
+    # A category emptied or created by an approved move changed no value.
+    valued_events = [e for e in events if f"{e.entity_type}:{e.entity_id}" not in attribution.move_consequences]
+    revisions_by_week = week_revisions(cubes["base"], valued_events, config)
+    counterfactual = reconstruct_counterfactual(previous, current, valued_events, config)
     reconciliation = run_reconciliation(
         current,
         contract_current_fact if config.analysis_stage != config.contract_stage else None,

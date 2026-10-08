@@ -15,9 +15,11 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > clean refreshes. On a harder profile with category seasonality and
 > late-arriving data it catches structural faults and single-week
 > restatements down to 1% and single-category drops of 40%, but misses most
-> drops of 10% or less; the
-> [case study](docs/case-study.md) tells how it got here and
-> [docs/claims.md](docs/claims.md) records the evidence.
+> drops of 10% or less, and reports per category the smallest drop it could
+> have caught. Known changes (new stores, closures, category moves) are
+> explained only by a registry entry a person approved; they can be drafted
+> from free-text notices. The [case study](docs/case-study.md) tells how it
+> got here and [docs/claims.md](docs/claims.md) records the evidence.
 > Backends: local Parquet snapshots and Delta tables via delta-rs.
 
 <picture>
@@ -46,7 +48,7 @@ uv pip install --python .venv/bin/python -e ".[test,delta]"
 .venv/bin/qc cohort --plan config/cohort.json --out reports/cohort/v1
 
 # Detection curves over fault size, fault pairs and clean false alarms
-.venv/bin/qc sweep --profile realistic --seeds 5001-5010 --jobs 8 \
+.venv/bin/qc sweep --profile realistic --seeds 5001-5010 --jobs 4 \
   --out reports/sweep/realistic.json
 
 # Point at a Delta table: inspect, propose a config (with field mapping), assess
@@ -61,8 +63,10 @@ uv pip install --python .venv/bin/python -e ".[test,delta]"
   --store data/qc.db --out reports/weekly --notify sinks.json
 .venv/bin/qc explain --store data/qc.db --dataset retail
 
-# Match free-text change notices to observed changes; draft (unapproved) registry entries
+# Match free-text change notices to observed changes; draft (unapproved) registry entries,
+# then rerun with the entries a person approved
 .venv/bin/qc notices --scenario-dir data/suites/demo/scenario-0003 --notices inbox.txt --out drafts.json
+.venv/bin/qc run --scenario-dir data/suites/demo/scenario-0003 --registry approved.json
 
 # Tests and gates
 .venv/bin/python -m pytest
@@ -85,6 +89,7 @@ DATA_CONTRACT_FAILURE, 4 for INCOMPLETE, 75 when locked and 1 on error.
 | Reconciliation | validated on synthetic data |
 | Lineage first divergence | validated on synthetic data |
 | Expected events, ratio expectations, reference controls | plumbing |
+| Approved closures and category moves | validated on synthetic data |
 | Temporal QC | validated on synthetic data |
 | Findings and final status | validated on synthetic data |
 | Recurrence | plumbing |
@@ -108,7 +113,8 @@ qc/                 engine: contracts, versions, revision, lifecycle, attributio
 qcgen/              synthetic retail world, fault injectors, oracle vault, verifier
 config/             cohort plan (hash-pinned) and generator suite config
 optional/           scale benchmark, sweep chart renderer
-experiments/        research sandboxes (cause labellers, notice matching); never on the status path
+experiments/        research and measurement sandboxes (cause labellers, notice matching,
+                    sensitivity calibration, approvals); never on the status path
 deployment/         weekly.sh scheduler wrapper
 data/, reports/     generated output (git-ignored)
 ```
@@ -117,7 +123,7 @@ data/, reports/     generated output (git-ignored)
 
 - [docs/case-study.md](docs/case-study.md): how the engine went from alarming on everything to measured claims, and what it still cannot do
 - [docs/engine.md](docs/engine.md): what each layer decides and the final status policy
-- [docs/evaluation.md](docs/evaluation.md): cohort gate, shadow scoring, choosing thresholds
+- [docs/evaluation.md](docs/evaluation.md): cohort gate, sweeps, false alarms, detection limits, approvals; each with its registered predictions
 - [docs/weekly-run.md](docs/weekly-run.md): weekly runs, journal, recovery, notifications, grain and calendars
 - [docs/onboarding.md](docs/onboarding.md): profiling a table and field mapping
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families

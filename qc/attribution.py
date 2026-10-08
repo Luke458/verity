@@ -61,6 +61,8 @@ class AttributionResult:
     matched_absences: dict[str, str] = field(default_factory=dict)
     # Category moves explained by an approved entry: "from->to" -> approval.
     matched_moves: dict[str, str] = field(default_factory=dict)
+    # Categories emptied or created by an approved move: "commodity:id" -> approval.
+    move_consequences: dict[str, str] = field(default_factory=dict)
     per_metric: dict[str, float] = field(default_factory=dict)
     cross_metric_flags: list[str] = field(default_factory=list)
     conservation: dict[str, float] = field(default_factory=dict)
@@ -86,6 +88,7 @@ class AttributionResult:
             "matched_event_ids": list(self.matched_event_ids),
             "matched_absences": dict(self.matched_absences),
             "matched_moves": dict(self.matched_moves),
+            "move_consequences": dict(self.move_consequences),
             "per_metric": dict(self.per_metric),
             "cross_metric_flags": list(self.cross_metric_flags),
             "conservation": dict(self.conservation),
@@ -144,6 +147,49 @@ def _match_expected(
         if weeks and type(start) is int and type(end) is int and all(start <= w <= end for w in weeks):
             return str(item.get("event_id"))
     return None
+
+
+def _move_consequences(
+    structural: list[LifecycleEvent],
+    registry: list[dict[str, Any]],
+    config: DatasetConfig,
+    latest_week: int | None,
+) -> dict[str, str]:
+    """Categories that approved moves emptied (removed) or created (backfilled).
+
+    A move that takes every product out of a category also shows as that
+    category's removal (and a move into a new category as its backfill). The
+    event is the move's consequence only if its value is the value the
+    approved moves carried, within the conservation tolerance.
+    """
+    tolerance = 1.0 - config.explained_fraction_threshold
+    moved_out: dict[str, float] = {}
+    moved_in: dict[str, float] = {}
+    approval: dict[str, str] = {}
+    for event in structural:
+        if event.classification != RECLASSIFIED:
+            continue
+        event_id = _match_expected(event, registry, config, latest_week)
+        if not event_id:
+            continue
+        source, target = str(event.details.get("from_commodity")), str(event.details.get("to_commodity"))
+        moved_out[source] = moved_out.get(source, 0.0) + float(event.details.get("moved_previous", 0.0))
+        moved_in[target] = moved_in.get(target, 0.0) + float(event.details.get("moved_current", 0.0))
+        approval.setdefault(source, event_id)
+        approval.setdefault(target, event_id)
+    found: dict[str, str] = {}
+    for event in structural:
+        if event.entity_type != "commodity":
+            continue
+        if event.classification == REMOVED and event.entity_id in moved_out:
+            value, moved = event.historical_value_removed, moved_out[event.entity_id]
+        elif event.classification == NEW_BACKFILL and event.entity_id in moved_in:
+            value, moved = event.historical_value_added, moved_in[event.entity_id]
+        else:
+            continue
+        if abs(value - moved) <= tolerance * max(abs(value), abs(moved), 1e-9):
+            found[f"commodity:{event.entity_id}"] = approval[event.entity_id]
+    return found
 
 
 def match_absences(
@@ -373,8 +419,18 @@ def explain_revision(
     coverage: list[dict[str, Any]] = []
     moves: dict[str, str] = {}
     conservation: dict[str, float] = {}
+    consequences = _move_consequences(structural, expected_events or [], config, latest_week)
 
     for event in structural:
+        key = f"{event.entity_type}:{event.entity_id}"
+        if key in consequences:
+            # A category emptied or created by an approved move: the move's
+            # approval covers it, and its value moved rather than changed.
+            matched.append(consequences[key])
+            coverage.append({"check": "historical_event", "scope": f"{key}:{event.classification}",
+                             "approval_id": consequences[key], "weeks": []})
+            explanations.append(f"moved_category:{event.entity_id}")
+            continue
         # Every structural event must be registry-matched, whatever grain it
         # sits at; only the primary grain contributes to the explained sum.
         event_id = _match_expected(event, expected_events or [], config, latest_week)
@@ -458,6 +514,7 @@ def explain_revision(
         approval_coverage=coverage,
         matched_absences={f"{t}:{i}": a for (t, i), a in sorted(absences.items())},
         matched_moves=moves,
+        move_consequences=dict(consequences),
         per_metric=per_metric,
         cross_metric_flags=_cross_metric_flags(
             overlap, per_metric, previous_total, config
@@ -529,10 +586,15 @@ def classify_run(
             reconstruction_score is not None
             and reconstruction_score >= config.reconstruction_score_threshold
         )
-        if all(event.classification == RECLASSIFIED for event in attribution.structural_events):
-            # A category move relabels value without changing it, so it
-            # explains none of the revision; whatever revision remains is
-            # judged as if there were no structural change.
+        if all(
+            event.classification == RECLASSIFIED
+            or f"{event.entity_type}:{event.entity_id}" in attribution.move_consequences
+            for event in attribution.structural_events
+        ):
+            # A category move (and a category it empties or creates) relabels
+            # value without changing it, so it explains none of the revision;
+            # whatever revision remains is judged as if there were no
+            # structural change.
             explained_enough = not _residual_escalates(attribution, config)
         else:
             explained_enough = (

@@ -100,3 +100,18 @@ def test_like_for_like_restates_only_matched_changes():
         "P1": "C02", "P3": "C01"}
     assert record["excluded"] == [{"entity": "store:S001", "approval_id": "close"}]
     assert record["restated"] == [{"move": "C01->C02", "products": 2, "approval_id": "move"}]
+
+
+def test_a_category_emptied_by_an_approved_move_is_its_consequence():
+    from qc.attribution import _move_consequences
+    from qc.lifecycle import REMOVED
+
+    move = _moved()
+    move.details.update(moved_previous=100.0, moved_current=100.0)
+    emptied = LifecycleEvent("commodity", "C01", REMOVED, historical_value_removed=100.0)
+    shrunk = LifecycleEvent("commodity", "C01", REMOVED, historical_value_removed=300.0)
+    assert _move_consequences([move, emptied], [_move()], CONFIG, 10) == {"commodity:C01": "move"}
+    # Value beyond what the move carried is a removal of its own.
+    assert _move_consequences([move, shrunk], [_move()], CONFIG, 10) == {}
+    # An unapproved move explains nothing.
+    assert _move_consequences([move, emptied], [_move(approved_by=None)], CONFIG, 10) == {}
