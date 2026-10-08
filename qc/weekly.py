@@ -113,6 +113,7 @@ def run_weekly(
     stage_tables: dict[str, str] | None = None,
     dim_tables: dict[str, str] | None = None,
     version_map: dict[str, dict[str, int]] | None = None,
+    registry_path: str | Path | None = None,
 ) -> WeeklyResult:
     from datetime import datetime
     from uuid import uuid4
@@ -151,6 +152,10 @@ def run_weekly(
                     machine_schema=MACHINE_SCHEMA_VERSION)
     expectations = load_expectations(expectations_path) if expectations_path else []
     identity["expectations"] = [item.to_dict() for item in expectations]
+    from .events import load_registry
+    registry = load_registry(registry_path) if registry_path else []
+    # Approvals are part of the assessment's identity: changing them is a new assessment.
+    identity["registry"] = registry
     reference_frame, reference_spec = None, None
     if reference_uri or reference_spec_path:
         if not reference_spec_path:
@@ -229,7 +234,7 @@ def run_weekly(
         result = run_qc(source, current, previous, config, run_id=run_id,
                         reference_frame=reference_frame,
                         reference_spec=reference_spec, expectations=expectations,
-                        observed_at=assessment_cutoff, prior_refreshes=prior_refreshes,
+                        registry=registry, observed_at=assessment_cutoff, prior_refreshes=prior_refreshes,
                         assessment_id=assessment_id)
         result.machine["snapshot_manifest"] = identity
         result.machine["observed_at"] = observed_at

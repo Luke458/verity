@@ -188,7 +188,9 @@ structural fingerprints for later comparison.
 
 `load_registry` / `save_registry` read and write registry entries. `propose_expected_events` drafts entries from observed historical
 backfills; drafts are marked `confirmed: false` and must be confirmed before
-they are trusted. `qc run --registry path` uses a registry file; blind runs use none.
+they are trusted. `qc run`, `qc delta-run` and `qc weekly` take `--registry path`; blind runs use none.
+In `qc weekly` the registry is part of the assessment's identity, and an entry counts only if
+`approved_at` is no later than the refresh's commit time (the observation cutoff).
 
 An entry is used only when `approved_by` is set, `confirmed` is `true`, its
 `dataset` is the dataset under test and `approved_at` is no later than the

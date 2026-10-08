@@ -77,6 +77,106 @@ uv pip install --python .venv/bin/python -e ".[test,delta]"
 `qc weekly` exits 0 for PASS / PASS_WITH_EXPLANATION, 2 for INVESTIGATE, 3 for
 DATA_CONTRACT_FAILURE, 4 for INCOMPLETE, 75 when locked and 1 on error.
 
+## Use it in your own pipeline
+
+Verity reads two versions of a weekly fact table and never writes to it. To
+put it behind a real refresh:
+
+1. **Make each refresh a readable snapshot.** Either a Delta table (each
+   refresh is a table version) or a JSON manifest listing one Parquet file
+   per refresh with its `observed_at` time ([weekly-run.md](docs/weekly-run.md)).
+   The table needs an integer `week` column; derive one from the date if you
+   have to.
+2. **Describe the table.** `qc onboard --uri <delta table> --out retail.yaml`
+   profiles a Delta table and proposes a config. Map production column names
+   with `--alias pfc=product_id`. For Parquet, write the YAML by hand from
+   [onboarding.md](docs/onboarding.md). Declare `restatement_weeks` if late
+   transactions restate recent weeks, and a calendar if you want holiday
+   evidence.
+3. **Backtest before trusting it.** Assess past refresh pairs with
+   `qc delta-run` (or `qc weekly` on a manifest) and read every INVESTIGATE.
+   Check that your config still passes the synthetic gate:
+   `qc cohort --plan config/cohort.json --config retail.yaml` (exit 3 means a
+   gate failed).
+4. **Schedule `qc weekly`** after each refresh commits, with `--store` for the
+   journal and `--notify` for alerts, and route its exit code
+   (`deployment/weekly.sh` shows one wrapper).
+5. **Register known changes.** New stores, closures and category moves are
+   explained only by entries in a registry file passed as `--registry`, each
+   with `approved_by`, `approved_at` and `confirmed: true`. In `qc weekly` an
+   approval counts only if it was recorded before the refresh was committed,
+   so register known changes ahead of the refresh
+   ([engine.md](docs/engine.md#expected-event-registry)).
+
+### Prompt for an AI coding assistant
+
+Fill in the angle-bracketed parts and give this to a coding agent working in
+your repository:
+
+```text
+You are integrating Verity (https://github.com/Luke458/verity), an automated QC
+engine for weekly retail fact tables refreshed as versioned snapshots, into my
+data pipeline. Your job is to wire it up and measure it honestly. Do not change
+how it decides a status.
+
+My setup:
+- Fact table: <location, e.g. Delta at abfss://..., or Parquet exports in s3://...>
+- Columns: <week or date column, store/product/category keys, measures such as sales and units>
+- Refresh: <cadence; whether late transactions restate recent weeks, and how many>
+- Orchestrator: <Airflow / Databricks Jobs / cron / ...>; alerts go to <Slack webhook / email / ...>
+- Python: <version, environment, how packages are installed>
+
+Read first: README.md, docs/onboarding.md, docs/weekly-run.md, docs/engine.md
+(especially "Final assessment policy" and "Expected-event registry") and
+docs/claims.md (what is validated, only on synthetic data, and what is not claimed).
+
+Steps:
+1. Install Verity in an isolated environment (pip install -e ".[delta]" from a
+   pinned commit). Run its tests once.
+2. Make refreshes readable as snapshots. With Delta, use table versions. With
+   anything else, export each refresh to Parquet and maintain the JSON manifest
+   described in docs/weekly-run.md (version, observed_at, stage paths). Never
+   overwrite an exported snapshot. Ensure an integer, contiguous week column.
+3. Create config/datasets/<name>.yaml. With Delta, start from
+   `qc onboard --uri ... --alias <production>=<canonical> --out ...` and fix
+   every BLOCKER; otherwise write it by hand from docs/onboarding.md. Declare
+   the grain (entity_key_columns), restatement_weeks if recent weeks are
+   restated, snapshot_metrics for stock-like measures, and a calendar anchor
+   and events if holidays matter. Explain every field you set.
+4. Backtest on the last <N, e.g. 12> refresh pairs (`qc delta-run --json`, or
+   `qc weekly --uri manifest.json --previous A --current B --out ...`). Report a
+   table of status per pair, and for each INVESTIGATE list its unexplained
+   findings and whether it matches a known incident or known business change.
+   Do not edit thresholds to make a pair pass. If you think a setting is
+   wrong, show the evidence and the before/after statuses, and ask me.
+5. Run `qc cohort --plan config/cohort.json --config <your yaml>`. It must exit
+   0 (exit 3 = a gate failed); report the output.
+6. Add a scheduled task that runs `qc weekly --uri ... --config ...
+   --store <journal.db> --out <reports dir> --registry <registry.json>
+   --notify <sinks.json>` after the refresh commits. Pass storage credentials
+   through the QC_STORAGE_OPTIONS environment variable, never on the command
+   line. Map exit codes: 0 pass, 2 investigate, 3 contract failure,
+   4 incomplete, 75 locked (retry later), 1 error.
+7. Set up the registry file (format in docs/engine.md). Entries explain known
+   changes (new stores with history, removals, closures, category moves) only
+   once a person sets approved_by, approved_at and confirmed: true, and in
+   qc weekly only if approved before the refresh is committed. Never fill in
+   approvals yourself. `qc notices` reads synthetic scenario directories; for
+   production, draft entries with qc.notices.draft on a run result, or by
+   hand, and leave them unapproved.
+8. Write a short runbook: how to read a report (`qc explain --store ...`), how
+   to register a known change, what each exit code means, and how to rerun.
+
+Ask me before you change any threshold or default, approve or confirm any
+registry entry, write to any production table, or send to a real alert channel.
+Deliver: the config, the scheduler task, the registry template, the runbook and
+the backtest table with your reading of each INVESTIGATE.
+```
+
+To reimplement the engine in another stack instead, treat
+[docs/engine.md](docs/engine.md) as the specification and the hash-pinned
+`qc cohort` plan as the acceptance test.
+
 ## Capabilities
 
 | Capability | Status |

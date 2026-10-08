@@ -250,3 +250,41 @@ def test_weekly_early_store_failure_surfaces_original_error(tmp_path, monkeypatc
     monkeypatch.setattr(SqliteStore, "recurrence_inputs", boom)
     with pytest.raises(RuntimeError, match="database is locked"):
         run_weekly(str(path), out_root=tmp_path / "weekly")
+
+
+def _closure(approved_at: str) -> dict:
+    return {"event_id": "close-S2", "dataset": "weekly-closure", "classification": "LATEST_WEEK_MISSING",
+            "entity_type": "store", "entity_ids": ["S2"], "effective_from_week": 32, "effective_to_week": 32,
+            "confirmed": True, "approved_by": "analyst", "approved_at": approved_at}
+
+
+def _absence_dispositions(result) -> list[str]:
+    report = json.loads((Path(result.report_dir) / "report.json").read_text())
+    return [f["disposition"] for f in report["findings"] if f["check"] == "absence_event"]
+
+
+def test_weekly_registry_explains_an_approved_closure_only_if_approved_in_time(tmp_path):
+    path = tmp_path / "fact"
+    _write_versions(path, (30, 31, 32), missing_latest_store=True)
+    config = replace(DatasetConfig(), name="weekly-closure")
+    store = tmp_path / "store.db"
+    blind = run_weekly(str(path), config=config, store_path=store, out_root=tmp_path / "weekly")
+    assert blind.status == "INVESTIGATE"
+
+    on_time = tmp_path / "registry.json"
+    on_time.write_text(json.dumps({"events": [_closure("2000-01-01T00:00:00+00:00")]}))
+    approved = run_weekly(str(path), config=config, store_path=store, out_root=tmp_path / "weekly",
+                          registry_path=on_time)
+    # A different registry is a different assessment, not a cached one.
+    assert approved.skipped is False
+    assert _absence_dispositions(approved) == ["HUMAN_APPROVED"]
+    assert approved.status != "INVESTIGATE"
+
+    # An approval recorded after the refresh was observed cannot explain it.
+    late = tmp_path / "late.json"
+    late.write_text(json.dumps({"events": [_closure("2999-01-01T00:00:00+00:00")]}))
+    too_late = run_weekly(str(path), config=config, store_path=store, out_root=tmp_path / "weekly",
+                          registry_path=late)
+    assert _absence_dispositions(too_late) == []
+    assert too_late.status == "INVESTIGATE"
+    assert main(["weekly", "--uri", str(path), "--out", str(tmp_path / "cli"), "--registry", str(late)]) == 2

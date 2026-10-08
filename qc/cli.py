@@ -345,12 +345,15 @@ def _cmd_delta_run(args: argparse.Namespace) -> int:
         return 2
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     source = mapped(delta_source, config.column_map_dict())
+    from .registry import FileRegistry
+
     result = run_qc(
         source,
         current,
         previous,
         config,
         run_id=args.run_id,
+        registry=FileRegistry(args.registry) if args.registry else None,
     )
     if args.json:
         print(_json_dumps(result.machine, indent=2, default=_json_default))
@@ -731,6 +734,7 @@ def _cmd_weekly(args: argparse.Namespace) -> int:
             stage_tables=json.loads(args.stage_tables) if args.stage_tables else None,
             dim_tables=json.loads(args.dim_tables) if args.dim_tables else None,
             version_map=json.loads(args.version_map) if args.version_map else None,
+            registry_path=args.registry,
         )
     except Exception as error:  # noqa: BLE001 - the scheduler sees a failure
         print(
@@ -898,6 +902,7 @@ def build_parser() -> argparse.ArgumentParser:
     delta_run.add_argument("--storage-options", default=None, help="JSON object")
     delta_run.add_argument("--config", default=None)
     delta_run.add_argument("--run-id", default=None)
+    delta_run.add_argument("--registry", default=None, help="expected-event registry JSON (approved entries only count)")
     delta_run.add_argument("--json", action="store_true")
     delta_run.set_defaults(func=_cmd_delta_run)
 
@@ -946,6 +951,7 @@ def build_parser() -> argparse.ArgumentParser:
     weekly.add_argument("--current", default=None)
     weekly.add_argument("--previous", default=None)
     weekly.add_argument("--expectations", default=None)
+    weekly.add_argument("--registry", default=None, help="expected-event registry JSON (approved entries only count)")
     weekly.add_argument("--reference-uri", default=None)
     weekly.add_argument("--reference-spec", default=None)
     weekly.add_argument("--reference-version", default=None)

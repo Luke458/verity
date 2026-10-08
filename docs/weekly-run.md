@@ -5,7 +5,8 @@ never changes source tables or blocks publication.
 
 ```sh
 qc weekly --uri ./lake/fact --previous 11 --current 12 \
-  --config config/datasets/retail.yaml --store data/qc.db --out reports/weekly
+  --config config/datasets/retail.yaml --store data/qc.db --out reports/weekly \
+  --registry config/registry.json   # approved known changes (optional)
 ```
 
 The default predecessor is relative to the selected current version. Self,
