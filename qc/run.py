@@ -228,7 +228,6 @@ def _machine(
 def _finalize(
     result: QCRunResult,
     config: DatasetConfig,
-    prior_refreshes: Sequence[dict[str, Any]] = (),
     assessment_id: str | None = None,
 ) -> QCRunResult:
     """Materialize findings, compute the one final status, attach labels."""
@@ -259,13 +258,7 @@ def _finalize(
         item.to_dict() for item in result.week_revisions if item.material
     ]
 
-    findings = collect_findings(result, config, tuple(prior_refreshes))
-    if config.recurrence_enabled:
-        # An initial assessment with no eligible predecessor history is a
-        # recorded cold start, not an implicit clean recurrence history.
-        result.machine["recurrence_status"] = (
-            "ASSESSED" if prior_refreshes else "COLD_START"
-        )
+    findings = collect_findings(result, config)
     apply_policy(result, findings, config.optional_checks)
     if config.decision_enabled:
         result.decisions = RuleDecisionProvider(config).decide(result)
@@ -284,7 +277,6 @@ def run_qc(
     reference_spec: ReferenceSpec | None = None,
     expectations: Sequence[Any] = (),
     observed_at: str | None = None,
-    prior_refreshes: Sequence[dict[str, Any]] = (),
     assessment_id: str | None = None,
 ) -> QCRunResult:
     config = config or DatasetConfig()
@@ -325,7 +317,7 @@ def run_qc(
         result = QCRunResult(run_id=run_id, dataset=config.name, status="INCOMPLETE", contracts=contracts,
                              version_pair=None, input_findings=input_findings, snapshot_manifest=snapshots, observed_at=observed_at,
                              machine=_machine(run_id, config.name, "INCOMPLETE", contracts, None, [], None, []))
-        return _finalize(result, config, prior_refreshes, assessment_id)
+        return _finalize(result, config, assessment_id)
     checks: list[ContractCheck] = []
     contract_current_fact: pd.DataFrame | None = None
     for stage in common_stages:
@@ -361,7 +353,7 @@ def run_qc(
                 run_id, config.name, contracts.status, contracts, None, [], None, reasons
             ),
         )
-        return _finalize(result, config, prior_refreshes, assessment_id)
+        return _finalize(result, config, assessment_id)
 
     analysis_stage = _resolve_common_stage(
         source, previous_id, current_id, config.analysis_stages()
@@ -531,6 +523,5 @@ def run_qc(
             ) | {"like_for_like": restatement},
         ),
         config,
-        prior_refreshes,
         assessment_id,
     )

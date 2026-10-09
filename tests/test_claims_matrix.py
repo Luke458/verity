@@ -35,5 +35,5 @@ def test_readme_capabilities_are_in_claims_matrix() -> None:
 
 def test_claims_matrix_has_statuses() -> None:
     claims = CLAIMS.read_text()
-    for status in ("validated-synthetic", "plumbing-only", "research"):
+    for status in ("validated-synthetic", "implemented-unmeasured", "research"):
         assert status in claims, f"claims matrix lost the {status} status"

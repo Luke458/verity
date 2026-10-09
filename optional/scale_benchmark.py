@@ -131,7 +131,6 @@ def run_benchmark(
             outcome: sum(1 for item in findings if item.get("outcome") == outcome)
             for outcome in ("PASS", "FAIL", "UNAVAILABLE", "CONTRACT_FAILURE")
         },
-        "recurrence_assessments": len(machine.get("recurrence", []) or []),
         "complete": complete,
     }
     if error:

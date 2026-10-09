@@ -1,4 +1,4 @@
-"""Regression acceptance for multi-measure assessment, recurrence storage,
+"""Regression acceptance for multi-measure assessment,
 the shared evaluation contract and integrity findings.
 
 Each test runs through the real orchestration paths where a defect was
@@ -7,9 +7,8 @@ observed.
 
 from __future__ import annotations
 
-import json
 import math
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import pandas as pd
 import pytest
@@ -17,10 +16,7 @@ import pytest
 from qc.cohort import CohortCase, _common_gate_results, _evaluation_cases
 from qc.config import DatasetConfig
 from qc.evaluation import EvaluationCase, evaluation_gates
-from qc.policy import finding
-from qc.recurrence import assess_recurrence
 from qc.run import run_qc
-from qc.store import SqliteStore
 
 STAGES = ("warehouse", "report")
 BASE = DatasetConfig(
@@ -186,60 +182,6 @@ def test_snapshot_measure_is_compared_within_period_not_summed_across_time():
         if item["check"] == "temporal" and item["metric"] == "stock"
     ]
     assert all(item["outcome"] != "FAIL" for item in stock_failures)
-
-
-def _recurrence_payload() -> dict:
-    item = finding(
-        "temporal",
-        "national",
-        "FAIL",
-        scope_type="temporal_series",
-        metric="dollar",
-        level="national",
-        period=121,
-        impact=10.0,
-        materiality=5.0,
-    )
-    return json.loads(json.dumps(asdict(item)))
-
-
-def test_recurrence_survives_serialization_and_storage(tmp_path):
-    serialized = _recurrence_payload()
-    assert serialized["stable_key"]
-    prior = [{"findings": [serialized], "ledger": {}, "materiality_threshold": 0.0}]
-    config = replace(
-        DatasetConfig(), recurrence_window=3, recurrence_minimum=2
-    )
-    assessments = assess_recurrence([serialized], prior, config)
-    assert assessments
-    assert assessments[0].stable_key == serialized["stable_key"]
-    assert assessments[0].material
-    assert assessments[0].cumulative_impact == 20.0
-
-    store = SqliteStore(tmp_path / "store.db")
-    store.record_run(
-        "run-a",
-        "recurrence",
-        "INVESTIGATE",
-        {
-            "run_id": "run-a",
-            "status": "INVESTIGATE",
-            "version_pair": {"previous_id": "1", "current_id": "2"},
-            "findings": [serialized],
-            "materiality_threshold": 1.0,
-        },
-        created="2026-01-10T00:00:00+00:00",
-    )
-    entries = store.recurrence_inputs(
-        "recurrence",
-        cutoff="2026-02-01T00:00:00+00:00",
-        window=3,
-        current_version="3",
-    )
-    refreshes = store.recurrence_refreshes(entries)
-    store.close()
-    replayed = assess_recurrence([serialized], refreshes, config)
-    assert replayed and replayed[0].stable_key == serialized["stable_key"]
 
 
 # ---------------------------------------------------------------------------

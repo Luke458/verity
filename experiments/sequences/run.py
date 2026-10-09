@@ -1,12 +1,14 @@
-"""Refresh sequences through ``qc weekly``: recurrence and slow movements.
+"""Refresh sequences through ``qc weekly``: slow movements across refreshes.
 
     python -m experiments.sequences.run --seeds 6301-6310 --jobs 4 --out reports/sequences/test.json
 
 Every other measurement in this repo scores one version pair. Here one seeded
 world is published as 11 consecutive weekly snapshots (each a full refresh,
 the last ``late_arrival_weeks`` under-counted on ``realistic``), and
-``qc weekly`` assesses the 10 consecutive pairs with a journal, as deployed,
-once with recurrence on and once off. Kinds of sequence:
+``qc weekly`` assesses the 10 consecutive pairs with a journal, as deployed.
+(The registered run, docs/results/sequences-test.json, also compared
+recurrence on and off; recurrence was removed after it changed nothing.)
+Kinds of sequence:
 
 - ``clean``: no change;
 - ``drift``: one category's sales fall a further ``DRIFT`` per week from the
@@ -114,25 +116,19 @@ def run_job(job: tuple[str, int, str, str]) -> list[dict[str, Any]]:
     try:
         built = build_sequence(profile, seed, kind, root / "data")
         rows = []
-        for recurrence in (True, False):
-            config = replace(DatasetConfig(), name=f"seq-{profile}", recurrence_enabled=recurrence,
-                             **dataset_calendar(profile), **PROFILES[profile])
-            store = root / f"journal-{recurrence}.db"
-            versions = built["versions"]
-            for step, (previous, current) in enumerate(zip(versions, versions[1:], strict=False)):
-                result = run_weekly(built["manifest"], config=config, store_path=store,
-                                    out_root=root / f"reports-{recurrence}", stage="warehouse",
-                                    current=current, previous=previous)
-                report = json.loads((Path(str(result.report_dir)) / "report.json").read_text())
-                unexplained = [f for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"]
-                leaf = f"commodity_id:{built['commodity']}"
-                rows.append({
-                    "profile": profile, "seed": seed, "kind": kind, "recurrence": recurrence, "step": step,
-                    "status": result.status,
-                    "recurrence_findings": sum(f["check"] == "recurrence" for f in report["findings"]),
-                    "flagged_leaf": any(f["check"] == "temporal" and f["scope"] == leaf for f in unexplained),
-                    "unexplained": sorted({f"{f['check']}|{f['scope']}|{f['metric']}" for f in unexplained}),
-                })
+        config = replace(DatasetConfig(), name=f"seq-{profile}", **dataset_calendar(profile), **PROFILES[profile])
+        versions = built["versions"]
+        for step, (previous, current) in enumerate(zip(versions, versions[1:], strict=False)):
+            result = run_weekly(built["manifest"], config=config, store_path=root / "journal.db",
+                                out_root=root / "reports", stage="warehouse", current=current, previous=previous)
+            report = json.loads((Path(str(result.report_dir)) / "report.json").read_text())
+            unexplained = [f for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"]
+            leaf = f"commodity_id:{built['commodity']}"
+            rows.append({
+                "profile": profile, "seed": seed, "kind": kind, "step": step, "status": result.status,
+                "flagged_leaf": any(f["check"] == "temporal" and f["scope"] == leaf for f in unexplained),
+                "unexplained": sorted({f"{f['check']}|{f['scope']}|{f['metric']}" for f in unexplained}),
+            })
         return rows
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -142,18 +138,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     from qc.conformal import wilson_interval
 
     out: dict[str, Any] = {}
-    on = {(r["profile"], r["seed"], r["kind"], r["step"]): r for r in rows if r["recurrence"]}
-    off = {(r["profile"], r["seed"], r["kind"], r["step"]): r for r in rows if not r["recurrence"]}
-    keys = sorted(set(on) & set(off))
-    out["status_identical"] = {"same": sum(on[k]["status"] == off[k]["status"] for k in keys), "n": len(keys)}
-    with_recurrence = [r for r in on.values() if r["recurrence_findings"]]
-    out["recurrence_findings"] = {
-        "refreshes": len(with_recurrence),
-        "already_investigate_without_it": sum(off[(r["profile"], r["seed"], r["kind"], r["step"])]["status"]
-                                              == "INVESTIGATE" for r in with_recurrence),
-    }
     for profile in PROFILES:
-        mine = [r for r in on.values() if r["profile"] == profile]
+        mine = [r for r in rows if r["profile"] == profile]
         clean = [r for r in mine if r["kind"] == "clean"]
         flagged = sum(r["status"] != "PASS" for r in clean)
         low, high = wilson_interval(flagged, len(clean)) if clean else (0.0, 1.0)

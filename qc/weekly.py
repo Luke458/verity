@@ -123,7 +123,6 @@ def run_weekly(
     from .assessment import artifact_checksums, digest, publish, snapshot_manifest
     from .delta import DeltaSource
     from .expectations import load_expectations
-    from .recurrence import RECURRENCE_INPUT_SCHEMA
     from .reference import ReferenceSpec
     from .reporting import render_markdown
     from .run import run_qc
@@ -188,21 +187,6 @@ def run_weekly(
     try:
         store = SqliteStore(store_path or out / "assessments.sqlite")
         connection = store.connection
-        # Freeze the recurrence inputs strictly before the assessment cutoff
-        # and include their digest in the assessment identity: a cached
-        # assessment can never be reused once eligible predecessors change,
-        # and future-dated refreshes cannot affect historical replay.
-        recurrence_entries = store.recurrence_inputs(
-            config.name,
-            cutoff=assessment_cutoff,
-            window=config.recurrence_window,
-            current_version=current,
-        )
-        identity["recurrence_inputs"] = {
-            "schema_version": RECURRENCE_INPUT_SCHEMA,
-            "cutoff": assessment_cutoff,
-            "entries": recurrence_entries,
-        }
         assessment_id = digest(identity)
         run_id = f"{config.name}:{assessment_id}"
         attempt_id = str(uuid4())
@@ -230,11 +214,10 @@ def run_weekly(
             cached.report_dir = str(report_dir)
             cached.artifacts = {name: str(report_dir / Path(path).name) for name, path in cached.artifacts.items()}
             return cached
-        prior_refreshes = store.recurrence_refreshes(recurrence_entries)
         result = run_qc(source, current, previous, config, run_id=run_id,
                         reference_frame=reference_frame,
                         reference_spec=reference_spec, expectations=expectations,
-                        registry=registry, observed_at=assessment_cutoff, prior_refreshes=prior_refreshes,
+                        registry=registry, observed_at=assessment_cutoff,
                         assessment_id=assessment_id)
         result.machine["snapshot_manifest"] = identity
         result.machine["observed_at"] = observed_at

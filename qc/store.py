@@ -2,7 +2,7 @@
 
 One database holds:
 
-- ``runs``: immutable machine payloads, the frozen inputs to recurrence;
+- ``runs``: immutable machine payloads;
 - ``assessments``: content-addressed weekly assessments with their published
   artifacts and checksums;
 - ``attempts``: one row per invocation, recording its state and any error.
@@ -14,10 +14,8 @@ relationship copies) are left in place and never read.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
-from collections.abc import Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,11 +49,6 @@ def observation_time(value: str | None = None) -> str:
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=UTC)
     return timestamp.astimezone(UTC).isoformat()
-
-
-def _version_order(value: Any) -> tuple[int, object]:
-    text = str(value)
-    return (0, int(text)) if text.isdigit() else (1, text)
 
 
 class SqliteStore:
@@ -185,93 +178,3 @@ class SqliteStore:
             "checksums": json.loads(row["checksums"]),
             "result": json.loads(row["result"]),
         }
-
-    def recurrence_inputs(
-        self,
-        dataset: str,
-        *,
-        cutoff: str,
-        window: int = 2,
-        current_version: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Frozen recurrence predecessors strictly before the cutoff.
-
-        Distinct logical refreshes are identified by their version pair; the
-        latest eligible revision of each refresh is selected at the cutoff and
-        retries or alternative attempts of the same refresh are excluded as
-        duplicate evidence.
-        """
-        rows = self.connection.execute(
-            "SELECT run_id, created, payload FROM runs "
-            "WHERE dataset = ? AND created <= ? "
-            "ORDER BY created DESC, run_id DESC",
-            (dataset, observation_time(cutoff)),
-        ).fetchall()
-        latest: dict[tuple[str, str], dict[str, Any]] = {}
-        for row in rows:
-            payload = json.loads(row["payload"])
-            pair = payload.get("version_pair") or {}
-            previous_id = pair.get("previous_id")
-            current_id = pair.get("current_id")
-            key = (str(previous_id), str(current_id))
-            if key in latest:
-                continue
-            if current_version is not None and _version_order(current_id) >= _version_order(current_version):
-                continue
-            latest[key] = {
-                "run_id": row["run_id"],
-                "created": row["created"],
-                "previous_version": previous_id,
-                "current_version": current_id,
-                "previous_max_week": pair.get("previous_max_week"),
-                "current_max_week": pair.get("current_max_week"),
-                "payload_hash": hashlib.sha256(
-                    str(row["payload"]).encode()
-                ).hexdigest(),
-            }
-        ordered = sorted(
-            latest.values(),
-            key=lambda entry: (
-                # Snapshot/business-period metadata orders predecessors; version
-                # string ordering is only a fallback for legacy payloads.
-                int(entry["previous_max_week"] or 0),
-                int(entry["current_max_week"] or 0),
-                _version_order(entry["previous_version"]),
-                _version_order(entry["current_version"]),
-                str(entry["created"]),
-            ),
-        )
-        limit = max(0, int(window) - 1)
-        return ordered[-limit:] if limit else []
-
-    def recurrence_refreshes(
-        self, entries: Sequence[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Load the frozen predecessor payloads and verify their hashes."""
-        refreshes: list[dict[str, Any]] = []
-        for entry in entries:
-            row = self.connection.execute(
-                "SELECT payload FROM runs WHERE run_id = ?", (entry["run_id"],)
-            ).fetchone()
-            if row is None:
-                raise ValueError(
-                    f"recurrence predecessor {entry['run_id']!r} is unavailable"
-                )
-            digest = hashlib.sha256(str(row["payload"]).encode()).hexdigest()
-            if digest != entry.get("payload_hash"):
-                raise ValueError(
-                    f"recurrence predecessor {entry['run_id']!r} evidence changed"
-                )
-            payload = json.loads(row["payload"])
-            historical = payload.get("historical_revision") or {}
-            refreshes.append(
-                {
-                    "run_id": payload.get("run_id"),
-                    "status": payload.get("status"),
-                    "findings": payload.get("findings", []),
-                    "unexplained_delta": historical.get("unexplained_delta", 0.0),
-                    "materiality_threshold": payload.get("materiality_threshold", 0.0),
-                    "payload_hash": digest,
-                }
-            )
-        return refreshes

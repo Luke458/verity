@@ -11,8 +11,8 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 
 > **Validation status: synthetic only.** All evidence comes from the bundled
 > generator (`qcgen`) and its fault oracle. On the registered cohort the engine
-> detects 72/72 held-out faults and movements and raises no alarm on 60/60
-> clean refreshes. On a harder profile with category seasonality and
+> detects 72/72 held-out faults and movements and raises a false alarm on 1 of
+> 60 clean refreshes. On a harder profile with category seasonality and
 > late-arriving data it catches structural faults and single-week
 > restatements down to 1% and single-category drops of 40%, but misses most
 > drops of 10% or less, and reports per category the smallest drop it could
@@ -183,26 +183,29 @@ To reimplement the engine in another stack instead, treat
 |---|---|
 | Synthetic world and fault oracle | validated on synthetic data |
 | Data contracts | validated on synthetic data |
-| Version pair and revision cube | plumbing |
+| Version pair and revision cube | validated on synthetic data |
 | Lifecycle and attribution | validated on synthetic data |
 | Counterfactual reconstruction | validated on synthetic data |
 | Reconciliation | validated on synthetic data |
 | Lineage first divergence | validated on synthetic data |
-| Expected events, ratio expectations, reference controls | plumbing |
-| Approved closures and category moves | validated on synthetic data |
+| Ratio expectations and reference controls | implemented, not measured |
+| Approved known changes (backfills, closures, category moves) | validated on synthetic data |
 | Temporal QC | validated on synthetic data |
 | Findings and final status | validated on synthetic data |
-| Recurrence | plumbing |
 | Rule cause labels | validated on synthetic data |
 | Weekly orchestrator and journal | validated on synthetic data |
-| Notification | plumbing |
-| Delta source and onboarding | plumbing |
+| Notification | implemented, not measured |
+| Delta source and onboarding | implemented, not measured |
 | Fault-size sweep and realistic profile | validated on synthetic data |
 | Cohort evaluation | validated on synthetic data |
 | Notice drafting (`qc notices`) | validated on synthetic notices; drafts need approval |
 
 "Validated on synthetic data" means measured through the full engine against
-the generator's oracle; it is not a real-world accuracy claim.
+the generator's oracle; it is not a real-world accuracy claim. "Implemented,
+not measured" means built, wired in and tested for correct mechanics, but the
+generator cannot produce the conditions to measure it (real endpoints, real
+tables, independent references); [docs/claims.md](docs/claims.md) says why
+for each.
 
 ## Layout
 

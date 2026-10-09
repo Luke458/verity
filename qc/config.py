@@ -182,8 +182,6 @@ class DatasetConfig:
             raise ValueError("temporal_interval_alpha must be in (0, 1)")
         if not 0 < self.temporal_fdr_q < 1:
             raise ValueError("temporal_fdr_q must be in (0, 1)")
-        if self.recurrence_minimum > self.recurrence_window:
-            raise ValueError("recurrence_minimum cannot exceed recurrence_window")
         if self.period_map:
             if len(dict(self.period_map)) != len(self.period_map) or any(type(v) is not int for _, v in self.period_map):
                 raise ValueError("period_map must have unique labels and integer indices")
@@ -271,16 +269,6 @@ class DatasetConfig:
     # on the synthetic small profile (40 clean + 45 fault refreshes, seeds
     # 3000-3039 disjoint from the cohort plan): 2/40 false alarms vs 3/40.
     temporal_fdr_q: float = 0.01
-    # Recurrence escalation: a finding repeated in at least
-    # ``recurrence_minimum`` of the last ``recurrence_window`` refreshes whose
-    # cumulative impact is material escalates to review.
-    recurrence_enabled: bool = True
-    recurrence_window: int = 3
-    recurrence_minimum: int = 2
-    # Registered cumulative materiality budget as a multiple of the largest
-    # scoped per-period threshold. Summing each observation's threshold cannot
-    # detect a sequence whose members all stay individually below threshold.
-    recurrence_budget_ratio: float = 1.0
     forecast_quantiles: tuple[float, ...] = (
         0.01,
         0.05,

@@ -406,6 +406,43 @@ recurrence cannot do its job, for two separate reasons:
 4. **A slow decline goes unseen on `realistic`:** in at most 5/10 sequences is
    the declining category flagged within ten weeks (−26%).
 
+### Test results (seeds 6301-6310)
+
+All four held.
+
+1. **Recurrence changed nothing.** Status was identical with recurrence on and off
+   in 600/600 refreshes, and no refresh had a `recurrence` finding.
+2. **Clean sequences:** 7/100 refreshes flagged on `small`, 8/100 on
+   `realistic`, in line with the single-pair false-alarm rates.
+3. **The 10% step on `realistic`** was flagged in its first week 0/10 times,
+   and never after its first week in 9/10 sequences.
+4. **The 3%-a-week decline on `realistic`** was flagged at some point in 3/10
+   sequences.
+
+Week by week, a flagged category looks like this (`X` = flagged, first
+assessed week on the left):
+
+| | `small` | `realistic` |
+|---|---|---|
+| Step, −10% held | `X.........` or `XX........` in all 10 | `..........` in 9, `...X......` in 1 |
+| Decline, −3% a week | first flag in week 1-4 in all 10, then mostly silent (e.g. `.XX.X.....`) | `..X.......`, `...X......`, `.....X....`, and 7 never |
+
+The single-week test compares the latest week with a baseline trained on the
+previous snapshot. Once a shift is in that snapshot, it is in the baseline.
+A sustained change is therefore visible at most in its first week or two,
+and a gradual one is absorbed as it happens. On `realistic` a category can
+lose a quarter of its sales over ten weeks without a single flag.
+
+**What changed:** recurrence was removed: the module, its journal inputs, its
+config keys (`recurrence_enabled`, `recurrence_window`,
+`recurrence_minimum`, `recurrence_budget_ratio`; a config that still sets
+them now fails with "unknown dataset config keys") and its tests. The registered
+cohort is unchanged. Sustained and gradual movements remain undetected on
+`realistic`. Catching them needs a test that compares several recent weeks
+with the weeks before them, and has not been built.
+
+Results: [`results/sequences-test.json`](results/sequences-test.json).
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

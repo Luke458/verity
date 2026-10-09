@@ -6,7 +6,6 @@ scenario into a regression guard.
 
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import replace
 from pathlib import Path
@@ -191,7 +190,7 @@ def test_large_sibling_raw_residuals_do_not_inflate_target_interval():
 
 
 # ---------------------------------------------------------------------------
-# 5/6. Frozen recurrence inputs and identity
+# 5/6. Assessment identity
 # ---------------------------------------------------------------------------
 
 
@@ -219,35 +218,6 @@ def _seed_run(store: SqliteStore, run_id: str, previous: str, current: str, crea
         _run_payload(run_id, previous, current),
         created=created,
     )
-
-
-def test_future_dated_recurrence_is_excluded_at_the_cutoff(tmp_path):
-    store = SqliteStore(tmp_path / "store.db")
-    _seed_run(store, "old", "V0001", "V0002", "2026-01-10T00:00:00+00:00")
-    _seed_run(store, "future", "V0002", "V0003", "2027-01-10T00:00:00+00:00")
-    entries = store.recurrence_inputs(
-        "recurrence",
-        cutoff="2026-06-01T00:00:00+00:00",
-        window=3,
-        current_version="V0003",
-    )
-    assert [entry["run_id"] for entry in entries] == ["old"]
-    store.close()
-
-
-def test_recurrence_inputs_deduplicate_retries_and_latest_revision_wins(tmp_path):
-    store = SqliteStore(tmp_path / "store.db")
-    _seed_run(store, "run-a", "V0001", "V0002", "2026-01-10T00:00:00+00:00")
-    _seed_run(store, "run-a-retry", "V0001", "V0002", "2026-01-11T00:00:00+00:00")
-    _seed_run(store, "run-b", "V0002", "V0003", "2026-01-12T00:00:00+00:00")
-    entries = store.recurrence_inputs(
-        "recurrence",
-        cutoff="2026-02-01T00:00:00+00:00",
-        window=3,
-        current_version="V0004",
-    )
-    assert [entry["run_id"] for entry in entries] == ["run-a-retry", "run-b"]
-    store.close()
 
 
 def _write_delta_versions(path: Path, targets: tuple[int, ...]) -> None:
@@ -279,7 +249,7 @@ def test_future_dated_refresh_cannot_change_a_historical_assessment(tmp_path):
     pytest.importorskip("deltalake")
     path = tmp_path / "fact"
     _write_delta_versions(path, (30, 31, 32))
-    config = replace(DatasetConfig(), name="recurrence-identity")
+    config = replace(DatasetConfig(), name="future-identity")
     first = run_weekly(
         str(path),
         config=config,
@@ -307,36 +277,6 @@ def test_future_dated_refresh_cannot_change_a_historical_assessment(tmp_path):
     assert again.assessment_id == first.assessment_id
     assert again.status == first.status
 
-
-def test_eligible_recurrence_evidence_change_creates_a_new_assessment(tmp_path):
-    pytest.importorskip("deltalake")
-    path = tmp_path / "fact"
-    _write_delta_versions(path, (30, 31, 32))
-    config = replace(DatasetConfig(), name="recurrence-change")
-    first = run_weekly(
-        str(path),
-        config=config,
-        store_path=tmp_path / "store.db",
-        out_root=tmp_path / "weekly",
-    )
-    assert first.skipped is False
-
-    with SqliteStore(tmp_path / "store.db") as store:
-        store.record_run(
-            "prior-refresh",
-            "recurrence-change",
-            "INVESTIGATE",
-            _run_payload("prior-refresh", "0", "1"),
-            created="2020-01-01T00:00:00+00:00",
-        )
-    changed = run_weekly(
-        str(path),
-        config=config,
-        store_path=tmp_path / "store.db",
-        out_root=tmp_path / "weekly",
-    )
-    assert changed.assessment_id != first.assessment_id
-    assert changed.skipped is False
 
 
 # ---------------------------------------------------------------------------
@@ -432,29 +372,3 @@ def test_insufficient_partitions_return_insufficient_evidence():
     outcome = select_candidate(weeks, values, 1, None, config)
     assert outcome.mode == "insufficient"
     assert all(not item.eligible for item in outcome.evaluations)
-
-
-def test_initial_assessment_without_predecessors_is_a_cold_start():
-    result = run_qc(_single_week_source(), "V0002", "V0001", CONFIG)
-    assert result.machine["recurrence_status"] == "COLD_START"
-    assert "recurrence" not in result.machine
-
-
-def test_tampered_recurrence_predecessor_is_rejected(tmp_path):
-    store = SqliteStore(tmp_path / "store.db")
-    _seed_run(store, "run-a", "1", "2", "2026-01-10T00:00:00+00:00")
-    entries = store.recurrence_inputs(
-        "recurrence",
-        cutoff="2026-02-01T00:00:00+00:00",
-        window=3,
-        current_version="3",
-    )
-    assert len(entries) == 1
-    store.connection.execute(
-        "UPDATE runs SET payload = ? WHERE run_id = 'run-a'",
-        (json.dumps(_run_payload("run-a", "1", "2", net=999.0)),),
-    )
-    store.connection.commit()
-    with pytest.raises(ValueError, match="changed"):
-        store.recurrence_refreshes(entries)
-    store.close()

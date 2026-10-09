@@ -64,16 +64,14 @@ SQLite is authoritative (default `reports/weekly/assessments.sqlite`; set
 
 | Table | Semantics |
 |---|---|
-| `runs` | immutable machine payload per assessed refresh; the frozen input to recurrence |
+| `runs` | immutable machine payload per assessed refresh |
 | `assessments` | content-addressed assessment identity, status, artifacts and checksums |
 | `attempts` | one row per invocation with its state (STARTED, COMMITTED, PUBLISHED) and any error |
 
 The assessment identity hashes the selected snapshot content and metadata,
-configuration, engine code, reference and approval inputs, the observation
-cutoff and a frozen recurrence-input manifest (distinct predecessor refreshes
-strictly before the cutoff and their payload hashes). Changing an eligible
-predecessor, or a refresh appearing after the cutoff, cannot silently reuse a
-cached result. Each execution gets its own attempt ID; `--force` creates another
+configuration, engine code, reference, expectation and registry inputs, and
+the observation cutoff. Changing any of them cannot silently reuse a cached
+result, and refreshes recorded later cannot change an earlier assessment. Each execution gets its own attempt ID; `--force` creates another
 attempt for the same immutable assessment without overwriting its outcome.
 
 Result and report artifacts commit together in SQLite; reports are then written

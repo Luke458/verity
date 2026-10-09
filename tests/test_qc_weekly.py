@@ -239,15 +239,13 @@ def test_incomplete_report_directory_is_reprocessed(tmp_path):
 def test_weekly_early_store_failure_surfaces_original_error(tmp_path, monkeypatch):
     # Regression: a failure before the attempt row existed raised
     # UnboundLocalError from the handler and hid the real error.
-    from qc.store import SqliteStore
-
     path = tmp_path / "fact"
     _write_versions(path, (30, 31))
 
-    def boom(self, *args, **kwargs):
+    def boom(*args, **kwargs):
         raise RuntimeError("database is locked")
 
-    monkeypatch.setattr(SqliteStore, "recurrence_inputs", boom)
+    monkeypatch.setattr("qc.assessment.digest", boom)
     with pytest.raises(RuntimeError, match="database is locked"):
         run_weekly(str(path), out_root=tmp_path / "weekly")
 

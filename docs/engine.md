@@ -344,8 +344,8 @@ status, classification, explained fraction and conservation ratio for each.
 
 ## Final assessment policy
 
-After contracts, reconciliation, references, temporal checks, recurrence and
-scoped approvals, the engine collects immutable findings (every appended period
+After contracts, reconciliation, references, temporal checks and scoped
+approvals, the engine collects immutable findings (every appended period
 gets its own temporal findings) and computes one final status. Contract
 failures win; unexplained failures yield INVESTIGATE; unavailable required
 evidence yields INCOMPLETE; otherwise findings explained by an approved
@@ -356,11 +356,12 @@ required successful checks yield PASS. Each finding carries a disposition
 registered, approved event or expectation observed before the assessment
 cutoff can explain a failure, and it covers the exact finding IDs it lists.
 
-Recurrence matches unexplained findings on a serialized, period-independent
-stable key (check, scope kind, measure, hierarchy level and scope) and
-accumulates signed scoped impacts against a registered cumulative budget;
-multiple periods inside one logical refresh count as one occurrence. Optional
-missing checks remain visible.
+Each finding also carries a serialized, period-independent stable key (check,
+scope kind, measure, hierarchy level and scope). Optional missing checks remain
+visible. There is no cross-refresh escalation: an earlier recurrence check was
+removed because it could not change a status and never saw a predecessor when
+refreshes were replayed
+([evaluation.md](evaluation.md#recurrence-and-slow-movements)).
 
 `RuleDecisionProvider` then labels the likely cause, origin and severity, and
 `likely_causes` lists every cause the evidence supports, so two simultaneous

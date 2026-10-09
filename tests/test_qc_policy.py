@@ -18,7 +18,6 @@ from qc.policy import (
     finding,
     status_for,
 )
-from qc.recurrence import assess_recurrence
 from qc.temporal import (
     share_shift_test,
     student_t_two_sided_p,
@@ -62,96 +61,6 @@ def test_benjamini_hochberg_never_claims_discovery_on_empty_input():
     assert adjusted[0] <= 0.05
     with pytest.raises(ValueError, match="p-values"):
         benjamini_hochberg([1.5])
-
-
-def _recurrence_finding(finding_id, impact, materiality=50.0):
-    from qc.policy import finding, stable_key_for
-
-    item = finding(
-        "temporal",
-        "banner_id:B1",
-        "FAIL",
-        scope_type="temporal_series",
-        metric="dollar",
-        level="banner_id",
-        period=10,
-        impact=impact,
-        materiality=materiality,
-    )
-    payload = {
-        "finding_id": finding_id,
-        "stable_key": stable_key_for(
-            "temporal", "temporal_series", "dollar", "banner_id", "banner_id:B1"
-        ),
-        "check": "temporal",
-        "scope": "banner_id:B1",
-        "scope_type": "temporal_series",
-        "metric": "dollar",
-        "level": "banner_id",
-        "outcome": "FAIL",
-        "disposition": UNEXPLAINED_ANOMALY,
-        "approval_ids": [],
-        "impact": impact,
-        "materiality": materiality,
-    }
-    assert item.stable_key == payload["stable_key"]
-    return payload
-
-
-def test_recurrence_requires_repetition_and_material_cumulative_impact():
-    current = [_recurrence_finding("abc", 60.0)]
-    prior = [{"findings": [_recurrence_finding("def", 60.0)]}]
-    config = replace(CONFIG, recurrence_window=3, recurrence_minimum=2)
-    escalated = assess_recurrence(current, prior, config)
-    assert len(escalated) == 1
-    assert escalated[0].repeated
-    assert escalated[0].material
-    assert escalated[0].occurrences == 2
-    assert escalated[0].cumulative_impact == pytest.approx(120.0)
-
-    small_prior = [{"findings": [_recurrence_finding("def", 5.0)]}]
-    small = assess_recurrence(
-        [_recurrence_finding("abc", 5.0)], small_prior, config
-    )
-    assert not small[0].material
-
-    single = assess_recurrence(current, [], config)
-    assert single == []
-
-    zero_budget = assess_recurrence(
-        current,
-        prior,
-        replace(config, recurrence_budget_ratio=0.0),
-    )
-    assert not zero_budget[0].material
-
-    # Two periods in one logical refresh count once, with combined impact.
-    repeated = assess_recurrence(
-        [_recurrence_finding("abc", 30.0), _recurrence_finding("abd", 30.0)],
-        prior,
-        config,
-    )
-    assert repeated[0].occurrences == 2
-    assert repeated[0].cumulative_impact == pytest.approx(120.0)
-
-    approved_prior = [{"findings": [
-        {
-            **_recurrence_finding("def", 60.0),
-            "disposition": HUMAN_APPROVED,
-            "approval_ids": ["evt-1"],
-        }
-    ]}]
-    assert assess_recurrence(current, approved_prior, config) == []
-
-    # Signed impacts that net to zero still escalate on gross persistence.
-    alternating = assess_recurrence(
-        [_recurrence_finding("abc", 40.0)],
-        [{"findings": [_recurrence_finding("def", -40.0)]}],
-        config,
-    )
-    assert alternating[0].cumulative_impact == pytest.approx(0.0)
-    assert alternating[0].cumulative_gross_impact == pytest.approx(80.0)
-    assert alternating[0].material
 
 
 @pytest.mark.parametrize(

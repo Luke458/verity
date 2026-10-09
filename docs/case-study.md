@@ -69,7 +69,8 @@ computed in exactly one place, from findings, so a check cannot set a status
 that something else silently overwrites.
 
 **Registered cohort, held-out seeds: detection 72/72 (Wilson lower bound
-0.949), clean false positives 0/60 (upper bound 0.060). Gate passed.** The
+0.949), clean false positives 0/60 (upper bound 0.060). Gate passed.** (A
+later baseline change made it 1/60.) The
 drift detector, now actually wired in, failed the same gate (25/60 clean
 refreshes alarmed) and stays off.
 
@@ -200,6 +201,22 @@ No large fault was hidden, and market movements were caught as often with an
 approved change as without one
 ([evaluation.md](evaluation.md#approving-closures-and-category-moves)).
 
+One feature had been labelled "plumbing" since the early review: recurrence,
+meant to escalate findings that repeat across refreshes. Every benchmark scored
+single version pairs, so it had never run where it mattered. A new harness
+published one world as eleven weekly snapshots and ran the weekly job over
+them. Reading the code for it showed two separate faults:
+- **It could not change a status.** It only acted on findings that had already
+  escalated.
+- **It never ran when past refreshes were replayed.** The journal recorded runs
+  at wall-clock time but looked them up by observation time.
+
+The registered run confirmed it: identical statuses in 600/600 refreshes with
+it on and off. It was deleted. The same run measured what recurrence was
+supposed to cover and nothing does: a category that drops 10% and stays down
+is flagged at most in its first week, because the next baseline already
+contains the drop.
+
 ## 7. What it still cannot do
 
 - Category drops of 10% or less on seasonal data are within noise when ~47
@@ -210,6 +227,10 @@ approved change as without one
   that number is a safe, conservative bound.
 - Late arrival must be declared; within one version pair the engine cannot
   tell it from a restatement fault.
+- Sustained and gradual movements: on `realistic`, a 10% drop that persists is
+  never flagged in 9/10 refresh sequences, and a 3%-a-week decline (−26% over
+  ten weeks) in 7/10. It needs a test of several recent weeks against the
+  weeks before them.
 - A product that stops selling naturally looks exactly like a lost product.
   Two of the three clean `realistic` refreshes flagged in 60 are single
   products just over the 0.1% absence materiality; the third is the share

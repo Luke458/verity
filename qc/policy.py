@@ -7,7 +7,7 @@ thresholds. Only a registered, approved expectation or expected event can
 explain a failure; nothing is cleared automatically.
 
 1. ``collect_findings`` runs every check and materializes findings (including
-   period-specific temporal findings and recurrence escalations).
+   period-specific temporal findings).
 2. ``apply_policy`` computes the final status exactly once from them.
 """
 
@@ -45,7 +45,6 @@ SCOPE_REVISION = "revision"
 SCOPE_REFERENCE = "reference"
 SCOPE_APPROVAL = "approval"
 SCOPE_TEMPORAL = "temporal_series"
-SCOPE_RECURRENCE = "recurrence"
 SCOPE_HIERARCHY = "hierarchy"
 SCOPE_LINEAGE = "lineage"
 
@@ -56,7 +55,6 @@ _CHECK_SCOPE_KINDS = {
     "revision_week": SCOPE_REVISION,
     "reference": SCOPE_REFERENCE,
     "ratio:dollar_per_unit": SCOPE_APPROVAL,
-    "recurrence": SCOPE_RECURRENCE,
     "temporal": SCOPE_TEMPORAL,
 }
 
@@ -100,7 +98,7 @@ class Finding:
 def stable_key_for(
     check: str, scope_type: str, metric: str, level: str, scope: str
 ) -> str:
-    """Serialized, period-independent key shared by recurrence and storage.
+    """Serialized, period-independent key for a finding's scope.
 
     One function derives the key so collection, serialization and matching can
     never disagree about which findings belong to the same scope.
@@ -197,7 +195,6 @@ def _temporal_materiality(series: Any, config: Any) -> float:
 def collect_findings(
     result: Any,
     config: Any | None = None,
-    prior_refreshes: tuple[dict[str, Any], ...] = (),
 ) -> list[Finding]:
     """Run every check into immutable findings."""
     findings = [
@@ -420,30 +417,6 @@ def collect_findings(
                 )
             )
 
-    recurrence: list[dict[str, Any]] = []
-    if config is not None and prior_refreshes:
-        from .recurrence import assess_recurrence
-
-        for assessment in assess_recurrence(
-            [asdict(item) for item in findings],
-            list(prior_refreshes),
-            config,
-        ):
-            recurrence.append(assessment.to_dict())
-            if not assessment.material:
-                continue
-            findings.append(
-                finding(
-                    "recurrence",
-                    f"{assessment.check}:{assessment.scope}",
-                    "FAIL",
-                    metric=assessment.metric,
-                    level=assessment.level,
-                    impact=float(assessment.cumulative_impact),
-                    materiality=float(assessment.cumulative_threshold),
-                )
-            )
-        result.machine["recurrence"] = recurrence
     return findings
 
 
