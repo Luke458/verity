@@ -368,6 +368,44 @@ Results: [`results/approvals-test.json`](results/approvals-test.json)
 (registered run) and
 [`results/approvals-test-after-fix.json`](results/approvals-test-after-fix.json).
 
+## Recurrence and slow movements
+
+Every other measurement here scores one version pair. Recurrence is meant to
+act across refreshes: a finding that repeats within `recurrence_window`
+refreshes, with material cumulative impact, adds a `recurrence` finding.
+`python -m experiments.sequences.run` publishes one seeded world as 11 weekly
+snapshots and runs `qc weekly` with a journal over the 10 consecutive pairs,
+with recurrence on and off. On `realistic`, every snapshot under-counts its
+last two weeks. There are three kinds of sequence:
+
+- **clean**: nothing changes;
+- **drift**: one category falls a further 3% each week (−26% after ten);
+- **step**: one category drops 10% and stays down.
+
+Reading the code before measuring (development seed 6201) found that
+recurrence cannot do its job, for two separate reasons:
+
+- **It cannot change a status.** It considers only current findings that
+  failed without approval, and any such finding already makes the refresh
+  INVESTIGATE.
+- **It never sees a predecessor when refreshes are replayed.** The journal
+  records each run at wall-clock time but looks for predecessors observed
+  before the refresh's own observation time. When past refreshes are
+  assessed after the fact (as in this harness, or a backtest), no
+  predecessor ever qualifies and every assessment is a cold start.
+
+### Registered predictions (seeds 6301-6310, current engine)
+
+1. **Recurrence changes nothing:** every refresh has the same status with
+   recurrence on and off, and no refresh has a `recurrence` finding.
+2. **Clean sequences:** at most 10% of refreshes flagged per profile.
+3. **A sustained 10% drop is seen once at most.** On `realistic` its category is
+   flagged in its first week in at most 3/10 sequences. In at least 8/10 it
+   is never flagged after its first week, because the baseline absorbs the
+   new level.
+4. **A slow decline goes unseen on `realistic`:** in at most 5/10 sequences is
+   the declining category flagged within ten weeks (−26%).
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not
