@@ -123,7 +123,7 @@ def run_job(job: tuple[str, int, str, str]) -> list[dict[str, Any]]:
                 result = run_weekly(built["manifest"], config=config, store_path=store,
                                     out_root=root / f"reports-{recurrence}", stage="warehouse",
                                     current=current, previous=previous)
-                report = json.loads((Path(result.report_dir) / "report.json").read_text())
+                report = json.loads((Path(str(result.report_dir)) / "report.json").read_text())
                 unexplained = [f for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"]
                 leaf = f"commodity_id:{built['commodity']}"
                 rows.append({
