@@ -257,7 +257,7 @@ def _review_rows(machine: dict[str, Any]) -> list[list[Any]]:
     for check, items in groups.items():
         unavailable = all(item.get("outcome") == "UNAVAILABLE" for item in items)
         if check == "historical_revision":
-            reason = history.get("reason")
+            reason = str(history.get("reason"))
             what = f"History: {_HISTORY_REASONS.get(reason, 'revision not explained')}"
             if reason == "missing_entities":
                 what = "Missing from the latest week"
@@ -305,7 +305,7 @@ def _review_rows(machine: dict[str, Any]) -> list[list[Any]]:
                 int(flag["week"]): flag.get("ratio")
                 for flag in (machine.get("expectations") or {}).get("unexpected", [])
             }
-            size = ", ".join(_number(ratios.get(item.get("period")), 2) for item in items)
+            size = ", ".join(_number(ratios.get(int(item.get("period") or 0)), 2) for item in items)
             rows.append([f"Ratio {check.split(':', 1)[1]}", f"week {weeks}", size,
                          "Approve a ratio expectation if a price change is expected"])
         elif check.startswith("contracts:"):
@@ -495,7 +495,7 @@ def _sensitivity_section(machine: dict[str, Any]) -> list[str]:
 
 def _passed_section(machine: dict[str, Any]) -> list[str]:
     names = {"temporal": "latest week", "revision_week": "week revisions", "ratio": "ratios"}
-    families: dict[str, list[bool]] = {}
+    families: dict[str, list[str]] = {}
     for item in machine.get("findings", []):
         family = str(item.get("check", "")).split(":", 1)[0]
         if family.startswith("hierarchy"):

@@ -14,7 +14,7 @@ analyst judgement.
 ## Registered system result
 
 `qc cohort --plan config/cohort.json` (small profile, held-out seeds
-7101-7103, full engine, final status), engine code `aeaabda2a0b7`
+7101-7103, full engine, final status), engine code `41c7daa992d0`
 (rerun 2026-10-13 after the report rewrite; unchanged since the share-test
 change of 2026-10-01):
 
