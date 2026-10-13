@@ -585,6 +585,36 @@ If all hold, the default becomes `temporal_sustained_weeks: 4` with share
 0.33. If 5 or 6 fails, it stays off and the window is not tuned again on these
 data.
 
+#### Test results
+
+Predictions 1-5 held; **6 failed**, so the window stays off by default.
+
+| | window off | window on (share 0.33) | Prediction |
+|---|---|---|---|
+| Clean refreshes flagged, `small` / `realistic` | 3/100, 4/100 | 3/100, 4/100 | 1 held |
+| `small` decline flagged in >= 6 of 10 weeks | 0/10 | 10/10 | 2 held |
+| `small` step flagged in >= 3 of first 5 weeks | 0/10 | 10/10 | 3 held |
+| `realistic` step / decline ever flagged | 0/10, 1/10 | 0/10, 1/10 | 4 held |
+| Cohort gate | 72/72, 1/60 | 72/72, 1/60 (cause 0.917, origin 1.000) | 5 held |
+| One-week movement, `small`, 5/10/20/40% | 7, 20, 20, 20 of 20 | 4, 19, 20, 20 of 20 | |
+| One-week movement, `realistic`, 5/10/20/40% | 2, 3, 13, 20 of 20 | 2, 2, 12, 20 of 20 | |
+| Paired one-week loss | | **6 of 160** (none gained) | **6 failed** (bound 4) |
+| Sweep clean false alarms, `small` / `realistic` | 6/120, 9/120 | 5/120, 8/120 | 6 held |
+
+The smaller share did not shrink the loss rate: 3.75% of paired cases at
+both 0.5 and 0.33. One lost case (seed 7219, `small`, 10%) shows why: the
+category's adjusted p-value went from 0.0089 to 0.0132, just past the 0.01
+cut-off, with nothing else changed. At these sizes many one-week movements
+sit close to the threshold, so even a ×1.5 penalty pushes some over it. Any
+second look paid for from the same error budget costs roughly this much.
+
+**Outcome:** `temporal_sustained_weeks` stays 1 (off). With 4 weeks and share
+0.33 it catches every slow decline and held drop on `small` in these tests,
+and nothing extra on `realistic`. It also costs about one in 27 one-week
+detections. That is a feed-specific trade, documented, and not the default.
+
+Results: [`results/sustained-window-test-2.json`](results/sustained-window-test-2.json).
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

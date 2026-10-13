@@ -277,8 +277,8 @@ class DatasetConfig:
     # weeks is also tested against the weeks before them, so a held or gradual
     # movement too small for one week is still seen. 1 disables it. Off by
     # default: 4 caught slow declines on the synthetic small profile but cost
-    # one-week sensitivity beyond its registered bound (docs/evaluation.md,
-    # "Sustained shifts: a multi-week window").
+    # one-week sensitivity beyond its registered bound in two tests
+    # (docs/evaluation.md, "Sustained shifts: a multi-week window").
     temporal_sustained_weeks: int = 1
     # The window's part of each leaf's error rate; the single-week look keeps
     # the rest (weighted Bonferroni).

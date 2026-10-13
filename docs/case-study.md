@@ -222,8 +222,11 @@ doubled or quadrupled clean false alarms, because synthetic shares also
 wander slowly. Measuring the spread on each category's own history fixed
 that. On held-out seeds it caught every slow decline on `small` (against none
 without it) and nothing more on `realistic`, where a held 10% drop is within
-the natural wander. Its registered single-week cost bound failed (two 5%
-one-week movements missed), so it ships off by default as an opt-in.
+the natural wander. Its registered single-week cost bound failed twice:
+once with an even split of the error budget, then with a third for the
+window on twice the seeds (6 of 160 one-week movements missed, none gained).
+Many one-week movements sit near the threshold, so any second look paid from
+the same budget costs some. It ships off by default as an opt-in.
 
 ## 7. What it still cannot do
 

@@ -301,8 +301,9 @@ Opt-in, `temporal_sustained_weeks: 4` gives each share-tested leaf a second
 look: its mean share over the latest four weeks against the 26 weeks before
 them, scaled by how much that comparison has varied at past weeks of its own
 history (`sustained_t`/`sustained_p`; the flag is `sustained_shift` when this
-look decides). Each leaf's p-value is then twice the smaller of the two looks,
-so the family's error rate holds and single-week sensitivity drops slightly.
+look decides). The leaf's error rate is split between the looks
+(`temporal_sustained_share`, default 0.5; a weighted Bonferroni), so the
+family's error rate holds and single-week sensitivity drops slightly.
 It catches slow declines and held drops that one week cannot, on synthetic
 data with modest share noise, and costs some one-week sensitivity, so it is
 off by default ([evaluation.md](evaluation.md#sustained-shifts-a-multi-week-window)).
