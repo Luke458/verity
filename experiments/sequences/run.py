@@ -1,7 +1,7 @@
 """Refresh sequences through ``qc weekly``: slow movements across refreshes.
 
     python -m experiments.sequences.run --seeds 6301-6310 --jobs 4 --out reports/sequences/test.json
-    python -m experiments.sequences.run --seeds 6311-6320 --jobs 4 --sustained 1 --out ...  # window off
+    python -m experiments.sequences.run --seeds 6311-6320 --jobs 4 --sustained 4 --out ...  # 4-week window
 
 Every other measurement in this repo scores one version pair. Here one seeded
 world is published as 11 consecutive weekly snapshots (each a full refresh,
@@ -167,7 +167,7 @@ def main() -> None:
     parser.add_argument("--seeds", default="6301-6302", help="inclusive range")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--workdir", default="reports/sequences-work")
-    parser.add_argument("--sustained", type=int, default=4, help="temporal_sustained_weeks (1 = off)")
+    parser.add_argument("--sustained", type=int, default=1, help="temporal_sustained_weeks (1 = off)")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     first, last = (int(x) for x in args.seeds.split("-"))

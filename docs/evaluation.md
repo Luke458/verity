@@ -438,15 +438,16 @@ config keys (`recurrence_enabled`, `recurrence_window`,
 `recurrence_minimum`, `recurrence_budget_ratio`; a config that still sets
 them now fails with "unknown dataset config keys") and its tests. The registered
 cohort is unchanged. Sustained and gradual movements remain undetected on
-`realistic`. Catching them needs a test that compares several recent weeks
-with the weeks before them, and has not been built.
+`realistic`. A test comparing several recent weeks with the weeks before them
+was built next ([below](#sustained-shifts-a-multi-week-window)); it helps on
+`small`, not on `realistic`, and is opt-in.
 
 Results: [`results/sequences-test.json`](results/sequences-test.json).
 
 ## Sustained shifts: a multi-week window
 
-`temporal_sustained_weeks` (default 4) adds a second look at every
-share-tested leaf. The leaf's mean share over its latest four weeks is
+`temporal_sustained_weeks: 4` (opt-in; the default, 1, is off; see the
+results) adds a second look at every share-tested leaf. The leaf's mean share over its latest four weeks is
 compared with the 26 weeks before them. The test is scaled by how much that
 same comparison has varied at past weeks of the leaf's own history, using the
 year-over-year baseline when its spread is smaller, as the single-week test
@@ -502,6 +503,44 @@ and on (4).
    2/60 higher.
 
 If 5 or 6 fails, the default returns to 1.
+
+### Test results
+
+Predictions 1-5 held; **6 failed on `small`**, so the window ships off by
+default (`temporal_sustained_weeks: 1`) and is opt-in.
+
+| | window off | window on (4 weeks) | Prediction |
+|---|---|---|---|
+| Clean refreshes flagged, `small` / `realistic` | 3/100, 9/100 | 2/100, 9/100 | 1 held |
+| `small` decline flagged in >= 6 of 10 weeks | 0/10 | 10/10 | 2 held |
+| `small` step flagged in >= 3 of first 5 weeks | 0/10 | 8/10 | 3 held (at the bound) |
+| `realistic` step / decline ever flagged | 1/10, 2/10 | 0/10, 2/10 | 4 held |
+| Cohort gate | 72/72, 1/60 | 72/72, 1/60 (cause 0.917, origin 1.000) | 5 held |
+| One-week movement, `small`, 5/10/20/40% | 4, 10, 10, 10 of 10 | 2, 10, 10, 10 of 10 | **6 failed** |
+| One-week movement, `realistic`, 5/10/20/40% | 0, 1, 8, 10 of 10 | 0, 1, 7, 10 of 10 | 6 held |
+| Sweep clean false alarms, `small` / `realistic` | 3/60, 2/60 | 1/60, 1/60 | 6 held |
+
+On `small`, the window catches what the single-week test does not: a decline
+of 3% a week is flagged in 7-9 of its 10 weeks rather than in a few scattered
+ones, and a held 10% drop for four or five weeks rather than one or two.
+Week by week (`X` = the moving category flagged):
+
+| | window off | window on |
+|---|---|---|
+| `small` decline, typical | `.XXXX.X...`, `..X.XX....` | `.XXXXXXXXX`, `..XXXXXXXX` |
+| `small` step, typical | `X.........`, `XX........` | `XXXXX.....`, `X..X......` |
+
+The price is single-week sensitivity: the Bonferroni split cost two
+just-detectable 5% movements on `small` (seeds 7204 and 7205 detected off,
+missed on; none the other way) and one 20% movement on `realistic`. That
+breaks the registered bound of one. On `realistic` the window bought
+nothing, since a held 10% drop is within that generator's natural share wander.
+Whether the trade is worth it depends on the feed: a team that cares more
+about slow erosion than about one-week blips of 5% can turn it on. A
+held drop is still flagged for only about five weeks before it enters the
+leaf's own history and stops counting as a shift.
+
+Results: [`results/sustained-window-test.json`](results/sustained-window-test.json).
 
 ## Limits
 

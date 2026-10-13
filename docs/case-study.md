@@ -213,9 +213,17 @@ them. Reading the code for it showed two separate faults:
 
 The registered run confirmed it: identical statuses in 600/600 refreshes with
 it on and off. It was deleted. The same run measured what recurrence was
-supposed to cover and nothing does: a category that drops 10% and stays down
-is flagged at most in its first week, because the next baseline already
-contains the drop.
+supposed to cover: a category that drops 10% and stays down is flagged at
+most in its first week or two.
+
+A second look per category followed: the mean of its last four weeks against
+the 26 before. Two designs that assumed shares are noise around a level
+doubled or quadrupled clean false alarms, because synthetic shares also
+wander slowly. Measuring the spread on each category's own history fixed
+that. On held-out seeds it caught every slow decline on `small` (against none
+without it) and nothing more on `realistic`, where a held 10% drop is within
+the natural wander. Its registered single-week cost bound failed (two 5%
+one-week movements missed), so it ships off by default as an opt-in.
 
 ## 7. What it still cannot do
 
@@ -229,8 +237,8 @@ contains the drop.
   tell it from a restatement fault.
 - Sustained and gradual movements: on `realistic`, a 10% drop that persists is
   never flagged in 9/10 refresh sequences, and a 3%-a-week decline (−26% over
-  ten weeks) in 7/10. It needs a test of several recent weeks against the
-  weeks before them.
+  ten weeks) in 7/10. The opt-in multi-week window does not change that there;
+  on `small` it does, at a cost in one-week sensitivity.
 - A product that stops selling naturally looks exactly like a lost product.
   Two of the three clean `realistic` refreshes flagged in 60 are single
   products just over the 0.1% absence materiality; the third is the share

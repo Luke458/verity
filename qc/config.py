@@ -273,8 +273,11 @@ class DatasetConfig:
     temporal_fdr_q: float = 0.01
     # Sustained-shift window: each leaf's mean share over its latest this many
     # weeks is also tested against the weeks before them, so a held or gradual
-    # movement too small for one week is still seen. 1 disables it.
-    temporal_sustained_weeks: int = 4
+    # movement too small for one week is still seen. 1 disables it. Off by
+    # default: 4 caught slow declines on the synthetic small profile but cost
+    # one-week sensitivity beyond its registered bound (docs/evaluation.md,
+    # "Sustained shifts: a multi-week window").
+    temporal_sustained_weeks: int = 1
     forecast_quantiles: tuple[float, ...] = (
         0.01,
         0.05,

@@ -297,6 +297,15 @@ predictive spread and expected share, and the materiality floor.
 `latest_week.sensitivity` gives the median per level and measure. It is a
 conservative bound: simultaneous movements, such as dollars and units of one
 category, face a more lenient BH threshold ([evaluation.md](evaluation.md#sensitivity-what-a-refresh-could-not-have-seen)).
+Opt-in, `temporal_sustained_weeks: 4` gives each share-tested leaf a second
+look: its mean share over the latest four weeks against the 26 weeks before
+them, scaled by how much that comparison has varied at past weeks of its own
+history (`sustained_t`/`sustained_p`; the flag is `sustained_shift` when this
+look decides). Each leaf's p-value is then twice the smaller of the two looks,
+so the family's error rate holds and single-week sensitivity drops slightly.
+It catches slow declines and held drops that one week cannot, on synthetic
+data with modest share noise, and costs some one-week sensitivity, so it is
+off by default ([evaluation.md](evaluation.md#sustained-shifts-a-multi-week-window)).
 Sparse leaves fall back to parent expectation
 times a historically estimated child share and are labelled `parent_share`.
 Structural additions from newly appearing entities are subtracted from the
@@ -358,7 +367,7 @@ cutoff can explain a failure, and it covers the exact finding IDs it lists.
 
 Each finding also carries a serialized, period-independent stable key (check,
 scope kind, measure, hierarchy level and scope). Optional missing checks remain
-visible. There is no cross-refresh escalation: an earlier recurrence check was
+visible. There is no cross-refresh state: an earlier recurrence check was
 removed because it could not change a status and never saw a predecessor when
 refreshes were replayed
 ([evaluation.md](evaluation.md#recurrence-and-slow-movements)).
