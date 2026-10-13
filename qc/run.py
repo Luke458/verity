@@ -34,6 +34,7 @@ from .decisions import DecisionSet, RuleDecisionProvider
 from .hierarchy import HierarchyCheck, hierarchy_checks
 from .lifecycle import (
     LifecycleEvent,
+    absence_baseline,
     classify_entity_changes,
     detect_reclassification,
 )
@@ -421,7 +422,8 @@ def run_qc(
     counterfactual = reconstruct_counterfactual(previous, current, valued_events, config)
     reconciliation = run_reconciliation(
         current,
-        contract_current_fact if config.analysis_stage != config.contract_stage else None,
+        # One stage serves as both: nothing to balance, other checks still run.
+        contract_current_fact if config.analysis_stage != config.contract_stage else current,
         config,
         periods=pair.new_periods,
     )
@@ -453,6 +455,7 @@ def run_qc(
         config,
         reconstruction_score=counterfactual.reconciliation_score,
         absences=absences,
+        absence_baseline=absence_baseline(previous, config),
     )
     historical_status = history["status"]
     try:

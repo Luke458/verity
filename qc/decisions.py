@@ -330,10 +330,13 @@ class RuleDecisionProvider:
 
         # Only entity types whose absence is material name the cause; an
         # immaterial absence stays in the evidence without driving the label.
+        # The status judged these impacts (with the feed's absence baseline);
+        # recompute only for a result that carries none.
+        impacts = (getattr(result, "machine", None) or {}).get("missing_entities")
+        if impacts is None:
+            impacts = missing_entity_impact(events, config)
         material_types = {
-            entity_type
-            for entity_type, impact in missing_entity_impact(events, config).items()
-            if impact["material"]
+            entity_type for entity_type, impact in impacts.items() if impact["material"]
         }
         latest_missing = [
             e

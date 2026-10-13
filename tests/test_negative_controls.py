@@ -138,7 +138,8 @@ def _self_comparison_is_skipped() -> None:
     result = run_reconciliation(frame, frame, DatasetConfig())
     assert result.status == "NOT_EVALUATED"
     assert result.checks
-    assert all(check.status == "SKIPPED" for check in result.checks)
+    assert all(check.status in ("SKIPPED", "NOT_APPLICABLE") for check in result.checks)
+    assert [c.status for c in result.checks if c.name == "mass_balance"] == ["NOT_APPLICABLE"]
 
 
 @negative_control("attribution:over_explained_blocks_pass")

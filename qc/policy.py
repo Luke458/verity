@@ -222,9 +222,13 @@ def collect_findings(
                 finding(
                     f"reconciliation:{check.name}",
                     result.dataset,
-                    {"PASS": "PASS", "FAIL": "FAIL", "SKIPPED": "UNAVAILABLE"}[
-                        check.status
-                    ],
+                    {
+                        "PASS": "PASS",
+                        "FAIL": "FAIL",
+                        "SKIPPED": "UNAVAILABLE",
+                        "NOT_APPLICABLE": "SKIPPED",
+                    }[check.status],
+                    required=check.status != "NOT_APPLICABLE",
                 )
             )
     if result.counterfactual is not None and result.counterfactual.evaluated:

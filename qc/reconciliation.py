@@ -4,7 +4,9 @@ Mass balance compares the report table against the analysis table *per week
 and per report key*, so compensating errors (one duplicated key offset by one
 missing key) cannot pass. Aggregate-marker scans catch parent rows mixed into
 detail rows. Checks report ``PASS``, ``FAIL`` or ``SKIPPED``; a run whose
-checks were all skipped is ``NOT_EVALUATED``, never ``PASS``.
+checks were all skipped is ``NOT_EVALUATED``, never ``PASS``. A feed whose
+report stage is its analysis stage has nothing to balance: mass balance is
+``NOT_APPLICABLE`` (informational), and the marker and price checks still run.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from .config import DatasetConfig
 PASS = "PASS"
 FAIL = "FAIL"
 SKIPPED = "SKIPPED"
+NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 @dataclass(frozen=True)
@@ -48,7 +51,7 @@ class ReconciliationResult:
 
     @property
     def evaluated(self) -> list[ReconciliationCheck]:
-        return [check for check in self.checks if check.status != SKIPPED]
+        return [check for check in self.checks if check.status not in (SKIPPED, NOT_APPLICABLE)]
 
     def to_dict(self) -> dict:
         return {
@@ -82,7 +85,7 @@ def _mass_balance(
         return [
             ReconciliationCheck(
                 "mass_balance",
-                SKIPPED,
+                NOT_APPLICABLE,
                 "report and analysis frames are identical; nothing to reconcile",
             )
         ]

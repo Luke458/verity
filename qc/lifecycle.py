@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from .config import DatasetConfig
@@ -241,8 +242,54 @@ def classify_entity_changes(
     return events
 
 
+# Fewer recent weeks than this and the absence baseline is not used.
+MIN_ABSENCE_BASELINE = 13
+
+
+def absence_baseline(previous: pd.DataFrame, config: DatasetConfig) -> dict[str, list[float]]:
+    """Missing share the latest-week rule would have given at each recent week.
+
+    Each of the latest ``entity_absence_baseline_weeks`` weeks of the previous
+    version is treated as if it were the appended week: entities present the
+    week before, present in at least ``entity_presence_threshold`` of the
+    ``entity_presence_window`` weeks before it, and absent in it, valued at
+    their trailing mean as a share of the trailing mean total. These are the
+    shares a clean refresh of this feed produces, per entity type.
+    """
+    week, metric = config.week_column, config.primary_metric
+    count, span = config.entity_absence_baseline_weeks, config.entity_presence_window
+    if not count or week not in previous.columns or metric not in previous.columns:
+        return {}
+    weeks = sorted(int(value) for value in previous[week].dropna().unique())
+    totals = previous.groupby(week)[metric].sum().reindex(weeks).to_numpy(dtype=float)
+    baseline: dict[str, list[float]] = {}
+    for entity_column in config.entity_columns:
+        if entity_column not in previous.columns:
+            continue
+        grouped = previous.groupby([entity_column, week], dropna=False)[metric].sum(min_count=1)
+        table = grouped.unstack(week).reindex(columns=weeks)
+        present = table.notna().to_numpy()
+        values = table.fillna(0.0).to_numpy(dtype=float)
+        shares = []
+        for index in range(max(span + 1, len(weeks) - count), len(weeks)):
+            window = slice(index - span, index)
+            rate = present[:, window].mean(axis=1)
+            missing = (
+                present[:, index - 1]
+                & ~present[:, index]
+                & (rate >= config.entity_presence_threshold)
+            )
+            total = totals[window].sum() / span
+            lost = np.abs(values[missing][:, window].sum(axis=1) / span).sum()
+            shares.append(float(lost / total) if total else 0.0)
+        baseline[_entity_type(entity_column)] = shares
+    return baseline
+
+
 def missing_entity_impact(
-    events: list[LifecycleEvent], config: DatasetConfig
+    events: list[LifecycleEvent],
+    config: DatasetConfig,
+    baseline: dict[str, list[float]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Expected value lost to latest-period absences, per entity type.
 
@@ -250,7 +297,9 @@ def missing_entity_impact(
     were together expected to carry a material share of the period, using the
     same ``materiality_ratio``/``materiality_abs`` as historical revisions. One
     sparse product out of thousands going quiet is a fact in the evidence, not a
-    coverage regression.
+    coverage regression. With an ``absence_baseline`` of at least
+    ``MIN_ABSENCE_BASELINE`` weeks, the share must also exceed every share in
+    it: the absences a clean refresh of this feed shows are not evidence.
     """
     impact: dict[str, dict[str, Any]] = {}
     for event in events:
@@ -273,6 +322,13 @@ def missing_entity_impact(
         entry["share"] = entry["expected_lost"] / total if total else None
         entry["threshold"] = threshold
         entry["material"] = entry["expected_lost"] > threshold
+    for entity_type, entry in impact.items():
+        history = (baseline or {}).get(entity_type, [])
+        usable = len(history) >= MIN_ABSENCE_BASELINE
+        entry["baseline_weeks"] = len(history)
+        entry["baseline_max"] = max(history) if usable else None
+        if usable and entry["share"] is not None:
+            entry["material"] = entry["material"] and entry["share"] > max(history)
     return impact
 
 

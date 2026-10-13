@@ -194,10 +194,17 @@ def _summary(machine: dict[str, Any]) -> list[str]:
         total = entry.get("expected_period_total") or 0.0
         threshold = entry.get("threshold")
         limit = f" (limit {_percent(threshold / total, 2)})" if total and threshold is not None else ""
-        verdict = "material" if entry.get("material") else "below materiality"
+        baseline = entry.get("baseline_max")
+        usual = (
+            f"; clean weeks of this feed lose up to {_percent(baseline, 2)} "
+            f"(previous {entry.get('baseline_weeks')} weeks)"
+            if baseline is not None
+            else ""
+        )
+        verdict = "material" if entry.get("material") else "within normal churn" if baseline is not None and share is not None and share <= baseline else "below materiality"
         lines.append(
             f"- **Missing:** {_plural(int(entry.get('entities', 0)), entity_type)} absent from week "
-            f"{latest_weeks}, expected to carry {_percent(share, 2)} of it{limit}: {verdict}."
+            f"{latest_weeks}, expected to carry {_percent(share, 2)} of it{limit}{usual}: {verdict}."
         )
 
     anomalous = _anomalous_series(machine)

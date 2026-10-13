@@ -87,7 +87,7 @@ final status policy, not the final assessment:
 | Condition | Status |
 |---|---|
 | contract failure | `DATA_CONTRACT_FAILURE` |
-| missing entities of one type, not explained by an approved closure, expected to carry more than `materiality_ratio` of the period (`lifecycle.missing_entity_impact`; re-checked like-for-like when closures are approved) | `INVESTIGATE` |
+| missing entities of one type, not explained by an approved closure, expected to carry more than `materiality_ratio` of the period and more than in any of the previous `entity_absence_baseline_weeks` (default 52) weeks (`lifecycle.missing_entity_impact`; re-checked like-for-like when closures are approved) | `INVESTIGATE` |
 | structural events, all matched by the expected-event registry and explained fraction >= threshold | `PASS_WITH_EXPLANATION` |
 | structural events are only category moves, all matched, and the residual escalates by neither rule below | `PASS_WITH_EXPLANATION` |
 | structural events not matched by the registry | `INVESTIGATE` |
@@ -137,7 +137,8 @@ not enough if the arithmetic does not reconcile.
 ## Reconciliation
 
 Invariant checks between the report and the analysis table: metric mass balance
-within `reconciliation_tolerance`, per-report-group count consistency for
+within `reconciliation_tolerance` (`NOT_APPLICABLE`, informational, when one
+stage is both; the remaining checks still run), per-report-group count consistency for
 `store_count` / `product_count`, per-week hierarchy consistency for configured
 `hierarchy_columns` (`hierarchy_tolerance`), and aggregate-marker detection:
 a detail column containing values such as `TOTAL` or `ALL` fails

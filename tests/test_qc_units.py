@@ -515,6 +515,50 @@ def test_missing_entity_escalates_only_when_material():
         assert (status == "INVESTIGATE") is material
 
 
+def _churning_frames(extra_missing: int):
+    """100 products, each absent one week in ten (staggered); in the latest
+    week the usual tenth is absent plus ``extra_missing`` more."""
+    rows_prev = [
+        {"week": week, "product_id": f"P{product:03d}", "dollar": 10.0, "units": 1}
+        for week in range(1, 71)
+        for product in range(100)
+        if (week + product) % 10
+    ]
+    usual = {product for product in range(100) if not (71 + product) % 10}
+    gone = usual | set(sorted(set(range(100)) - usual)[:extra_missing])
+    rows_curr = rows_prev + [
+        {"week": 71, "product_id": f"P{product:03d}", "dollar": 10.0, "units": 1}
+        for product in range(100)
+        if product not in gone
+    ]
+    return _fact(rows_prev), _fact(rows_curr)
+
+
+@pytest.mark.parametrize(
+    ("extra_missing", "baseline_weeks", "material"),
+    [
+        (0, 52, False),  # the usual weekly churn: within its own baseline
+        (0, 0, True),  # without the baseline the same churn escalates
+        (40, 52, True),  # an outage beyond anything in the baseline
+    ],
+)
+def test_absence_escalates_only_beyond_the_feeds_own_churn(extra_missing, baseline_weeks, material):
+    from qc.lifecycle import absence_baseline, missing_entity_impact
+
+    config = replace(CONFIG, entity_absence_baseline_weeks=baseline_weeks)
+    previous, current = _churning_frames(extra_missing)
+    pair = _pair(previous, current)
+    events = classify_entity_changes(previous, current, pair, config)
+    baseline = absence_baseline(previous, config)
+    impact = missing_entity_impact(events, config, baseline)["product"]
+    assert impact["material"] is material
+    if baseline_weeks:
+        # The baseline is the same statistic: a tenth of products, every week.
+        assert impact["baseline_weeks"] == 52
+        assert impact["baseline_max"] == pytest.approx(0.1, abs=0.02)
+        assert impact["share"] > impact["baseline_max"] if material else impact["share"] <= impact["baseline_max"]
+
+
 def _restated_frames(week_factor: dict[int, float]):
     rows_prev, rows_curr = [], []
     # 100 overlap weeks: one week is 1% of history, as on a two-year table.

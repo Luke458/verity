@@ -569,11 +569,13 @@ def classify_run(
     config: DatasetConfig,
     reconstruction_score: float | None = None,
     absences: list[LifecycleEvent] | None = None,
+    absence_baseline: dict[str, list[float]] | None = None,
 ) -> str:
     """Historical status. ``absences`` replaces ``events`` for the missing-entity
     check when approved closures restated the data (see ``like_for_like``)."""
     return assess_history(
-        contract_status, events, attribution, config, reconstruction_score, absences
+        contract_status, events, attribution, config, reconstruction_score, absences,
+        absence_baseline,
     )["status"]
 
 
@@ -584,6 +586,7 @@ def assess_history(
     config: DatasetConfig,
     reconstruction_score: float | None = None,
     absences: list[LifecycleEvent] | None = None,
+    absence_baseline: dict[str, list[float]] | None = None,
 ) -> dict[str, Any]:
     """``classify_run``'s status with the rule that decided it.
 
@@ -599,7 +602,7 @@ def assess_history(
         event for event in (events if absences is None else absences)
         if f"{event.entity_type}:{event.entity_id}" not in attribution.matched_absences
     ]
-    missing = missing_entity_impact(unexplained_absences, config)
+    missing = missing_entity_impact(unexplained_absences, config, absence_baseline)
 
     def decided(status: str, reason: str) -> dict[str, Any]:
         return {"status": status, "reason": reason, "missing_entities": missing}

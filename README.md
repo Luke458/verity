@@ -229,6 +229,7 @@ data/, reports/     generated output (git-ignored)
 - [docs/case-study.md](docs/case-study.md): how the engine went from alarming on everything to measured claims, and what it still cannot do
 - [docs/engine.md](docs/engine.md): what each layer decides and the final status policy
 - [docs/evaluation.md](docs/evaluation.md): cohort gate, sweeps, false alarms, detection limits, approvals; each with its registered predictions
+- [docs/real-data.md](docs/real-data.md): the engine on real Walmart sales (M5): false alarms and injected-fault detection, registered before the test run
 - [docs/weekly-run.md](docs/weekly-run.md): weekly runs, journal, recovery, notifications, grain and calendars
 - [docs/onboarding.md](docs/onboarding.md): profiling a table and field mapping
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families

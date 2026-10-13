@@ -16,6 +16,9 @@ from typing import Any
 
 import yaml
 
+# Integer settings with a nonzero default where 0 also means off.
+_ZERO_DISABLES = frozenset({"entity_absence_baseline_weeks"})
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -133,7 +136,7 @@ class DatasetConfig:
                 raise ValueError(f"{field.name} must be boolean")
             if isinstance(default, int) and not isinstance(default, bool):
                 # Integer fields defaulting to 0 are counts where 0 means off.
-                minimum = 0 if default == 0 else 1
+                minimum = 0 if default == 0 or field.name in _ZERO_DISABLES else 1
                 if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
                     raise ValueError(
                         f"{field.name} must be an integer >= {minimum}"
@@ -250,6 +253,12 @@ class DatasetConfig:
     # product that trades one week in five is expected to be absent next week.
     entity_presence_threshold: float = 0.5
     entity_presence_window: int = 8
+    # Real feeds lose some reliably present products every week (stock-outs,
+    # delistings). A latest-week absence escalates only if its missing share
+    # also exceeds every share the same rule gives at each of this many recent
+    # weeks of the previous version (0 disables; under 13 weeks of baseline
+    # the materiality rule applies alone). docs/real-data.md.
+    entity_absence_baseline_weeks: int = 52
     # Absolute materiality floor per metric/period/scope; never an accumulated
     # historical total.
     temporal_materiality_abs: float = 0.0
