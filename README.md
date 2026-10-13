@@ -9,8 +9,8 @@ forecasts and each entity's own share history. Every check emits a versioned
 finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 `INCOMPLETE`, `DATA_CONTRACT_FAILURE`) is computed from them.
 
-> **Validation status: synthetic only.** All evidence comes from the bundled
-> generator (`qcgen`) and its fault oracle. On the registered cohort the engine
+> **Validation status: synthetic, plus one real-sales test.** Most evidence comes
+> from the bundled generator (`qcgen`) and its fault oracle. On the registered cohort the engine
 > detects 72/72 held-out faults and movements and raises a false alarm on 1 of
 > 60 clean refreshes. On a harder profile with category seasonality and
 > late-arriving data it catches structural faults and single-week
@@ -18,7 +18,10 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > drops of 10% or less, and reports per category the smallest drop it could
 > have caught. Known changes (new stores, closures, category moves) are
 > explained only by a registry entry a person approved; they can be drafted
-> from free-text notices. The [case study](docs/case-study.md) tells how it
+> from free-text notices. On real Walmart sales (M5) with injected faults it
+> caught every store outage, product outage and restatement, but raised false
+> alarms on 14 of 100 clean refreshes, against 6 predicted
+> ([docs/real-data.md](docs/real-data.md)). The [case study](docs/case-study.md) tells how it
 > got here and [docs/claims.md](docs/claims.md) records the evidence.
 > Backends: local Parquet snapshots and Delta tables via delta-rs.
 
@@ -201,6 +204,7 @@ To reimplement the engine in another stack instead, treat
 | Fault-size sweep and realistic profile | validated on synthetic data |
 | Cohort evaluation | validated on synthetic data |
 | Notice drafting (`qc notices`) | validated on synthetic notices; drafts need approval |
+| Real sales (M5) | measured on real sales with injected faults; false alarms above prediction |
 
 "Validated on synthetic data" means measured through the full engine against
 the generator's oracle; it is not a real-world accuracy claim. "Implemented,

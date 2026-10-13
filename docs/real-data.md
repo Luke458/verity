@@ -120,6 +120,57 @@ finding for restatements. Engine code is that of the registering commit.
    with no history finding. This is a single real refresh, an illustration rather
    than a rate.
 
-## Results
+## Results (test weeks 178-277, engine `4513c0f6a164`)
 
-Pending the test run.
+Five of six predictions held. **Prediction 1 failed: 14 of 100 clean real
+refreshes raised an alarm, against at most 6 predicted** (Wilson 95%
+0.085-0.221). Results: [`results/m5-test.json`](results/m5-test.json).
+
+| | Result | Prediction | |
+|---|---|---|---|
+| Clean refreshes alarmed | **14/100** | at most 6 | **failed** |
+| Market movement 40% | 19/20 | at least 12 | held |
+| Market movement 20% | 9/20 | 2 to 12 | held |
+| Market movement 10% | 1/20 | at most 4 | held |
+| Market movement 5% | 0/20 | at most 2 | held |
+| One store missing | 20/20 | at least 19 | held |
+| 100 products missing | 20/20 | at least 18 | held |
+| 10 products missing | 0/20 | at most 6 | held |
+| One week restated by 10% | 20/20 | at least 19 | held |
+| Broad recalculation | 20/20 | at least 19 | held |
+| M5's own releases (273 to 277 weeks) | PASS, no history finding | PASS | held |
+
+**Where the 14 false alarms came from** (some refreshes have more than one):
+
+- **Price per unit, 9.** M5's dollars per unit rise from 2.70 (first year) to
+  3.15 (last). The dollar-per-unit check compares the new week with the
+  median and MAD of *all* earlier weeks, so inflation alone puts later weeks
+  near its k = 4 robust-z cut (z = 4.0-4.3 at flagged weeks 194, 203, 204,
+  212 and 221; 1.9 and 3.4 at unflagged weeks 230 and 250). The check assumes stationary prices. The synthetic generator's
+  prices are stationary, so this never showed. A trailing reference window
+  is the obvious fix; it is not applied here, because this run is the test.
+- **Latest-week share tests, 8** (at q = 0.01, about 1 was expected). They
+  are real department share movements in Walmart's data, not faults. Some are
+  large against expectation (HOBBIES_1 dollars +19% and +38% at weeks 205 and
+  212, FOODS_1 units -11% at 197), others small moves in a share that rarely moves (HOBBIES_2,
+  weeks 247-248). The engine is built to surface genuine market movements, and
+  a reviewer may want some of these. Still, the share test's spread, taken from
+  each department's own trailing or year-over-year history, under-states how
+  much real department shares move, so the nominal 1% per-refresh rate does not
+  hold on this feed.
+- **Product absence, 1** (week 266, 1.9% of the week against a 52-week
+  maximum of 1.5%), about the 2 expected by construction.
+
+**What held up on real data.** Store, product-outage, restatement and
+recalculation faults were caught every time. A department-wide drop of 40% was
+caught 19/20, and 20% 9/20, about as on the synthetic `realistic`
+profile (20/20 and 12/20). The absence baseline separated normal churn (10
+products, 0/20) from an outage (100 products, 20/20). M5's own release-to-release
+refresh passed, with its 7 missing products recognised as normal churn.
+
+**Not shown.** M5 has no real pipeline faults and no real restatements, so
+these are injected faults in real noise, not real incidents. The refreshes
+append exactly one clean week; late-arriving data, real revisions and real
+outages remain untested. A fix to either false-alarm source needs fresh weeks:
+weeks 126-177 have not been run, and a second dataset (Favorita) would test
+transfer.

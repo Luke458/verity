@@ -292,6 +292,8 @@ def score(records: list[dict[str, Any]]) -> dict[str, Any]:
         key = record["family"]
         if record["family"] == "market_movement":
             key += f"@{1 - record['params']['factor']:.2f}"
+        elif record["family"] == "missing_products":
+            key += f"@{record['params']['n_products']}"
         groups.setdefault(key, []).append(record)
     summary: dict[str, Any] = {}
     for key, items in sorted(groups.items()):
