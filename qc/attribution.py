@@ -572,14 +572,40 @@ def classify_run(
 ) -> str:
     """Historical status. ``absences`` replaces ``events`` for the missing-entity
     check when approved closures restated the data (see ``like_for_like``)."""
+    return assess_history(
+        contract_status, events, attribution, config, reconstruction_score, absences
+    )["status"]
+
+
+def assess_history(
+    contract_status: str,
+    events: list[LifecycleEvent],
+    attribution: AttributionResult,
+    config: DatasetConfig,
+    reconstruction_score: float | None = None,
+    absences: list[LifecycleEvent] | None = None,
+) -> dict[str, Any]:
+    """``classify_run``'s status with the rule that decided it.
+
+    ``reason`` is one of ``contract_failure``, ``missing_entities``,
+    ``unmatched_events``, ``events_not_explained``, ``reconstruction_incomplete``,
+    ``unexplained_value_change``,
+    ``broad_historical_recalculation``, ``events_matched`` or ``none``;
+    ``missing_entities`` is the unapproved absence impact the first rule judged.
+    """
     if contract_status == "DATA_CONTRACT_FAILURE":
-        return "DATA_CONTRACT_FAILURE"
+        return {"status": "DATA_CONTRACT_FAILURE", "reason": "contract_failure", "missing_entities": {}}
     unexplained_absences = [
         event for event in (events if absences is None else absences)
         if f"{event.entity_type}:{event.entity_id}" not in attribution.matched_absences
     ]
-    if any(entry["material"] for entry in missing_entity_impact(unexplained_absences, config).values()):
-        return "INVESTIGATE"
+    missing = missing_entity_impact(unexplained_absences, config)
+
+    def decided(status: str, reason: str) -> dict[str, Any]:
+        return {"status": status, "reason": reason, "missing_entities": missing}
+
+    if any(entry["material"] for entry in missing.values()):
+        return decided("INVESTIGATE", "missing_entities")
     if attribution.structural_events:
         all_matched = not attribution.unmatched_events
         reconstructed_enough = (
@@ -602,12 +628,23 @@ def classify_run(
                 and not attribution.over_explained
             )
         if all_matched and explained_enough and reconstructed_enough:
-            return "PASS_WITH_EXPLANATION"
-        return "INVESTIGATE"
-    return "INVESTIGATE" if _residual_escalates(attribution, config) else "PASS"
+            return decided("PASS_WITH_EXPLANATION", "events_matched")
+        if not all_matched:
+            return decided("INVESTIGATE", "unmatched_events")
+        if not explained_enough:
+            return decided("INVESTIGATE", "events_not_explained")
+        return decided("INVESTIGATE", "reconstruction_incomplete")
+    reason = _residual_reason(attribution, config)
+    return decided("INVESTIGATE", reason) if reason else decided("PASS", "none")
+
+
+def _residual_reason(attribution: AttributionResult, config: DatasetConfig) -> str | None:
+    if attribution.material and attribution.explained_fraction < config.explained_fraction_threshold:
+        return "unexplained_value_change"
+    if not attribution.material and attribution.breadth > config.broad_recalculation_breadth:
+        return "broad_historical_recalculation"
+    return None
 
 
 def _residual_escalates(attribution: AttributionResult, config: DatasetConfig) -> bool:
-    if attribution.material and attribution.explained_fraction < config.explained_fraction_threshold:
-        return True
-    return not attribution.material and attribution.breadth > config.broad_recalculation_breadth
+    return _residual_reason(attribution, config) is not None

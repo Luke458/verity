@@ -36,7 +36,7 @@ class ContractResult:
         return {
             "status": self.status,
             "checks": [
-                {"name": c.name, "passed": c.passed, "detail": c.detail}
+                {"name": c.name, "passed": bool(c.passed), "detail": c.detail}
                 for c in self.checks
             ],
         }

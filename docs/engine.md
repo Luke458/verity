@@ -164,6 +164,30 @@ output and the report and label the run `ENTITY_MERGE`.
 machine JSON (`report.json`) for a run; the output directory is created
 exclusively, so a run is never overwritten. `qc report` writes both.
 
+The report is rendered from the machine JSON alone (`render_machine`), so a
+stored `report.json` renders the same report later. In order it gives:
+
+- **Status and summary:** what was compared, whether history changed and by
+  how much, missing entities and their expected share of the latest week,
+  latest-week movements by measure, ratio outliers, the lineage stage where
+  changes first appear, approvals applied, and the rule cause labels.
+- **Needs a decision:** one row per kind of failing finding, with its size and
+  how it can be cleared. Entries are an approved registry entry, an approved
+  ratio expectation, or nothing (investigate). Latest-week movements cannot be
+  approved directly; an approved closure or category move re-tests them like-for-like.
+- **Evidence:** structural changes with their approval, the history revision
+  (the ten largest restated weeks), and the latest-week series, ordered by
+  adjusted p-value.
+- **What this refresh could not see:** the median `detectable_change` per
+  level and measure, and the least sensitive category.
+- **Checks:** pass counts per check family.
+
+Cause labels are shown without probabilities: the rule provider's
+probabilities are heuristic, not calibrated. The machine output records
+the rule that decided the history check (`historical_revision.reason`) and the
+unapproved missing-entity impact it judged (`missing_entities`), machine
+schema 8.
+
 `DeltaSource` (delta-rs, optional `[delta]` extra) reads Delta tables and their
 versions directly, so table versions can be assessed locally or from object
 storage without Databricks compute. Single-table mode maps one table to one

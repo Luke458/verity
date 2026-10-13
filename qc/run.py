@@ -22,7 +22,7 @@ import pandas as pd
 from .attribution import (
     AttributionResult,
     WeekRevision,
-    classify_run,
+    assess_history,
     explain_revision,
     like_for_like,
     week_revisions,
@@ -184,12 +184,15 @@ def _machine(
     temporal: TemporalResult | None = None,
     relationships: Sequence[EntityRelationship] = (),
     reference: dict[str, Any] | None = None,
+    historical_reason: str | None = None,
 ) -> dict[str, Any]:
     historical: dict[str, Any] | None = None
     if attribution is not None:
         historical = {
             "status": historical_status or status,
+            "reason": historical_reason,
             "raw_delta": attribution.raw_delta,
+            "previous_total": attribution.previous_total,
             "explained_delta": attribution.explained_delta,
             "unexplained_delta": attribution.unexplained_delta,
             "explained_fraction": attribution.explained_fraction,
@@ -443,7 +446,7 @@ def run_qc(
         if restatement["excluded"]
         else None
     )
-    historical_status = classify_run(
+    history = assess_history(
         contracts.status,
         events,
         attribution,
@@ -451,6 +454,7 @@ def run_qc(
         reconstruction_score=counterfactual.reconciliation_score,
         absences=absences,
     )
+    historical_status = history["status"]
     try:
         temporal = run_temporal_qc(temporal_previous, temporal_current, pair, config, events)
     except Exception as exc:  # noqa: BLE001 - preserve completed deterministic checks
@@ -520,7 +524,11 @@ def run_qc(
                 temporal,
                 relationships,
                 reference_report,
-            ) | {"like_for_like": restatement},
+                history["reason"],
+            ) | {
+                "like_for_like": restatement,
+                "missing_entities": history["missing_entities"],
+            },
         ),
         config,
         assessment_id,

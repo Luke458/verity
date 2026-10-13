@@ -39,6 +39,8 @@ uv pip install --python .venv/bin/python -e ".[test,delta]"
 
 # Run QC over one version pair (human output, or --json for the machine record)
 .venv/bin/qc run --scenario-dir data/suites/demo/scenario-0000
+# report.md: status, what needs a decision and how to clear it, the evidence,
+# and the smallest change each category could have shown
 .venv/bin/qc report --scenario-dir data/suites/demo/scenario-0000 --out reports/runs/run-1
 
 # Score the engine against the oracle (blind: the engine never sees ground truth)
