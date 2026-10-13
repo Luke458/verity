@@ -1,6 +1,7 @@
 """Refresh sequences through ``qc weekly``: slow movements across refreshes.
 
     python -m experiments.sequences.run --seeds 6301-6310 --jobs 4 --out reports/sequences/test.json
+    python -m experiments.sequences.run --seeds 6311-6320 --jobs 4 --sustained 1 --out ...  # window off
 
 Every other measurement in this repo scores one version pair. Here one seeded
 world is published as 11 consecutive weekly snapshots (each a full refresh,
@@ -17,7 +18,8 @@ Kinds of sequence:
   on and stay there (a sustained small shift).
 
 Both movements are genuine and should eventually be flagged. Pre-registered in
-docs/evaluation.md ("Recurrence and slow movements").
+docs/evaluation.md ("Recurrence and slow movements"; the multi-week window in
+"Sustained shifts: a multi-week window").
 """
 
 from __future__ import annotations
@@ -105,18 +107,19 @@ def build_sequence(profile: str, seed: int, kind: str, root: Path) -> dict[str, 
             "first_week": first}
 
 
-def run_job(job: tuple[str, int, str, str]) -> list[dict[str, Any]]:
+def run_job(job: tuple[str, int, str, str, int]) -> list[dict[str, Any]]:
     from qc.config import DatasetConfig
     from qc.weekly import run_weekly
     from qcgen.config import dataset_calendar
 
-    profile, seed, kind, workdir = job
-    root = Path(workdir) / f"{profile}-{seed}-{kind}"
+    profile, seed, kind, workdir, sustained = job
+    root = Path(workdir) / f"{profile}-{seed}-{kind}-{sustained}"
     shutil.rmtree(root, ignore_errors=True)
     try:
         built = build_sequence(profile, seed, kind, root / "data")
         rows = []
-        config = replace(DatasetConfig(), name=f"seq-{profile}", **dataset_calendar(profile), **PROFILES[profile])
+        config = replace(DatasetConfig(), name=f"seq-{profile}", temporal_sustained_weeks=sustained,
+                         **dataset_calendar(profile), **PROFILES[profile])
         versions = built["versions"]
         for step, (previous, current) in enumerate(zip(versions, versions[1:], strict=False)):
             result = run_weekly(built["manifest"], config=config, store_path=root / "journal.db",
@@ -125,7 +128,8 @@ def run_job(job: tuple[str, int, str, str]) -> list[dict[str, Any]]:
             unexplained = [f for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"]
             leaf = f"commodity_id:{built['commodity']}"
             rows.append({
-                "profile": profile, "seed": seed, "kind": kind, "step": step, "status": result.status,
+                "profile": profile, "seed": seed, "kind": kind, "sustained": sustained, "step": step,
+                "status": result.status,
                 "flagged_leaf": any(f["check"] == "temporal" and f["scope"] == leaf for f in unexplained),
                 "unexplained": sorted({f"{f['check']}|{f['scope']}|{f['metric']}" for f in unexplained}),
             })
@@ -163,16 +167,17 @@ def main() -> None:
     parser.add_argument("--seeds", default="6301-6302", help="inclusive range")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--workdir", default="reports/sequences-work")
+    parser.add_argument("--sustained", type=int, default=4, help="temporal_sustained_weeks (1 = off)")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     first, last = (int(x) for x in args.seeds.split("-"))
-    jobs = [(profile, seed, kind, args.workdir) for profile in PROFILES for seed in range(first, last + 1) for kind in KINDS]
+    jobs = [(profile, seed, kind, args.workdir, args.sustained) for profile in PROFILES for seed in range(first, last + 1) for kind in KINDS]
     if args.jobs > 1:
         with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool:
             rows = [row for chunk in pool.map(run_job, jobs) for row in chunk]
     else:
         rows = [row for job in jobs for row in run_job(job)]
-    report = {"seeds": args.seeds, "summary": summarize(rows), "rows": rows}
+    report = {"seeds": args.seeds, "sustained_weeks": args.sustained, "summary": summarize(rows), "rows": rows}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, indent=1) + "\n")
     print(json.dumps(report["summary"], indent=1))

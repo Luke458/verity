@@ -86,3 +86,46 @@ def test_share_shift_ignores_common_movement_and_flags_leaf_shift():
     assert shifted[2] < 0.0
     # Too little aligned history is not evaluated rather than guessed.
     assert share_shift_test(weeks[:5], child[:5], weeks[:5], parent[:5], 300, 1000, 26) is None
+
+
+def _annual_shares(rng, weeks, noise):
+    """A share with its own annual cycle plus ``noise`` (one value per week)."""
+    return [0.3 * (1.0 + 0.1 * np.sin(2 * np.pi * week / 52)) + 0.006 * e for week, e in zip(weeks, noise, strict=True)]
+
+
+def test_sustained_window_sees_a_held_shift_one_week_cannot():
+    rng = np.random.default_rng(5)
+    weeks = list(range(1, 121))
+    share = _annual_shares(rng, [*weeks, 121], rng.standard_normal(121))
+    # The leaf's share drops 8% from week 117 on and stays there.
+    share = [s * (0.92 if week >= 117 else 1.0) for week, s in zip([*weeks, 121], share, strict=True)]
+    child = [1000.0 * s for s in share]
+    parent = [1000.0] * 120
+    single = share_shift_test(weeks, child[:-1], weeks, parent, child[-1], 1000.0, 26, target_week=121)
+    window = share_shift_test(weeks, child[:-1], weeks, parent, child[-1], 1000.0, 26, target_week=121, recent=5)
+    assert single is not None and window is not None
+    assert window.method == "seasonal"
+    assert single.p > 0.05 and window.p < 0.01
+    assert window.impact < 0.0
+    # A window reaching past the observed history is not evaluated.
+    assert share_shift_test(weeks[:-2], child[:-3], weeks, parent, child[-1], 1000.0, 26,
+                            target_week=121, recent=5) is None
+
+
+def test_sustained_window_allows_for_serial_correlation():
+    """On autocorrelated shares with no shift, the window test is not liberal."""
+    rng = np.random.default_rng(11)
+    rejections = 0
+    trials = 300
+    weeks = list(range(1, 121))
+    for _ in range(trials):
+        noise = np.zeros(121)
+        for i in range(1, 121):  # AR(1), rho = 0.6
+            noise[i] = 0.6 * noise[i - 1] + rng.standard_normal()
+        share = _annual_shares(rng, [*weeks, 121], noise)
+        child = [1000.0 * s for s in share]
+        tested = share_shift_test(weeks, child[:-1], weeks, [1000.0] * 120, child[-1], 1000.0, 26,
+                                  target_week=121, recent=4)
+        assert tested is not None
+        rejections += tested.p < 0.05
+    assert rejections / trials < 0.08

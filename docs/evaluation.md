@@ -443,6 +443,66 @@ with the weeks before them, and has not been built.
 
 Results: [`results/sequences-test.json`](results/sequences-test.json).
 
+## Sustained shifts: a multi-week window
+
+`temporal_sustained_weeks` (default 4) adds a second look at every
+share-tested leaf. The leaf's mean share over its latest four weeks is
+compared with the 26 weeks before them. The test is scaled by how much that
+same comparison has varied at past weeks of the leaf's own history, using the
+year-over-year baseline when its spread is smaller, as the single-week test
+does. The two looks share a Bonferroni correction (each leaf's p-value is
+twice the smaller of the two), so the refresh's false-alarm budget is
+unchanged; the single-week look gets slightly less sensitive.
+
+Development (seeds 6201-6206, `python -m experiments.sequences.run --sustained 4`):
+
+| Clean refreshes flagged, of 60 | `small` | `realistic` |
+|---|---|---|
+| No window | 1 | 2 |
+| AR(1)-corrected spread | 7 | 5 |
+| AR(1), year-over-year baseline only | 15 | 13 |
+| Empirical spread (kept) | 1 | 2 |
+
+The first two designs assumed shares are noise around a level, with
+week-to-week correlation at most. They are not: clean shares in this generator
+also wander slowly, and a mean over several weeks is far more exposed to that
+than one week is. False flags came in runs of consecutive refreshes. Measuring
+the spread on the leaf's own history counts the wander as noise.
+
+With the kept design, on `small`, the 3%-a-week decline was flagged in 7-9 of
+its 10 weeks in every sequence (1-4 weeks without the window), and the held
+10% step in 4-5 of its first 5 weeks (1-2 without). After about five weeks a
+step is inside the leaf's history, inflates the spread and stops being
+flagged. On `realistic` the window flagged nothing: the held step reached
+t ≈ −0.5 against the leaf's own history even with all 8 weeks of an 8-week
+window shifted. A 10% held drop is within this generator's natural share
+wander there.
+
+### Registered predictions (seeds 6311-6320 for sequences, 7201-7210 for the sweep)
+
+Each comparison runs the same seeds with the window off (`temporal_sustained_weeks: 1`)
+and on (4).
+
+1. **Clean sequences:** with the window on, at most 10/100 refreshes flagged per
+   profile, and at most 3 more than with it off.
+2. **Decline on `small`:** with the window on, the declining category is flagged
+   in at least 6 of its 10 weeks in at least 8/10 sequences; with it off, in at
+   most 2/10.
+3. **Step on `small`:** with the window on, flagged in at least 3 of its first 5
+   weeks in at least 8/10 sequences; with it off, in at most 2/10.
+4. **No gain on `realistic`:** with the window on, the step is ever flagged in at
+   most 3/10 sequences and the decline in at most 5/10 (the bounds registered
+   for the engine without it).
+5. **Cohort gate** passes with the window on: detection 72/72, clean false
+   positives at most 2/60.
+6. **Single-week cost** (`qc sweep --families market_movement --pairs none
+   --magnitudes 0.05,0.1,0.2,0.4`, 6 controls per seed, both profiles,
+   `realistic` with `restatement_weeks: 2`): with the window on, detection is at
+   most 1/10 lower than off at each magnitude, and clean false alarms at most
+   2/60 higher.
+
+If 5 or 6 fails, the default returns to 1.
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

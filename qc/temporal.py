@@ -1100,6 +1100,14 @@ class SeriesTemporalEvidence:
     # flag on its own, with 50% / 80% power (``decide_anomalies``).
     detectable_change: float | None = None
     detectable_change_80: float | None = None
+    # Sustained-shift window test (``temporal_sustained_weeks`` > 1): the mean
+    # share over the latest weeks against the weeks before them. When it runs,
+    # ``share_p`` is the Bonferroni combination of both tests.
+    sustained_weeks: int = 0
+    sustained_t: float | None = None
+    sustained_p: float | None = None
+    sustained_impact: float | None = None
+    sustained_decides: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1154,6 +1162,11 @@ class SeriesTemporalEvidence:
             "share_method": self.share_method,
             "share_spread": self.share_spread,
             "share_level": self.share_level,
+            "sustained_weeks": self.sustained_weeks,
+            "sustained_t": self.sustained_t,
+            "sustained_p": self.sustained_p,
+            "sustained_impact": self.sustained_impact,
+            "sustained_decides": self.sustained_decides,
             "detectable_change": self.detectable_change,
             "detectable_change_80": self.detectable_change_80,
         }
@@ -1211,7 +1224,7 @@ class TemporalResult:
 # or share-of-parent shift (leaves). Robust, seasonal and EWMA z-scores and
 # change points ignore trend, seasonality and multiplicity; they are reported
 # as evidence only.
-DECISION_FLAGS = frozenset({"forecast_lower", "forecast_upper", "share_shift"})
+DECISION_FLAGS = frozenset({"forecast_lower", "forecast_upper", "share_shift", "sustained_shift"})
 # A share shift needs this many trailing aligned observations to estimate the
 # leaf's own share variability.
 MIN_SHARE_HISTORY = 8
@@ -1322,8 +1335,8 @@ class ShareTest(NamedTuple):
     level: float = math.nan
 
 
-def _trailing_baseline(values: np.ndarray) -> tuple[float, float, int] | None:
-    """Mean, predictive sd and n of a trailing sample, or None if degenerate."""
+def _trailing_baseline(values: np.ndarray) -> tuple[float, float, int, int] | None:
+    """Mean, predictive sd, n and t degrees of freedom of a trailing sample, or None if degenerate."""
     n = len(values)
     if n < MIN_SHARE_HISTORY:
         return None
@@ -1333,7 +1346,39 @@ def _trailing_baseline(values: np.ndarray) -> tuple[float, float, int] | None:
         return None
     # Prediction interval for one new observation: the trailing mean is itself
     # estimated, so the spread is sd * sqrt(1 + 1/n) with n - 1 df.
-    return mean, sd * math.sqrt(1.0 + 1.0 / n), n
+    return mean, sd * math.sqrt(1.0 + 1.0 / n), n, n - 1
+
+
+def _window_baseline(series: np.ndarray, recent: int, size: int) -> tuple[float, float, int, int] | None:
+    """Baseline for the mean of the last ``recent`` values of ``series``: the mean of the ``size`` before them
+    and the empirical spread of that comparison.
+
+    Shares wander: besides week-to-week noise they drift slowly, and a mean
+    over several weeks is far more exposed to that drift than one week is. No
+    simple noise model captures it, so the spread is measured on the leaf's
+    own history instead: at every past origin with a full baseline behind it,
+    the mean of ``recent`` weeks minus the mean of the ``size`` weeks before
+    them. The root mean square of those differences is the spread (any
+    habitual drift counts against the test), and since neighbouring origins
+    overlap by ``recent`` - 1 weeks, the degrees of freedom are the number of
+    non-overlapping origins less one.
+    """
+    if len(series) < recent + size:
+        return None
+    sums = np.concatenate([[0.0], np.cumsum(series)])
+    differences = [  # past origins only: the window being tested is not its own yardstick
+        (sums[end] - sums[end - recent]) / recent - (sums[end - recent] - sums[end - recent - size]) / size
+        for end in range(recent + size, len(series))
+    ]
+    origins = len(differences)
+    df = origins // recent - 1
+    if df < 2:
+        return None
+    spread = math.sqrt(float(np.mean(np.square(differences))))
+    mean = float(series[-recent - size:-recent].mean())
+    if not math.isfinite(spread) or spread <= 1e-12 * max(abs(mean), 1e-12):
+        return None
+    return mean, spread, origins, df
 
 
 def share_shift_test(
@@ -1346,6 +1391,7 @@ def share_shift_test(
     window: int,
     target_week: int | None = None,
     season: int = 52,
+    recent: int = 1,
 ) -> ShareTest | None:
     """Test the leaf's share of its parent against its own history.
 
@@ -1359,15 +1405,25 @@ def share_shift_test(
       single comparison week would add. Needs that share and a full window of
       year-over-year history.
 
+    With ``recent`` > 1 the tested quantity is the mean over the target and
+    the ``recent`` - 1 weeks before it (all must be observed) against the
+    ``window`` weeks before them, scaled by how much that same comparison
+    has varied over the leaf's history (``_window_baseline``): a held or
+    gradual movement adds up over the window instead of being absorbed week
+    by week.
+
     The baseline with the smaller relative predictive spread is used. A common
     (market-wide) movement leaves shares unchanged and is not a leaf anomaly.
-    ``impact`` is the leaf movement attributable to the share change at the
-    parent's current level. Returns ``None`` when no baseline is available.
+    ``impact`` is the leaf movement per week attributable to the share change
+    at the parent's current level. Returns ``None`` when no baseline is available.
     """
     if not (math.isfinite(parent_actual) and parent_actual > 0.0):
         return None
     if not math.isfinite(child_actual):
         return None
+    recent = max(int(recent), 1)
+    if recent > 1 and target_week is None:
+        raise ValueError("a multi-week share test needs the target week")
     parent = {
         int(week_id): float(value)
         for week_id, value in zip(parent_weeks, parent_values, strict=True)
@@ -1378,22 +1434,32 @@ def share_shift_test(
         for week_id, value in zip(child_weeks, child_values, strict=True)
         if int(week_id) in parent and math.isfinite(float(value))
     }
-    weeks = sorted(share_by_week)
     observed = child_actual / parent_actual
+    start = int(target_week) - recent + 1 if target_week is not None else None
+    window_weeks = list(range(start, start + recent - 1)) if start is not None else []
+    if any(week not in share_by_week for week in window_weeks):
+        return None
+    weeks = sorted(week for week in share_by_week if start is None or recent == 1 or week < start)
     size = max(int(window), MIN_SHARE_HISTORY)
     candidates: list[tuple[float, ShareTest]] = []
+    recent_shares = [share_by_week[week] for week in window_weeks] + [observed]
+    current = sum(recent_shares) / recent
 
-    trailing = _trailing_baseline(
-        np.asarray([share_by_week[week] for week in weeks][-size:], dtype=float)
-    )
+    def baseline(values: list[float]) -> tuple[float, float, int, int] | None:
+        if recent == 1:
+            return _trailing_baseline(np.asarray(values[-size:], dtype=float))
+        return _window_baseline(np.asarray([*values, *recent_values], dtype=float), recent, size)
+
+    recent_values = recent_shares
+    trailing = baseline([share_by_week[week] for week in weeks])
     if trailing is not None:
-        mean, spread, n = trailing
-        t = (observed - mean) / spread
+        mean, spread, n, df = trailing
+        t = (current - mean) / spread
         candidates.append(
             (
                 spread / abs(mean) if mean else math.inf,
                 ShareTest(
-                    t, student_t_two_sided_p(t, n - 1), (observed - mean) * parent_actual, n, "trailing",
+                    t, student_t_two_sided_p(t, df), (current - mean) * parent_actual, n, "trailing",
                     spread / abs(mean) if mean else math.inf, mean,
                 ),
             )
@@ -1407,28 +1473,30 @@ def share_shift_test(
         ]
         return sum(values) / len(values) if values else None
 
-    last_year = year_ago(int(target_week)) if target_week is not None else None
-    if last_year is not None and observed > 0.0:
+    targets = window_weeks + ([int(target_week)] if target_week is not None else [])
+    found = [year_ago(week) for week in targets]
+    then = [value for value in found if value is not None]
+    if targets and len(then) == len(targets) and all(value > 0.0 for value in recent_shares):
+        recent_values = [math.log(now / before) for now, before in zip(recent_shares, then, strict=True)]
         pairs = [
             (share_by_week[week], year_ago(week))
             for week in weeks
             if share_by_week[week] > 0.0
         ]
-        changes = np.asarray(
-            [math.log(now / then) for now, then in pairs if then is not None][-size:],
-            dtype=float,
-        )
-        seasonal = _trailing_baseline(changes)
+        seasonal = baseline([math.log(now / before) for now, before in pairs if before is not None])
         if seasonal is not None:
-            mean, spread, n = seasonal
-            t = (math.log(observed / last_year) - mean) / spread
-            expected = last_year * math.exp(mean)
+            mean, spread, n, df = seasonal
+            change = sum(recent_values) / recent
+            t = (change - mean) / spread
+            # Last year's level carried forward by the usual change (for a
+            # window, the window's own level carried back by its change).
+            expected = then[0] * math.exp(mean) if recent == 1 else current * math.exp(mean - change)
             # Log units are already relative; compare spreads on one scale.
             candidates.append(
                 (
                     spread,
                     ShareTest(
-                        t, student_t_two_sided_p(t, n - 1), (observed - expected) * parent_actual, n, "seasonal", spread,
+                        t, student_t_two_sided_p(t, df), (current - expected) * parent_actual, n, "seasonal", spread,
                         expected,
                     ),
                 )
@@ -1470,6 +1538,30 @@ def _attach_share_tests(
             leaf.share_method = tested.method
             leaf.share_spread = float(tested.spread)
             leaf.share_level = float(tested.level)
+        recent = config.temporal_sustained_weeks
+        if tested is None or recent <= 1:
+            continue
+        sustained = share_shift_test(
+            item["train_weeks"],
+            item["train_values"],
+            parent_item["train_weeks"],
+            parent_item["train_values"],
+            leaf.adjusted_actual,
+            national.adjusted_actual,
+            window,
+            target_week=int(leaf.target_week),
+            season=config.temporal_season,
+            recent=recent,
+        )
+        if sustained is None:
+            continue
+        leaf.sustained_weeks = recent
+        leaf.sustained_t, leaf.sustained_p, leaf.sustained_impact = sustained.t, sustained.p, sustained.impact
+        # Two looks at one leaf: Bonferroni keeps the family's error rate.
+        leaf.share_p = min(1.0, 2.0 * min(tested.p, sustained.p))
+        if sustained.p < tested.p:
+            leaf.share_impact = sustained.impact
+            leaf.sustained_decides = True
 
 
 def decide_anomalies(
@@ -1514,6 +1606,8 @@ def decide_anomalies(
         if tested:
             material = abs(float(entry.share_impact or 0.0)) >= entry.materiality
             decided = "share_shift"
+            if entry.sustained_decides:
+                decided = "sustained_shift"
         else:
             material = (
                 entry.forecast_median == 0.0
@@ -1529,6 +1623,8 @@ def decide_anomalies(
             floor = entry.materiality / abs(entry.forecast_median) if entry.forecast_median else 0.0
             q = config.temporal_fdr_q
             family = len(series) if config.temporal_fdr_enabled else 1
+            # The single-week look pays for the window look (Bonferroni x2).
+            family *= 2 if entry.sustained_p is not None else 1
             entry.detectable_change, entry.detectable_change_80 = (
                 max(floor, detectable_change(
                     entry.share_spread, entry.share_n - 1, family, q, power, entry.share_method,

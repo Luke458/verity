@@ -182,6 +182,8 @@ class DatasetConfig:
             raise ValueError("temporal_interval_alpha must be in (0, 1)")
         if not 0 < self.temporal_fdr_q < 1:
             raise ValueError("temporal_fdr_q must be in (0, 1)")
+        if self.temporal_sustained_weeks < 1:
+            raise ValueError("temporal_sustained_weeks must be at least 1")
         if self.period_map:
             if len(dict(self.period_map)) != len(self.period_map) or any(type(v) is not int for _, v in self.period_map):
                 raise ValueError("period_map must have unique labels and integer indices")
@@ -269,6 +271,10 @@ class DatasetConfig:
     # on the synthetic small profile (40 clean + 45 fault refreshes, seeds
     # 3000-3039 disjoint from the cohort plan): 2/40 false alarms vs 3/40.
     temporal_fdr_q: float = 0.01
+    # Sustained-shift window: each leaf's mean share over its latest this many
+    # weeks is also tested against the weeks before them, so a held or gradual
+    # movement too small for one week is still seen. 1 disables it.
+    temporal_sustained_weeks: int = 4
     forecast_quantiles: tuple[float, ...] = (
         0.01,
         0.05,
