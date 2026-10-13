@@ -184,6 +184,8 @@ class DatasetConfig:
             raise ValueError("temporal_fdr_q must be in (0, 1)")
         if self.temporal_sustained_weeks < 1:
             raise ValueError("temporal_sustained_weeks must be at least 1")
+        if not 0 < self.temporal_sustained_share < 1:
+            raise ValueError("temporal_sustained_share must be in (0, 1)")
         if self.period_map:
             if len(dict(self.period_map)) != len(self.period_map) or any(type(v) is not int for _, v in self.period_map):
                 raise ValueError("period_map must have unique labels and integer indices")
@@ -278,6 +280,9 @@ class DatasetConfig:
     # one-week sensitivity beyond its registered bound (docs/evaluation.md,
     # "Sustained shifts: a multi-week window").
     temporal_sustained_weeks: int = 1
+    # The window's part of each leaf's error rate; the single-week look keeps
+    # the rest (weighted Bonferroni).
+    temporal_sustained_share: float = 0.5
     forecast_quantiles: tuple[float, ...] = (
         0.01,
         0.05,

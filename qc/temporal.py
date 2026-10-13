@@ -1102,7 +1102,7 @@ class SeriesTemporalEvidence:
     detectable_change_80: float | None = None
     # Sustained-shift window test (``temporal_sustained_weeks`` > 1): the mean
     # share over the latest weeks against the weeks before them. When it runs,
-    # ``share_p`` is the Bonferroni combination of both tests.
+    # ``share_p`` is the weighted Bonferroni combination of both tests.
     sustained_weeks: int = 0
     sustained_t: float | None = None
     sustained_p: float | None = None
@@ -1282,7 +1282,7 @@ def share_drop(leaf_drop: float, share: float) -> float:
 
 
 def detectable_change(
-    spread: float, df: int, tests: int, q: float, power: float, method: str, share: float = 0.0
+    spread: float, df: int, tests: float, q: float, power: float, method: str, share: float = 0.0
 ) -> float:
     """Smallest drop of the leaf's own value flagged with ``power`` as the refresh's only anomaly.
 
@@ -1557,9 +1557,13 @@ def _attach_share_tests(
             continue
         leaf.sustained_weeks = recent
         leaf.sustained_t, leaf.sustained_p, leaf.sustained_impact = sustained.t, sustained.p, sustained.impact
-        # Two looks at one leaf: Bonferroni keeps the family's error rate.
-        leaf.share_p = min(1.0, 2.0 * min(tested.p, sustained.p))
-        if sustained.p < tested.p:
+        # Two looks at one leaf: a weighted Bonferroni split of the leaf's
+        # error rate (``temporal_sustained_share`` to the window) keeps the
+        # family's rate.
+        share = config.temporal_sustained_share
+        week_p, window_p = tested.p / (1.0 - share), sustained.p / share
+        leaf.share_p = min(1.0, week_p, window_p)
+        if window_p < week_p:
             leaf.share_impact = sustained.impact
             leaf.sustained_decides = True
 
@@ -1622,9 +1626,9 @@ def decide_anomalies(
             # (lone anomaly, this family's size and q) and the materiality floor.
             floor = entry.materiality / abs(entry.forecast_median) if entry.forecast_median else 0.0
             q = config.temporal_fdr_q
-            family = len(series) if config.temporal_fdr_enabled else 1
-            # The single-week look pays for the window look (Bonferroni x2).
-            family *= 2 if entry.sustained_p is not None else 1
+            family = float(len(series) if config.temporal_fdr_enabled else 1)
+            if entry.sustained_p is not None:  # the single week's part of the leaf's error rate
+                family /= 1.0 - config.temporal_sustained_share
             entry.detectable_change, entry.detectable_change_80 = (
                 max(floor, detectable_change(
                     entry.share_spread, entry.share_n - 1, family, q, power, entry.share_method,

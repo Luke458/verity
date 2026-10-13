@@ -542,6 +542,49 @@ leaf's own history and stops counting as a shift.
 
 Results: [`results/sustained-window-test.json`](results/sustained-window-test.json).
 
+### Second attempt: a smaller share for the window
+
+The cost came from splitting each leaf's error rate equally between the two
+looks: the single-week p-value was doubled. `temporal_sustained_share` now sets
+the window's part (weighted Bonferroni: a leaf's p-value is the smaller of
+p_week / (1 − share) and p_window / share). The window's signals on `small`
+were far past its threshold, so it can give up most of its share.
+
+Development (sequences 6201-6206; one-week sweep 6001-6010, both profiles,
+5/10/20%): the sweep lost no detection at any share, 0.5 included, so it
+cannot choose. On the sequences, a 0.33 share flagged the `small` decline in
+7-9 of 10 weeks and the step in 4-5 of its first 5 (as at 0.5); 0.2 dropped the
+decline to 6-8. **0.33 is registered**: the single-week p-value pays ×1.5
+instead of ×2.
+
+**The acceptance test for the cost changes, after a failure, and that is
+stated here.** The first bound (at most 1/10 lower per magnitude, 10 seeds)
+turns on one or two cases at the threshold. What matters is how many one-week
+detections the window costs. This is counted directly as the paired loss
+(cases detected with the window off and missed with it on) over twice the
+seeds. The first test's loss at share 0.5 was 3 of 80 paired cases.
+
+Registered predictions, window `temporal_sustained_weeks: 4`,
+`temporal_sustained_share: 0.33`, against off; sequences 6321-6330, sweep
+7211-7230 (`market_movement`, 5/10/20/40%, `--pairs none`, 6 controls per
+seed, `realistic` with `restatement_weeks: 2`):
+
+1. **Clean sequences:** at most 10/100 refreshes flagged per profile, at most 3
+   more than off.
+2. **`small` decline** flagged in at least 6 of its 10 weeks in at least 8/10
+   sequences (off: at most 2/10).
+3. **`small` step** flagged in at least 3 of its first 5 weeks in at least
+   8/10 (off: at most 2/10).
+4. **`realistic`:** step ever flagged in at most 3/10, decline in at most 5/10.
+5. **Cohort gate** passes: 72/72, clean false positives at most 2/60.
+6. **One-week cost:** paired loss at most 4 of 160 cases (2.5%), over both
+   profiles and all magnitudes; sweep clean false alarms at most 2/120 higher
+   than off.
+
+If all hold, the default becomes `temporal_sustained_weeks: 4` with share
+0.33. If 5 or 6 fails, it stays off and the window is not tuned again on these
+data.
+
 ## Limits
 
 - The generator shares the engine authors' assumptions; generator bias is not

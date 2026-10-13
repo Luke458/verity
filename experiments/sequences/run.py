@@ -107,18 +107,19 @@ def build_sequence(profile: str, seed: int, kind: str, root: Path) -> dict[str, 
             "first_week": first}
 
 
-def run_job(job: tuple[str, int, str, str, int]) -> list[dict[str, Any]]:
+def run_job(job: tuple[str, int, str, str, int, float]) -> list[dict[str, Any]]:
     from qc.config import DatasetConfig
     from qc.weekly import run_weekly
     from qcgen.config import dataset_calendar
 
-    profile, seed, kind, workdir, sustained = job
-    root = Path(workdir) / f"{profile}-{seed}-{kind}-{sustained}"
+    profile, seed, kind, workdir, sustained, share = job
+    root = Path(workdir) / f"{profile}-{seed}-{kind}-{sustained}-{share}"
     shutil.rmtree(root, ignore_errors=True)
     try:
         built = build_sequence(profile, seed, kind, root / "data")
         rows = []
         config = replace(DatasetConfig(), name=f"seq-{profile}", temporal_sustained_weeks=sustained,
+                         temporal_sustained_share=share,
                          **dataset_calendar(profile), **PROFILES[profile])
         versions = built["versions"]
         for step, (previous, current) in enumerate(zip(versions, versions[1:], strict=False)):
@@ -168,16 +169,18 @@ def main() -> None:
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--workdir", default="reports/sequences-work")
     parser.add_argument("--sustained", type=int, default=1, help="temporal_sustained_weeks (1 = off)")
+    parser.add_argument("--sustained-share", type=float, default=0.5, help="temporal_sustained_share")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     first, last = (int(x) for x in args.seeds.split("-"))
-    jobs = [(profile, seed, kind, args.workdir, args.sustained) for profile in PROFILES for seed in range(first, last + 1) for kind in KINDS]
+    jobs = [(profile, seed, kind, args.workdir, args.sustained, args.sustained_share) for profile in PROFILES for seed in range(first, last + 1) for kind in KINDS]
     if args.jobs > 1:
         with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool:
             rows = [row for chunk in pool.map(run_job, jobs) for row in chunk]
     else:
         rows = [row for job in jobs for row in run_job(job)]
-    report = {"seeds": args.seeds, "sustained_weeks": args.sustained, "summary": summarize(rows), "rows": rows}
+    report = {"seeds": args.seeds, "sustained_weeks": args.sustained, "sustained_share": args.sustained_share,
+              "summary": summarize(rows), "rows": rows}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, indent=1) + "\n")
     print(json.dumps(report["summary"], indent=1))
