@@ -203,3 +203,77 @@ case is rerun.
    4 of 20.**
 6. **One week restated by 10%: at least 19 of 20. Broad recalculation: at
    least 19 of 20.**
+
+## Results (test weeks 142-241, engine `8c67828f00d8`)
+
+Five of six predictions held. **Prediction 1 failed: 30 of 100 clean real
+refreshes raised a false alarm, against at most 25 predicted** (Wilson 95%
+0.219-0.396). Results: [`results/favorita-test.json`](results/favorita-test.json).
+The run needed four restarts after worker crashes (it resumes per case).
+
+| | Result | Prediction | |
+|---|---|---|---|
+| Clean false alarms | **30/100** | at most 25 | **failed** |
+| Real-event alarms | 1 (store 18, week 190) | at most 2 | held |
+| Market movement 40% | 8/20 | 3 to 14 | held |
+| Market movement 20% / 10% / 5% | 3/20, 0/20, 0/20 | at most 6, 3, 2 | held |
+| One store missing | 18/20 | at least 15 | held |
+| 100 / 10 products missing | 20/20, 2/20 | at least 16; at most 4 | held |
+| One week restated / broad recalculation | 20/20, 20/20 | at least 19 each | held |
+
+**The rerun rule applied once.** Clean week 151 came back INCOMPLETE; rerun
+alone it is INCOMPLETE again, so it is deterministic and counts as a false
+alarm. It is an engine defect, found here and not fixed: BABY CARE sold the
+week before and nothing in week 151, and a leaf that vanishes in the new week
+is treated as a missing required observation. The dormant-series fix only
+covered leaves already absent the week before. A vanished leaf is the
+lifecycle checks' evidence, as a dormant one is (BABY CARE's absence is far
+below materiality).
+
+**Where the 30 false alarms came from:**
+
+- **Latest-week share tests, 25 refreshes.** 7 are the Christmas weeks
+  (155-156 in 2015, 204-208 in 2016), with up to seven families flagged at
+  once; the year-ago weeks are aligned (Christmas falls in weeks 104, 156 and
+  208), so the holiday mix simply moves more than the share spread allows.
+  8 are families with feed gaps of their own: MAGAZINES at +2,909% and
+  +773% in weeks 145-146 as it rebuilds after the gap, HOME AND KITCHEN II
+  and I, and SCHOOL AND OFFICE SUPPLIES at +307% to +849% in weeks 172-174
+  and 221-222 (consistent with the coastal school year starting in April).
+  In 2016 its year-ago weeks fell in the 2015 gap; in 2017 the season came
+  two to three weeks earlier than in 2016. Weeks 172-174 also carry
+  the 2016-04-16 earthquake: GROCERY I +65% at 172 and Manabi, the worst-hit
+  province, +176% at 173. 10 are other share movements (GROCERY II -54% and
+  -61% at 185-186, Loja -28% and +31%, among others).
+- **Product absences, 3** (weeks 161, 180, 223: 0.47-0.59% of the week
+  against 52-week maxima of 0.26-0.55%), about the 2 expected.
+- **The vanished leaf, 1** (week 151, above).
+- **A real closure counted as false, 1.** At week 191 store 25, the only
+  store in Santa Elena, goes dark; the alarm also carries a latest-week
+  finding, so the registered rule does not credit it.
+
+**A registration statement was wrong.** The registration said no store or
+province disappears in the test weeks. Store 18 is dark for weeks 190-204 and
+store 25 (with its province) for 191-199; the existence check behind that
+statement missed temporary gaps. It changed the count by at most one: week
+190 is the real-event alarm, week 191 a false alarm under the rule.
+
+**What held up.** Restatement, recalculation and 100-product outages were
+caught every time on a second retailer with fractional, units-only sales.
+One store missing was caught 18/20; both misses are the registered blindness
+of the absence baseline (store 15 at 1.03% of the week under store 12's 1.1%
+closure; store 14 at 0.92% under store 18's 1.23% at week 190). Normal
+product churn stayed separate from an outage (10 products 2/20, 100 products
+20/20).
+
+**What did not.** Department-level market movement transfers poorly: 40%
+drops were caught 8/20 (M5: 19/20), 2 of 7 before week 178 and 6 of 13 after,
+when the coverage gap has left the baselines. The misses are mostly small or
+erratic families (AUTOMOTIVE, PET SUPPLIES, HARDWARE, BABY CARE, MAGAZINES,
+HOME AND KITCHEN I). And the share tests' over-alarm, about 3x nominal on M5,
+is far worse here: 25 of 100 refreshes with a share flag, against about 1 at
+the nominal rate. On a feed with real coverage gaps and a moving holiday, a
+quarter of clean refreshes would need a person to look.
+
+**Not shown.** Favorita has no labelled pipeline faults, so these are
+injected faults in real noise. Weeks 126-141 (reserve) are unrun.

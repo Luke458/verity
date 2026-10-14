@@ -15,9 +15,9 @@ analyst judgement.
 ## Registered system result
 
 `qc cohort --plan config/cohort.json` (small profile, held-out seeds
-7101-7103, full engine, final status), engine code `ec1b5fe8ff34`
-(rerun 2026-10-14 after the M5 fixes and the 52-week price reference;
-unchanged since the share-test change of 2026-10-01):
+7101-7103, full engine, final status), engine code `8c67828f00d8`
+(rerun 2026-10-14 after the Favorita dev fixes; unchanged since the
+share-test change of 2026-10-01):
 
 | Measure | Result | Gate |
 |---|---|---|
@@ -47,6 +47,7 @@ share baseline (2026-10-01) added one.
 | Findings and final status | `validated-synthetic` | One status path (`policy.apply_policy`); nothing is cleared automatically. |
 | Rule cause labels | `validated-synthetic` | Cannot change status or review. Scored by `qc cohort` (reported, not gated): held-out cause accuracy 66/72 = 0.917 (Wilson 0.830-0.961), origin 66/66; on the `realistic` profile coding/warehouse errors are labelled correctly 54/54 and 60/60 (was 0/54, 0/60 before the lineage fix). Source-stage historical changes are labelled HISTORICAL_CORRECTION (the generator-less SOURCE_INGESTION label was removed): `recalculation` and `week_restatement` 60/60 on both profiles (`recalculation` was 0/60). `market_movement` is labelled UNKNOWN by design. `likely_causes` names every supported cause: on the labeller test split, single faults 236/260 exactly right and both causes of a two-fault refresh 51/80; on the sweeps, both causes of the four non-market pairs 38-40/40 per profile. A per-cause tree model is no longer significantly better on single faults and does not transfer across profiles; a zero-shot decision model (Decision-2.0-Lux-9B) ranks most causes well but gets 5/260 single faults exactly right, 168/260 at best with a written labelling policy and dev-tuned thresholds ([labeller-experiment.md](labeller-experiment.md)). Severity has no ground truth and is not scored. |
 | Real sales (M5) | `validated-real-sales` | Walmart's M5 data (10 stores, 3,049 products) as weekly refreshes, faults injected by the generator's single-stage injectors, engine defaults, registered before the test run ([real-data.md](real-data.md), [`results/m5-test.json`](results/m5-test.json)). Test weeks 178-277: clean false alarms **14/100** (predicted at most 6, **failed**: 9 from the price-per-unit check under real price inflation, 8 from latest-week share tests on real department movements, 1 product absence); store outage 20/20, 100-product outage 20/20, 10 products 0/20 (within normal churn, as predicted), one-week restatement 20/20, recalculation 20/20, department drop 40% 19/20, 20% 9/20, 10% 1/20. M5's own two releases: PASS. Dev on M5 found two defects, fixed before the test: single-stage feeds could not pass reconciliation, and product churn exceeded the absence floor every week (now judged against the feed's own 52-week baseline). After the test, the price check's reference became the 52 weeks before the assessed week; registered on unrun weeks 126-177 ([`results/m5-confirm.json`](results/m5-confirm.json)), all five predictions held: price check 0/52, clean false alarms 5/52 (4 share tests, 1 product absence), store and 100-product outages 13/13, restatement and recalculation 13/13, department drop 40% 12/13, 20% 5/13. The old reference would not have fired on those weeks either, so the fix's benefit rests on the spent test weeks (9 flags to 0, post hoc). |
+| Real sales, second retailer (Favorita) | `validated-real-sales` | Corporación Favorita (Ecuador; 54 stores, 33 families, 16 provinces, units only, no prices) as weekly refreshes, same injectors and scoring as M5, registered before the test run ([real-data-favorita.md](real-data-favorita.md), [`results/favorita-test.json`](results/favorita-test.json)). Dev exposed a real 12-20 week coverage gap (8 families, 605 items) and four defects, fixed before the test (dormant and new leaves not required; approved closures stand on later refreshes; the absence baseline leaves out approved absences; the market-movement injector picks only trading families); a simulated operator approves the gap. Test weeks 142-241: clean false alarms **30/100** (predicted at most 25, **failed**: 25 share flags, 3 product absences, 1 uncredited real store closure, 1 INCOMPLETE from a family vanishing in the new week, a defect found by the test); real-event alarms 1; store outage 18/20 (both misses the absence baseline's registered blindness after real closures), 100-product outage 20/20, 10 products 2/20, restatement 20/20, recalculation 20/20, department drop 40% 8/20, 20% 3/20, 10% and 5% 0/20. |
 | Weekly orchestrator and journal | `validated-synthetic` | Content-addressed identity, locking, fault injection at all five journal/publication seams (`tests/test_reliability.py`), atomic publication. |
 | Notification | `implemented-unmeasured` | Suppressed statuses and cached retries reach no sink; accumulating size bound; https-only webhooks without redirects. `tests/test_qc_notify.py`. Not measured: delivery depends on real endpoints, and there is no retry queue. |
 | Delta source and onboarding | `implemented-unmeasured` | delta-rs reads, config proposal, field mapping. `tests/test_qc_delta.py`, `tests/test_qc_onboard.py`, `tests/test_qc_mapping.py`. Not measured: only local Delta tables have been read; onboarding's proposals have never been scored against a real table. |
@@ -57,8 +58,10 @@ share baseline (2026-10-01) added one.
 ## Not claimed
 
 - Any detection rate, false-positive rate or alarm volume on real refreshes
-  from a real pipeline. The M5 test uses real sales but synthetic refreshes
-  and injected faults; real late arrival, revisions and outages remain untested.
+  from a real pipeline. The M5 and Favorita tests use real sales but
+  synthetic refreshes and injected faults; real late arrival and revisions
+  remain untested. Favorita's real coverage gap and store closures are the
+  only real incidents seen, and only as clean-refresh alarms.
 - Accuracy of the cause labels on anything but the generator's families.
 - Delivery guarantees for notifications (no retry queue).
 - Capacity beyond a single machine. `optional/scale_benchmark.py` last measured
@@ -77,6 +80,13 @@ share baseline (2026-10-01) added one.
   (4/52 on confirm), not about 1%: choosing the baseline with the smaller
   estimated spread runs about 3x nominal on M5, and the conservative
   alternative loses seasonal-category detection on synthetic data.
+- On a second retailer (Favorita) 30 of 100 clean test refreshes raised a
+  false alarm (predicted at most 25): 25 share flags (Christmas, families
+  rebuilding after feed gaps, the school season, the 2016 earthquake), 3
+  product absences, one real store closure not credited by the scoring rule,
+  and one engine defect: a family that vanishes in the new week makes the
+  refresh INCOMPLETE (found by the test, not fixed). With 49 latest-week leaves
+  and gap-laden share histories, a 40% department drop was caught 8/20.
 
 - On the `realistic` profile a single-commodity movement of 10% or less is
   within noise at the 1% false-alarm budget (2/20 detected at 10%). The engine
