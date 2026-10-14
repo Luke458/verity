@@ -1,0 +1,2503 @@
+{
+ "split": "confirm",
+ "weeks": [
+  126,
+  177
+ ],
+ "engine": "ec1b5fe8ff34",
+ "registered_in": "704476c",
+ "summary": {
+  "clean": {
+   "n": 52,
+   "false_alarms": 5,
+   "ci": [
+    0.0418,
+    0.2061
+   ],
+   "by_check": {
+    "historical_revision": 1,
+    "temporal": 4
+   }
+  },
+  "market_movement@0.05": {
+   "n": 13,
+   "detected": 0,
+   "flagged_any": 0,
+   "ci": [
+    0.0,
+    0.2281
+   ]
+  },
+  "market_movement@0.10": {
+   "n": 13,
+   "detected": 2,
+   "flagged_any": 4,
+   "ci": [
+    0.0433,
+    0.4223
+   ]
+  },
+  "market_movement@0.20": {
+   "n": 13,
+   "detected": 5,
+   "flagged_any": 6,
+   "ci": [
+    0.1771,
+    0.6448
+   ]
+  },
+  "market_movement@0.40": {
+   "n": 13,
+   "detected": 12,
+   "flagged_any": 12,
+   "ci": [
+    0.6669,
+    0.9863
+   ]
+  },
+  "missing_products@10": {
+   "n": 13,
+   "detected": 1,
+   "flagged_any": 4,
+   "ci": [
+    0.0137,
+    0.3331
+   ]
+  },
+  "missing_products@100": {
+   "n": 13,
+   "detected": 13,
+   "flagged_any": 13,
+   "ci": [
+    0.7719,
+    1.0
+   ]
+  },
+  "missing_stores": {
+   "n": 13,
+   "detected": 13,
+   "flagged_any": 13,
+   "ci": [
+    0.7719,
+    1.0
+   ]
+  },
+  "recalculation": {
+   "n": 13,
+   "detected": 13,
+   "flagged_any": 13,
+   "ci": [
+    0.7719,
+    1.0
+   ]
+  },
+  "week_restatement": {
+   "n": 13,
+   "detected": 13,
+   "flagged_any": 13,
+   "ci": [
+    0.7719,
+    1.0
+   ]
+  }
+ },
+ "records": [
+  {
+   "family": "clean",
+   "params": {},
+   "week": 126,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 127,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 128,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 129,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 130,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 131,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 132,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 133,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 134,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 135,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 136,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 137,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 138,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 139,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 140,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 141,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 142,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 143,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 144,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 145,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 146,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 147,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 148,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 149,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 150,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 151,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 152,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 153,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 154,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 155,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 156,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 157,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 158,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 159,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 160,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 161,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 162,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 163,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 164,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 165,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 166,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 167,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 168,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 169,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 170,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 171,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 172,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 173,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 174,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 175,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 176,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 177,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 126,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 130,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 134,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 138,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 142,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 146,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 150,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 154,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 158,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 162,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 166,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 170,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 174,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 127,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 131,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 135,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 139,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 143,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": false,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 147,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 151,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 155,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 159,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_1",
+     "units"
+    ],
+    [
+     "commodity_id:FOODS_3",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 163,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 167,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 171,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 175,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 128,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 132,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 136,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 140,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 144,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": false,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 148,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 152,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 156,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_3",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_3",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 160,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 164,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 168,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_1",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOBBIES_1",
+     "units"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 172,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 176,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 129,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOBBIES_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 133,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOBBIES_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 137,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_2",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 141,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_3",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 145,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOUSEHOLD_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 149,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 153,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 157,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 161,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 165,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 169,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 173,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_2",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 177,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_3",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_2",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_3",
+     "units"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 126,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 130,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 134,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 138,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 142,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 146,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:WI",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ],
+    [
+     "state_id:WI",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 150,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:WI",
+     "dollar"
+    ],
+    [
+     "commodity_id:HOUSEHOLD_1",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 154,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:WI",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:WI",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 158,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:WI",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 162,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:WI",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ],
+    [
+     "state_id:WI",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 166,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_2",
+     "units"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 170,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:WI",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ],
+    [
+     "state_id:WI",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 174,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:TX",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ],
+    [
+     "state_id:TX",
+     "units"
+    ],
+    [
+     "state_id:WI",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 127,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 131,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 135,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 139,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 143,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": false,
+   "anomalies": [
+    [
+     "commodity_id:HOBBIES_2",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 147,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 151,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": false,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 155,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 159,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "temporal"
+   ],
+   "detected": false,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ],
+    [
+     "commodity_id:FOODS_1",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 163,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 167,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 171,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 175,
+   "status": "PASS",
+   "review_checks": [],
+   "detected": false,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 128,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 132,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 136,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 140,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 144,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "commodity_id:FOODS_1",
+     "dollar"
+    ]
+   ]
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 148,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 152,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 156,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 160,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 164,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 168,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "detected": true,
+   "anomalies": [
+    [
+     "state_id:CA",
+     "dollar"
+    ],
+    [
+     "state_id:CA",
+     "units"
+    ]
+   ]
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 172,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 176,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 129,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 133,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 137,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 141,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 145,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 149,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 153,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 157,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 161,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 165,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 169,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 173,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 177,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "revision_week"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 126,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 130,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 134,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 138,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 142,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 146,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 150,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 154,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 158,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 162,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 166,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 170,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 174,
+   "status": "INVESTIGATE",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "detected": true,
+   "anomalies": []
+  }
+ ]
+}

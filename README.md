@@ -20,7 +20,9 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > explained only by a registry entry a person approved; they can be drafted
 > from free-text notices. On real Walmart sales (M5) with injected faults it
 > caught every store outage, product outage and restatement, but raised false
-> alarms on 14 of 100 clean refreshes, against 6 predicted
+> alarms on 14 of 100 clean refreshes, against 6 predicted. A fix to the price
+> check, registered on 52 unrun weeks, held there (5 of 52 clean refreshes
+> alarmed, none from the price check); the share tests still over-alarm
 > ([docs/real-data.md](docs/real-data.md)). The [case study](docs/case-study.md) tells how it
 > got here and [docs/claims.md](docs/claims.md) records the evidence.
 > Backends: local Parquet snapshots and Delta tables via delta-rs.
@@ -204,7 +206,7 @@ To reimplement the engine in another stack instead, treat
 | Fault-size sweep and realistic profile | validated on synthetic data |
 | Cohort evaluation | validated on synthetic data |
 | Notice drafting (`qc notices`) | validated on synthetic notices; drafts need approval |
-| Real sales (M5) | measured on real sales with injected faults; false alarms above prediction |
+| Real sales (M5) | measured on real sales with injected faults; false alarms above prediction on test, price check fixed and confirmed on fresh weeks; share tests still over-alarm |
 
 "Validated on synthetic data" means measured through the full engine against
 the generator's oracle; it is not a real-world accuracy claim. "Implemented,

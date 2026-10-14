@@ -171,9 +171,8 @@ refresh passed, with its 7 missing products recognised as normal churn.
 **Not shown.** M5 has no real pipeline faults and no real restatements, so
 these are injected faults in real noise, not real incidents. The refreshes
 append exactly one clean week; late-arriving data, real revisions and real
-outages remain untested. A fix to either false-alarm source needs fresh weeks:
-weeks 126-177 have not been run, and a second dataset (Favorita) would test
-transfer.
+outages remain untested. Weeks 126-177 were held back for a fix (below); a
+second dataset (Favorita) would test transfer.
 
 ## Second registration: the price reference (confirm weeks 126-177)
 
@@ -231,3 +230,31 @@ registering commit's.
    12/13. **10 products missing:** at most 4/13.
 5. **One week restated by 10%:** at least 12/13. **Broad recalculation:** at
    least 12/13.
+
+### Results (weeks 126-177, engine `ec1b5fe8ff34`)
+
+All five predictions held. Results:
+[`results/m5-confirm.json`](results/m5-confirm.json).
+
+| | Result | Prediction | |
+|---|---|---|---|
+| Price check, clean refreshes flagged | 0/52 | at most 1 | held |
+| Clean refreshes alarmed, all checks | 5/52 (Wilson 95% 0.042-0.206) | at most 8 | held |
+| Market movement 40% / 20% / 10% / 5% | 12/13, 5/13, 2/13, 0/13 | at least 8; 1-9; at most 3; at most 2 | held |
+| One store missing / 100 products missing | 13/13, 13/13 | at least 12 each | held |
+| 10 products missing | 1/13 | at most 4 | held |
+| One week restated / broad recalculation | 13/13, 13/13 | at least 12 each | held |
+
+The 5 clean alarms: 4 share tests (HOBBIES_2 units at week 143, FOODS_1 at
+144 and 151, CA at 168) and 1 product absence (week 155, 1.8% of the week
+against a 52-week maximum of 1.4%).
+
+**What this does and does not show.** On these weeks the old whole-history
+reference would not have flagged the price check either (largest |z| 2.69,
+computed after the run). So the confirm run shows the fix costs nothing on
+fresh weeks; it cannot show the benefit. The benefit is post hoc, on the
+spent test weeks: the old reference flags exactly the 9 test weeks it flagged
+in the run (194, 203-205, 212-215, 221) and the 52-week reference flags none.
+Its largest |z| there is 3.96, just under the cut of 4, so a steeper or
+faster price change than M5's would still trip it. The share tests' excess
+(4 of 52 here, 8 of 100 on test) is unchanged, as registered.
