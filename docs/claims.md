@@ -15,9 +15,9 @@ analyst judgement.
 ## Registered system result
 
 `qc cohort --plan config/cohort.json` (small profile, held-out seeds
-7101-7103, full engine, final status), engine code `4513c0f6a164`
-(rerun 2026-10-14 after the M5 fixes; unchanged since the share-test change
-of 2026-10-01):
+7101-7103, full engine, final status), engine code `ec1b5fe8ff34`
+(rerun 2026-10-14 after the M5 fixes and the 52-week price reference;
+unchanged since the share-test change of 2026-10-01):
 
 | Measure | Result | Gate |
 |---|---|---|

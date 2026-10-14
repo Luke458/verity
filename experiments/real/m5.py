@@ -59,7 +59,9 @@ CONFIG = replace(
 
 # Week index k is the refresh that appends week k. Annual baselines need 104
 # completed weeks, so the earliest assessed refresh appends week 106.
-SPLITS = {"dev": range(106, 126), "test": range(178, 278)}
+# ``confirm`` (weeks 126-177) was held back from the test and registered for
+# the price-reference fix (docs/real-data.md).
+SPLITS = {"dev": range(106, 126), "confirm": range(126, 178), "test": range(178, 278)}
 
 # (family, injector parameters, cut points per split): faults are injected at
 # every ``stride``-th cut point of the split.
@@ -74,7 +76,7 @@ FAULTS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("week_restatement", {"factor": 0.9}),
     ("recalculation", {"sigma": 0.004}),
 )
-FAULT_STRIDE = {"dev": 4, "test": 5}
+FAULT_STRIDE = {"dev": 4, "confirm": 4, "test": 5}
 
 
 def _sha256(path: Path) -> str:
@@ -299,7 +301,14 @@ def score(records: list[dict[str, Any]]) -> dict[str, Any]:
     for key, items in sorted(groups.items()):
         if key == "clean":
             alarms = sum(item["status"] != "PASS" for item in items)
-            summary[key] = {"n": len(items), "false_alarms": alarms, "ci": _wilson(alarms, len(items))}
+            by_check: dict[str, int] = {}
+            for item in items:
+                for check in item["review_checks"]:
+                    by_check[check] = by_check.get(check, 0) + 1
+            summary[key] = {
+                "n": len(items), "false_alarms": alarms, "ci": _wilson(alarms, len(items)),
+                "by_check": dict(sorted(by_check.items())),
+            }
         else:
             hits = sum(item["detected"] for item in items)
             flagged = sum(item["status"] != "PASS" for item in items)

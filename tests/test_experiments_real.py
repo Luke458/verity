@@ -63,3 +63,18 @@ def test_test_split_gives_each_fault_twenty_cut_points():
             sizes.setdefault((case["family"], str(case["params"])), []).append(case["week"])
     assert all(len(weeks) == 20 for weeks in sizes.values())
     assert all(178 <= case["week"] <= 277 for case in test)
+
+
+def test_splits_are_disjoint_and_confirm_gives_each_fault_thirteen_cut_points():
+    from experiments.real.m5 import SPLITS
+
+    weeks = [set(split) for split in SPLITS.values()]
+    assert sum(map(len, weeks)) == len(set().union(*weeks))
+    confirm = cases("confirm")
+    assert sum(case["family"] == "clean" for case in confirm) == 52
+    counts: dict[tuple[str, str], int] = {}
+    for case in confirm:
+        if case["family"] != "clean":
+            key = (case["family"], str(case["params"]))
+            counts[key] = counts.get(key, 0) + 1
+    assert set(counts.values()) == {13}

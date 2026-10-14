@@ -174,3 +174,60 @@ append exactly one clean week; late-arriving data, real revisions and real
 outages remain untested. A fix to either false-alarm source needs fresh weeks:
 weeks 126-177 have not been run, and a second dataset (Favorita) would test
 transfer.
+
+## Second registration: the price reference (confirm weeks 126-177)
+
+Weeks 126-177 were never run. They are spent here on one change, registered
+before they are run.
+
+**The change.** The dollar-per-unit check now takes its median and MAD from the
+52 observed weeks before the assessed week (`price_reference_weeks`, default
+52; 0 restores the whole history), so a sustained price rise moves the
+reference with it. 52 matches the absence baseline's year; it was not fitted.
+It was checked only on weeks whose reference window does not reach into
+126-177 (dev weeks 106-125 and test weeks 230-277, 68 refreshes): the largest
+robust |z| is 1.61 against the cut of 4. Shorter windows were worse (26
+weeks: 1 week above 4, 9 above 3; 13 weeks: 3 and 8): a window shorter than
+a year holds only part of the seasonal swing in product mix, so its MAD
+understates how far the next week can move.
+
+**Synthetic check.** Against the old whole-history reference
+(`price_reference_weeks: 0`), on the registered sweep seeds 5001-5010, every
+case of both profiles is identical (`small` and `realistic`, 640 cases each,
+the generator's prices are stationary), and the registered cohort is
+unchanged on engine `ec1b5fe8ff34` (72/72, 1/60, lineage 1.000, cause 0.917).
+
+**The share tests are not changed.** On the clean weeks whose baselines do not
+reach into 126-177 (106-125 and 258-277, 800 leaf tests), the selected share
+test gives p < 0.01 24 times against 8 expected; on test weeks 178-257, 63
+against 16. Taking whichever baseline (trailing or year-over-year) has the
+smaller estimated spread picks the luckier estimate, and the year-over-year
+spread itself runs small (t sd 1.38 and 1.24 where 1 is nominal). Requiring
+both baselines to call the share unusual is about nominal on M5 (4 against 8;
+11 against 16), but on the synthetic `realistic` profile (development seeds
+6001-6005) it cut detection of a 40% department drop from 5/5 to 1/5: a
+seasonal category's trailing baseline cannot see the drop, which is the blind
+spot the selection was added to close. That trade is not taken. The excess
+share false alarms stay a known limitation on real data.
+
+**Disclosure.** The price analysis used no statistic for any week in
+126-177. The share diagnosis tested weeks 178-257, whose training history
+includes weeks 126-177 as inputs; no week in 126-177 was tested. The
+churn quantiles disclosed above were computed over all weeks.
+
+### Predictions for weeks 126-177
+
+52 clean refreshes; each fault at every 4th week, 13 per fault and size, on
+its own weeks. Detection rules as before; engine code `ec1b5fe8ff34`, the
+registering commit's.
+
+1. **Price check:** flags at most 1 of 52 clean refreshes.
+2. **Clean false alarms, all checks:** at most 8 of 52. The share tests are
+   unchanged (8/100 on test, 0/20 on dev) and absences give about 2% by
+   construction.
+3. **Market movement:** 40%: at least 8/13; 20%: 1 to 9 of 13; 10%: at most
+   3/13; 5%: at most 2/13.
+4. **One store missing:** at least 12/13. **100 products missing:** at least
+   12/13. **10 products missing:** at most 4/13.
+5. **One week restated by 10%:** at least 12/13. **Broad recalculation:** at
+   least 12/13.

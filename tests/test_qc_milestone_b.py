@@ -203,6 +203,30 @@ def test_reconciliation_ratio_flags():
     assert not {1, 2, 3, 4, 5} & flagged_weeks
 
 
+def test_price_reference_trails_so_inflation_is_not_an_outlier():
+    # Price per unit is flat for 100 weeks, then rises 0.25% a week, with small
+    # alternating noise: against all earlier weeks the new week sits far above
+    # the flat years' median; against the last 52 it does not. A real price
+    # break is still caught.
+    ratios = [
+        10.0 * 1.0025 ** max(week - 100, 0) * (1.01 if week % 2 else 0.99) for week in range(1, 161)
+    ]
+    rows = [
+        {"week": week, "store_id": "S1", "banner_id": "B1", "state_id": "NSW", "product_id": "P1",
+         "dollar": ratio, "units": 1}
+        for week, ratio in enumerate([*ratios, ratios[-1] * 1.002], start=1)
+    ]
+    base = _fact(rows)
+    report = base.drop(columns=["store_id", "product_id"])
+    report["store_count"] = report["product_count"] = 1
+    whole = DatasetConfig(price_reference_weeks=0)
+    assert run_reconciliation(base, report, whole, periods=[161]).ratio_flags
+    assert not run_reconciliation(base, report, CONFIG, periods=[161]).ratio_flags
+    base.loc[base["week"] == 161, "dollar"] *= 2.0
+    report.loc[report["week"] == 161, "dollar"] *= 2.0
+    assert [flag["week"] for flag in run_reconciliation(base, report, CONFIG, periods=[161]).ratio_flags] == [161]
+
+
 def test_marker_scan_does_not_claim_parent_child_consistency():
     # A single frame cannot prove parent/child consistency: summing detail
     # rows always reproduces the total. The old tautological check is gone;

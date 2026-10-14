@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 
 # Integer settings with a nonzero default where 0 also means off.
-_ZERO_DISABLES = frozenset({"entity_absence_baseline_weeks"})
+_ZERO_DISABLES = frozenset({"entity_absence_baseline_weeks", "price_reference_weeks"})
 
 
 @dataclass(frozen=True)
@@ -97,6 +97,10 @@ class DatasetConfig:
         "subtotal",
     )
     price_outlier_k: float = 4.0
+    # Dollar-per-unit reference: the median/MAD of this many weeks before the
+    # assessed periods, so steady inflation is not an outlier (0: all earlier
+    # weeks). docs/real-data.md.
+    price_reference_weeks: int = 52
     null_fraction_limit: float = 0.01
     duplicate_fraction_limit: float = 0.005
     top_contributors: int = 10

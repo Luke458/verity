@@ -145,7 +145,8 @@ a detail column containing values such as `TOTAL` or `ALL` fails
 `hierarchy_markers:*` because aggregates mixed into detail rows double count.
 Failures set `RECONCILIATION_FAILURE` on the reconciliation section. Robust
 dollar-per-unit outliers (median/MAD with `price_outlier_k`) in the appended
-periods, measured against the weeks before them, are findings that a scoped,
+periods, measured against the `price_reference_weeks` (default 52; 0 for all)
+observed weeks before them, are findings that a scoped,
 approved ratio expectation can explain; historical weeks are never re-flagged
 on later refreshes.
 

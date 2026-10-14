@@ -209,9 +209,10 @@ def _ratio_flags(
     """Price outliers in the assessed periods against the prior-week reference.
 
     Only ``periods`` are tested (every week when ``None``), and the reference
-    median/MAD comes from weeks before the earliest assessed period, so a
-    historical outlier is not re-flagged on every later refresh and the tested
-    week cannot move its own reference.
+    median/MAD comes from the ``price_reference_weeks`` weeks before the
+    earliest assessed period (all of them when 0), so a historical outlier is
+    not re-flagged on every later refresh, the tested week cannot move its own
+    reference, and a steady price trend does not drift out of it.
     """
     week = config.week_column
     if "dollar" not in base.columns or "units" not in base.columns:
@@ -222,6 +223,8 @@ def _ratio_flags(
     if periods is not None:
         targets = {int(value) for value in periods}
         reference = ratios[[int(w) < min(targets) for w in ratios.index]] if targets else ratios.iloc[:0]
+        if config.price_reference_weeks:
+            reference = reference.iloc[-config.price_reference_weeks:]
         tested = ratios[[int(w) in targets for w in ratios.index]]
     else:
         reference = tested = ratios
