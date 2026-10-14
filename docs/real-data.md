@@ -171,8 +171,8 @@ refresh passed, with its 7 missing products recognised as normal churn.
 **Not shown.** M5 has no real pipeline faults and no real restatements, so
 these are injected faults in real noise, not real incidents. The refreshes
 append exactly one clean week; late-arriving data, real revisions and real
-outages remain untested. Weeks 126-177 were held back for a fix (below); a
-second dataset (Favorita) would test transfer.
+outages remain untested. Weeks 126-177 were held back for a fix (below). A
+second retailer, Favorita, tests transfer: [real-data-favorita.md](real-data-favorita.md).
 
 ## Second registration: the price reference (confirm weeks 126-177)
 

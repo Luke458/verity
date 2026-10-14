@@ -1,0 +1,2983 @@
+{
+ "dataset": "favorita",
+ "split": "dev",
+ "weeks": [
+  106,
+  125
+ ],
+ "engine": "8c67828f00d8",
+ "summary": {
+  "clean": {
+   "n": 20,
+   "false_alarms": 5,
+   "ci": [
+    0.1119,
+    0.4687
+   ],
+   "by_check": {
+    "temporal": 4
+   },
+   "real_event_alarms": 0,
+   "weeks_with_real_absences": 2
+  },
+  "market_movement@0.05": {
+   "n": 5,
+   "detected": 0,
+   "flagged_any": 2,
+   "ci": [
+    0.0,
+    0.4345
+   ]
+  },
+  "market_movement@0.10": {
+   "n": 5,
+   "detected": 0,
+   "flagged_any": 1,
+   "ci": [
+    0.0,
+    0.4345
+   ]
+  },
+  "market_movement@0.20": {
+   "n": 5,
+   "detected": 1,
+   "flagged_any": 2,
+   "ci": [
+    0.0362,
+    0.6245
+   ]
+  },
+  "market_movement@0.40": {
+   "n": 5,
+   "detected": 0,
+   "flagged_any": 1,
+   "ci": [
+    0.0,
+    0.4345
+   ]
+  },
+  "missing_products@10": {
+   "n": 5,
+   "detected": 0,
+   "flagged_any": 1,
+   "ci": [
+    0.0,
+    0.4345
+   ]
+  },
+  "missing_products@100": {
+   "n": 5,
+   "detected": 5,
+   "flagged_any": 5,
+   "ci": [
+    0.5655,
+    1.0
+   ]
+  },
+  "missing_stores": {
+   "n": 5,
+   "detected": 2,
+   "flagged_any": 5,
+   "ci": [
+    0.1176,
+    0.7693
+   ]
+  },
+  "recalculation": {
+   "n": 5,
+   "detected": 5,
+   "flagged_any": 5,
+   "ci": [
+    0.5655,
+    1.0
+   ]
+  },
+  "week_restatement": {
+   "n": 5,
+   "detected": 5,
+   "flagged_any": 5,
+   "ci": [
+    0.5655,
+    1.0
+   ]
+  }
+ },
+ "records": [
+  {
+   "family": "clean",
+   "params": {},
+   "week": 106,
+   "seed": 106,
+   "status": "PASS_WITH_EXPLANATION",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {
+    "commodity": [
+     "BABY CARE",
+     "CELEBRATION",
+     "HOME CARE",
+     "LADIESWEAR",
+     "MAGAZINES",
+     "PET SUPPLIES",
+     "PLAYERS AND ELECTRONICS",
+     "SCHOOL AND OFFICE SUPPLIES"
+    ]
+   }
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 107,
+   "seed": 107,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 3077.052375,
+     "expected_period_total": 3751970.2773749996,
+     "share": 0.0008201164048540401,
+     "threshold": 3751.9702773749996,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 108,
+   "seed": 108,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 29411.879625,
+     "expected_period_total": 3780047.733,
+     "share": 0.007780822281219591,
+     "threshold": 3780.047733,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 109,
+   "seed": 109,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 2,
+     "expected_lost": 5.5,
+     "expected_period_total": 3729992.2276250003,
+     "share": 1.4745339036542759e-06,
+     "threshold": 3729.9922276250004,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 110,
+   "seed": 110,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 9608.611625,
+     "expected_period_total": 3711848.734125,
+     "share": 0.0025886323267063447,
+     "threshold": 3711.848734125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 111,
+   "seed": 111,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 1546.96775,
+     "expected_period_total": 3639197.6317499997,
+     "share": 0.0004250848419177778,
+     "threshold": 3639.19763175,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:LIQUOR,WINE,BEER",
+     "metric": "units",
+     "adjusted_p": 1.1914590379576865e-05,
+     "relative_residual": 0.6678253789302268,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    },
+    {
+     "series": "state_id:Santa Elena",
+     "metric": "units",
+     "adjusted_p": 0.009956744790097923,
+     "relative_residual": 1.3693436489047612,
+     "flags": [
+      "robust_z",
+      "seasonal_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 112,
+   "seed": 112,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 3,
+     "expected_lost": 82.375,
+     "expected_period_total": 3438658.620875,
+     "share": 2.3955562061301358e-05,
+     "threshold": 3438.658620875,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "national",
+     "metric": "units",
+     "adjusted_p": 0.0035864493531468675,
+     "relative_residual": 0.24659584326599113,
+     "flags": [
+      "forecast_upper"
+     ]
+    },
+    {
+     "series": "state_id:Azuay",
+     "metric": "units",
+     "adjusted_p": 0.0035864493531468675,
+     "relative_residual": 0.35834358636995206,
+     "flags": [
+      "seasonal_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 113,
+   "seed": 113,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 3,
+     "expected_lost": 2706.25,
+     "expected_period_total": 3426743.207625,
+     "share": 0.0007897440327533741,
+     "threshold": 3426.7432076249997,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 114,
+   "seed": 114,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 115,
+   "seed": 115,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 116,
+   "seed": 116,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 1453.0,
+     "expected_period_total": 3454245.0857499996,
+     "share": 0.00042064183748690743,
+     "threshold": 3454.24508575,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 117,
+   "seed": 117,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 1697.25,
+     "expected_period_total": 3478588.5,
+     "share": 0.0004879134166056146,
+     "threshold": 3478.5885000000003,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 118,
+   "seed": 118,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 37748.569375,
+     "expected_period_total": 3439019.520125,
+     "share": 0.010976549901533543,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    },
+    "product": {
+     "entities": 1,
+     "expected_lost": 75.0,
+     "expected_period_total": 3439019.520125,
+     "share": 2.1808541522112076e-05,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Cotopaxi",
+     "metric": "units",
+     "adjusted_p": 5.1737415062396646e-05,
+     "relative_residual": -0.15963141866689706,
+     "flags": [
+      "robust_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {
+    "store": [
+     "S12"
+    ]
+   }
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 119,
+   "seed": 119,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 440.875,
+     "expected_period_total": 3503006.77425,
+     "share": 0.00012585616540647203,
+     "threshold": 3503.00677425,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 120,
+   "seed": 120,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 1979.625,
+     "expected_period_total": 3534719.561625,
+     "share": 0.0005600515021027344,
+     "threshold": 3534.719561625,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 121,
+   "seed": 121,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 7,
+     "expected_lost": 423.375,
+     "expected_period_total": 3534918.702,
+     "share": 0.00011976937397752917,
+     "threshold": 3534.918702,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 122,
+   "seed": 122,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 2,
+     "expected_lost": 4144.75,
+     "expected_period_total": 3482936.651125,
+     "share": 0.0011900159018571963,
+     "threshold": 3482.936651125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 123,
+   "seed": 123,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 957.16525,
+     "expected_period_total": 3532270.60575,
+     "share": 0.0002709773278530474,
+     "threshold": 3532.27060575,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 124,
+   "seed": 124,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 42.875,
+     "expected_period_total": 3565758.0752499998,
+     "share": 1.2024091117565226e-05,
+     "threshold": 3565.75807525,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "clean",
+   "params": {},
+   "week": 125,
+   "seed": 125,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 4,
+     "expected_lost": 44.75,
+     "expected_period_total": 3615354.839,
+     "share": 1.2377761517975303e-05,
+     "threshold": 3615.354839,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:HOME AND KITCHEN II",
+     "metric": "units",
+     "adjusted_p": 0.0012629425990504958,
+     "relative_residual": 2.4280701754385965,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "change_point",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 106,
+   "seed": 10600,
+   "status": "PASS_WITH_EXPLANATION",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "BREAD/BAKERY"
+    ]
+   },
+   "detected": false,
+   "real_absences": {
+    "commodity": [
+     "BABY CARE",
+     "CELEBRATION",
+     "HOME CARE",
+     "LADIESWEAR",
+     "MAGAZINES",
+     "PET SUPPLIES",
+     "PLAYERS AND ELECTRONICS",
+     "SCHOOL AND OFFICE SUPPLIES"
+    ]
+   }
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 110,
+   "seed": 11000,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 9608.611625,
+     "expected_period_total": 3711848.734125,
+     "share": 0.0025886323267063447,
+     "threshold": 3711.848734125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "PERSONAL CARE"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 114,
+   "seed": 11400,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "GROCERY I"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 118,
+   "seed": 11800,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 37748.569375,
+     "expected_period_total": 3439019.520125,
+     "share": 0.010976549901533543,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    },
+    "product": {
+     "entities": 1,
+     "expected_lost": 75.0,
+     "expected_period_total": 3439019.520125,
+     "share": 2.1808541522112076e-05,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Cotopaxi",
+     "metric": "units",
+     "adjusted_p": 4.2673073838040414e-05,
+     "relative_residual": -0.1800942087280328,
+     "flags": [
+      "robust_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "GROCERY I"
+    ]
+   },
+   "detected": false,
+   "real_absences": {
+    "store": [
+     "S12"
+    ]
+   }
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.95
+   },
+   "week": 122,
+   "seed": 12200,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 2,
+     "expected_lost": 4144.75,
+     "expected_period_total": 3482936.651125,
+     "share": 0.0011900159018571963,
+     "threshold": 3482.936651125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "GROCERY II"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 107,
+   "seed": 10701,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 3077.052375,
+     "expected_period_total": 3751970.2773749996,
+     "share": 0.0008201164048540401,
+     "threshold": 3751.9702773749996,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "HOME AND KITCHEN II"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 111,
+   "seed": 11101,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 1546.96775,
+     "expected_period_total": 3639197.6317499997,
+     "share": 0.0004250848419177778,
+     "threshold": 3639.19763175,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:LIQUOR,WINE,BEER",
+     "metric": "units",
+     "adjusted_p": 1.1895817275134105e-05,
+     "relative_residual": 0.6678253789302268,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    },
+    {
+     "series": "state_id:Santa Elena",
+     "metric": "units",
+     "adjusted_p": 0.009949375628022807,
+     "relative_residual": 1.3693147641484182,
+     "flags": [
+      "robust_z",
+      "seasonal_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "AUTOMOTIVE"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 115,
+   "seed": 11501,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "PREPARED FOODS"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 119,
+   "seed": 11901,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 440.875,
+     "expected_period_total": 3503006.77425,
+     "share": 0.00012585616540647203,
+     "threshold": 3503.00677425,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "LAWN AND GARDEN"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 123,
+   "seed": 12301,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 957.16525,
+     "expected_period_total": 3532270.60575,
+     "share": 0.0002709773278530474,
+     "threshold": 3532.27060575,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "DAIRY"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 108,
+   "seed": 10802,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 29411.879625,
+     "expected_period_total": 3780047.733,
+     "share": 0.007780822281219591,
+     "threshold": 3780.047733,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "HOME APPLIANCES"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 112,
+   "seed": 11202,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 3,
+     "expected_lost": 82.375,
+     "expected_period_total": 3438658.620875,
+     "share": 2.3955562061301358e-05,
+     "threshold": 3438.658620875,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "national",
+     "metric": "units",
+     "adjusted_p": 0.005461240763096065,
+     "relative_residual": 0.2377521481197693,
+     "flags": [
+      "forecast_upper"
+     ]
+    },
+    {
+     "series": "state_id:Azuay",
+     "metric": "units",
+     "adjusted_p": 0.005461240763096065,
+     "relative_residual": 0.3533076471850207,
+     "flags": [
+      "seasonal_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "MEATS"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 116,
+   "seed": 11602,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 1453.0,
+     "expected_period_total": 3454245.0857499996,
+     "share": 0.00042064183748690743,
+     "threshold": 3454.24508575,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "POULTRY"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 120,
+   "seed": 12002,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 1979.625,
+     "expected_period_total": 3534719.561625,
+     "share": 0.0005600515021027344,
+     "threshold": 3534.719561625,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:PREPARED FOODS",
+     "metric": "units",
+     "adjusted_p": 0.0035804510970622655,
+     "relative_residual": -0.250905140836929,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "PREPARED FOODS"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.8
+   },
+   "week": 124,
+   "seed": 12402,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 42.875,
+     "expected_period_total": 3565758.0752499998,
+     "share": 1.2024091117565226e-05,
+     "threshold": 3565.75807525,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "GROCERY II"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 109,
+   "seed": 10903,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 2,
+     "expected_lost": 5.5,
+     "expected_period_total": 3729992.2276250003,
+     "share": 1.4745339036542759e-06,
+     "threshold": 3729.9922276250004,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "FROZEN FOODS"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 113,
+   "seed": 11303,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 3,
+     "expected_lost": 2706.25,
+     "expected_period_total": 3426743.207625,
+     "share": 0.0007897440327533741,
+     "threshold": 3426.7432076249997,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "HOME AND KITCHEN I"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 117,
+   "seed": 11703,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 1697.25,
+     "expected_period_total": 3478588.5,
+     "share": 0.0004879134166056146,
+     "threshold": 3478.5885000000003,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "LINGERIE"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 121,
+   "seed": 12103,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 7,
+     "expected_lost": 423.375,
+     "expected_period_total": 3534918.702,
+     "share": 0.00011976937397752917,
+     "threshold": 3534.918702,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "LINGERIE"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "market_movement",
+   "params": {
+    "factor": 0.6
+   },
+   "week": 125,
+   "seed": 12503,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 4,
+     "expected_lost": 44.75,
+     "expected_period_total": 3615354.839,
+     "share": 1.2377761517975303e-05,
+     "threshold": 3615.354839,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:HOME AND KITCHEN II",
+     "metric": "units",
+     "adjusted_p": 0.0012342915965646252,
+     "relative_residual": 2.4280701754385965,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "change_point",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "commodities": [
+     "HOME AND KITCHEN I"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 106,
+   "seed": 10604,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 38699.203625,
+     "expected_period_total": 3713381.240625,
+     "share": 0.010421554135520577,
+     "threshold": 3713.3812406250004,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Manabi",
+     "metric": "units",
+     "adjusted_p": 2.3371308750524444e-06,
+     "relative_residual": 0.0808028157969236,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "change_point",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "stores": [
+     "S54"
+    ],
+    "banners": [
+     "Manabi"
+    ],
+    "states": [
+     "Manabi"
+    ]
+   },
+   "detected": false,
+   "real_absences": {
+    "commodity": [
+     "BABY CARE",
+     "CELEBRATION",
+     "HOME CARE",
+     "LADIESWEAR",
+     "MAGAZINES",
+     "PET SUPPLIES",
+     "PLAYERS AND ELECTRONICS",
+     "SCHOOL AND OFFICE SUPPLIES"
+    ]
+   }
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 110,
+   "seed": 11004,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 39146.884875,
+     "expected_period_total": 3711848.734125,
+     "share": 0.010546465569865998,
+     "threshold": 3711.848734125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    },
+    "product": {
+     "entities": 5,
+     "expected_lost": 9608.611625,
+     "expected_period_total": 3711848.734125,
+     "share": 0.0025886323267063447,
+     "threshold": 3711.848734125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Manabi",
+     "metric": "units",
+     "adjusted_p": 1.8805806873273047e-05,
+     "relative_residual": 0.17618455256359292,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "stores": [
+     "S53"
+    ],
+    "banners": [
+     "Manabi"
+    ],
+    "states": [
+     "Manabi"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 114,
+   "seed": 11404,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 48231.229125,
+     "expected_period_total": 3425082.300375,
+     "share": 0.014081772318206582,
+     "threshold": 3425.082300375,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:El Oro",
+     "metric": "units",
+     "adjusted_p": 1.3284245408904498e-14,
+     "relative_residual": -0.36163398912984623,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "stores": [
+     "S41"
+    ],
+    "banners": [
+     "El Oro"
+    ],
+    "states": [
+     "El Oro"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 118,
+   "seed": 11804,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 2,
+     "expected_lost": 104471.77350000001,
+     "expected_period_total": 3439019.520125,
+     "share": 0.03037836013684584,
+     "threshold": 3439.019520125,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    },
+    "product": {
+     "entities": 1,
+     "expected_lost": 75.0,
+     "expected_period_total": 3439019.520125,
+     "share": 2.1808541522112076e-05,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Azuay",
+     "metric": "units",
+     "adjusted_p": 2.6817412796222875e-08,
+     "relative_residual": -0.4292263373191877,
+     "flags": [
+      "robust_z",
+      "seasonal_z",
+      "ewma",
+      "share_shift"
+     ]
+    },
+    {
+     "series": "state_id:Cotopaxi",
+     "metric": "units",
+     "adjusted_p": 5.905417278845934e-05,
+     "relative_residual": -0.15963141866689706,
+     "flags": [
+      "robust_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "stores": [
+     "S39"
+    ],
+    "banners": [
+     "Azuay"
+    ],
+    "states": [
+     "Azuay"
+    ]
+   },
+   "detected": true,
+   "real_absences": {
+    "store": [
+     "S12"
+    ]
+   }
+  },
+  {
+   "family": "missing_stores",
+   "params": {
+    "n_stores": 1
+   },
+   "week": 122,
+   "seed": 12204,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 47718.025,
+     "expected_period_total": 3482936.651125,
+     "share": 0.013700514760894926,
+     "threshold": 3482.936651125,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.012125469926660247
+    },
+    "product": {
+     "entities": 2,
+     "expected_lost": 4144.75,
+     "expected_period_total": 3482936.651125,
+     "share": 0.0011900159018571963,
+     "threshold": 3482.936651125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Los Rios",
+     "metric": "units",
+     "adjusted_p": 2.8367110889246467e-07,
+     "relative_residual": -0.35332324218613537,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "stores": [
+     "S33"
+    ],
+    "banners": [
+     "Los Rios"
+    ],
+    "states": [
+     "Los Rios"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 107,
+   "seed": 10705,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 16,
+     "expected_lost": 19062.897125,
+     "expected_period_total": 3751970.2773749996,
+     "share": 0.005080769759811909,
+     "threshold": 3751.9702773749996,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1022053",
+     "I1057515",
+     "I108831",
+     "I1388574",
+     "I315277",
+     "I507870",
+     "I559680",
+     "I583925",
+     "I743496",
+     "I876225"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 111,
+   "seed": 11105,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 15,
+     "expected_lost": 8505.490375,
+     "expected_period_total": 3639197.6317499997,
+     "share": 0.0023371883683354455,
+     "threshold": 3639.19763175,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:LIQUOR,WINE,BEER",
+     "metric": "units",
+     "adjusted_p": 1.1380914725722342e-05,
+     "relative_residual": 0.6678253789302268,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "share_shift"
+     ]
+    },
+    {
+     "series": "state_id:Santa Elena",
+     "metric": "units",
+     "adjusted_p": 0.009905611418855105,
+     "relative_residual": 1.365063453748764,
+     "flags": [
+      "robust_z",
+      "seasonal_z",
+      "ewma",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1124973",
+     "I1160873",
+     "I1162761",
+     "I1386120",
+     "I471980",
+     "I514446",
+     "I743497",
+     "I770511",
+     "I819231",
+     "I987769"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 115,
+   "seed": 11505,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 10,
+     "expected_lost": 39083.121875,
+     "expected_period_total": 3447377.363875,
+     "share": 0.011337059378689222,
+     "threshold": 3447.377363875,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1018878",
+     "I1096235",
+     "I1230060",
+     "I1302670",
+     "I252970",
+     "I421066",
+     "I671908",
+     "I699703",
+     "I819932",
+     "I987308"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 119,
+   "seed": 11905,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 16,
+     "expected_lost": 13350.514,
+     "expected_period_total": 3503006.77425,
+     "share": 0.003811158487656185,
+     "threshold": 3503.00677425,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1239871",
+     "I1239956",
+     "I1314409",
+     "I1345981",
+     "I1369973",
+     "I557420",
+     "I572838",
+     "I838217",
+     "I850542",
+     "I890371"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 10
+   },
+   "week": 123,
+   "seed": 12305,
+   "status": "PASS",
+   "history_reason": "none",
+   "review_checks": [],
+   "missing_entities": {
+    "product": {
+     "entities": 16,
+     "expected_lost": 19487.26125,
+     "expected_period_total": 3532270.60575,
+     "share": 0.005516921953340069,
+     "threshold": 3532.27060575,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1045449",
+     "I1047690",
+     "I1047756",
+     "I111223",
+     "I1133955",
+     "I164037",
+     "I315753",
+     "I320681",
+     "I584125",
+     "I658608"
+    ]
+   },
+   "detected": false,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 108,
+   "seed": 10806,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 105,
+     "expected_lost": 179825.97100000002,
+     "expected_period_total": 3780047.733,
+     "share": 0.04757240746726835,
+     "threshold": 3780.047733,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1004545",
+     "I1010752",
+     "I1033395",
+     "I1047698",
+     "I1102975",
+     "I1104599",
+     "I1110679",
+     "I1112839",
+     "I1146497",
+     "I1146974",
+     "I1159597",
+     "I1160754",
+     "I1167754",
+     "I1168717",
+     "I1172015",
+     "I119193",
+     "I1221045",
+     "I122418",
+     "I1228950",
+     "I1229028",
+     "I1229584",
+     "I1239748",
+     "I1239782",
+     "I1239891",
+     "I1253470",
+     "I1253708",
+     "I1261376",
+     "I127534",
+     "I129758",
+     "I129759",
+     "I1303141",
+     "I1309297",
+     "I1312957",
+     "I1324851",
+     "I1333224",
+     "I1346636",
+     "I1349808",
+     "I1353189",
+     "I1353969",
+     "I1369876",
+     "I1370547",
+     "I1370565",
+     "I1372309",
+     "I1372862",
+     "I1387609",
+     "I1388521",
+     "I1392627",
+     "I155499",
+     "I165727",
+     "I168931",
+     "I208426",
+     "I210520",
+     "I223068",
+     "I226857",
+     "I265237",
+     "I269287",
+     "I273859",
+     "I308766",
+     "I319094",
+     "I354971",
+     "I358231",
+     "I363889",
+     "I368139",
+     "I372937",
+     "I418025",
+     "I461752",
+     "I507478",
+     "I513855",
+     "I514327",
+     "I557408",
+     "I570870",
+     "I573832",
+     "I575675",
+     "I578097",
+     "I587069",
+     "I587156",
+     "I660502",
+     "I679604",
+     "I698642",
+     "I716242",
+     "I736128",
+     "I740729",
+     "I743496",
+     "I764438",
+     "I802831",
+     "I841841",
+     "I843585",
+     "I849139",
+     "I849941",
+     "I895291",
+     "I913363",
+     "I915310",
+     "I938576",
+     "I949053",
+     "I957098",
+     "I958016",
+     "I968935",
+     "I987308",
+     "I987769",
+     "I996600"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 112,
+   "seed": 11206,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 102,
+     "expected_lost": 139795.473375,
+     "expected_period_total": 3438658.620875,
+     "share": 0.04065407148192794,
+     "threshold": 3438.658620875,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Azuay",
+     "metric": "units",
+     "adjusted_p": 0.007138104125202969,
+     "relative_residual": 0.30535962500665903,
+     "flags": [
+      "seasonal_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1014865",
+     "I1028589",
+     "I1036689",
+     "I1040170",
+     "I105857",
+     "I1078288",
+     "I1082578",
+     "I1083152",
+     "I1085486",
+     "I1134971",
+     "I1135438",
+     "I1146787",
+     "I1147731",
+     "I1148017",
+     "I115891",
+     "I115892",
+     "I1174923",
+     "I122418",
+     "I1229576",
+     "I1230417",
+     "I123347",
+     "I1239844",
+     "I1239867",
+     "I1239953",
+     "I1246758",
+     "I1248394",
+     "I1304243",
+     "I1304488",
+     "I1309672",
+     "I1325330",
+     "I1328672",
+     "I1345072",
+     "I1346625",
+     "I1349808",
+     "I1350565",
+     "I1351227",
+     "I1354712",
+     "I1369875",
+     "I1397060",
+     "I1404385",
+     "I165551",
+     "I172995",
+     "I179600",
+     "I205387",
+     "I215331",
+     "I215332",
+     "I227111",
+     "I264751",
+     "I275826",
+     "I302998",
+     "I305345",
+     "I308726",
+     "I310644",
+     "I323217",
+     "I368139",
+     "I368424",
+     "I378332",
+     "I378685",
+     "I409904",
+     "I411555",
+     "I417835",
+     "I458029",
+     "I464536",
+     "I470760",
+     "I508069",
+     "I514172",
+     "I527757",
+     "I557241",
+     "I557286",
+     "I557420",
+     "I559493",
+     "I559873",
+     "I578097",
+     "I578467",
+     "I581078",
+     "I663084",
+     "I671708",
+     "I700607",
+     "I740728",
+     "I749729",
+     "I759697",
+     "I765092",
+     "I781796",
+     "I789907",
+     "I793345",
+     "I804503",
+     "I819206",
+     "I830797",
+     "I833396",
+     "I833644",
+     "I838415",
+     "I841612",
+     "I849136",
+     "I872310",
+     "I888763",
+     "I913521",
+     "I913964",
+     "I968937",
+     "I979197",
+     "I996537"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 116,
+   "seed": 11606,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 103,
+     "expected_lost": 160256.43837499997,
+     "expected_period_total": 3454245.0857499996,
+     "share": 0.04639405554519431,
+     "threshold": 3454.24508575,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1047395",
+     "I1047752",
+     "I1047758",
+     "I1057498",
+     "I1081359",
+     "I1111202",
+     "I1119216",
+     "I1146787",
+     "I1154749",
+     "I1157699",
+     "I1159728",
+     "I1164290",
+     "I1166478",
+     "I1167188",
+     "I1179580",
+     "I1182733",
+     "I1224495",
+     "I1229025",
+     "I1229642",
+     "I1230440",
+     "I1239740",
+     "I1239749",
+     "I1239785",
+     "I1239857",
+     "I1239858",
+     "I1239879",
+     "I1242670",
+     "I1246758",
+     "I125430",
+     "I1260242",
+     "I1300325",
+     "I1306199",
+     "I1320701",
+     "I1328672",
+     "I1332103",
+     "I1354380",
+     "I1370574",
+     "I1372566",
+     "I1386894",
+     "I1388559",
+     "I1410792",
+     "I1418845",
+     "I155610",
+     "I165704",
+     "I170791",
+     "I172995",
+     "I174081",
+     "I214381",
+     "I260628",
+     "I268676",
+     "I310644",
+     "I320682",
+     "I371218",
+     "I407608",
+     "I409904",
+     "I414421",
+     "I414426",
+     "I464339",
+     "I472526",
+     "I502230",
+     "I554048",
+     "I557420",
+     "I559682",
+     "I567644",
+     "I572838",
+     "I575630",
+     "I583799",
+     "I583973",
+     "I584103",
+     "I598492",
+     "I633977",
+     "I637016",
+     "I660323",
+     "I660503",
+     "I679604",
+     "I688279",
+     "I696183",
+     "I741201",
+     "I765518",
+     "I765519",
+     "I770461",
+     "I781794",
+     "I812735",
+     "I816606",
+     "I819195",
+     "I829658",
+     "I838409",
+     "I841197",
+     "I843585",
+     "I847863",
+     "I858872",
+     "I862213",
+     "I866927",
+     "I906979",
+     "I913363",
+     "I930247",
+     "I964753",
+     "I968432",
+     "I985823",
+     "I988459"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 120,
+   "seed": 12006,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 105,
+     "expected_lost": 142418.48700000002,
+     "expected_period_total": 3534719.561625,
+     "share": 0.04029131152190377,
+     "threshold": 3534.719561625,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1010757",
+     "I1014864",
+     "I105693",
+     "I1057490",
+     "I1060036",
+     "I1079258",
+     "I1079331",
+     "I1082391",
+     "I1083154",
+     "I1084437",
+     "I1084881",
+     "I1089843",
+     "I1089844",
+     "I1091366",
+     "I1091369",
+     "I1092106",
+     "I1093340",
+     "I1104650",
+     "I1106968",
+     "I1113847",
+     "I1119217",
+     "I1124165",
+     "I1141956",
+     "I1146496",
+     "I1149579",
+     "I1156722",
+     "I1159598",
+     "I116311",
+     "I1171140",
+     "I1178697",
+     "I1225771",
+     "I1230327",
+     "I1230440",
+     "I1239794",
+     "I1239812",
+     "I1259007",
+     "I1304490",
+     "I1342003",
+     "I1345981",
+     "I1346624",
+     "I1372308",
+     "I1392262",
+     "I1398687",
+     "I1400330",
+     "I1418842",
+     "I1418844",
+     "I165553",
+     "I176411",
+     "I253103",
+     "I308726",
+     "I310644",
+     "I311954",
+     "I312324",
+     "I315713",
+     "I364832",
+     "I368260",
+     "I374464",
+     "I404332",
+     "I459804",
+     "I476261",
+     "I507457",
+     "I507479",
+     "I525887",
+     "I557420",
+     "I557810",
+     "I558730",
+     "I559493",
+     "I583925",
+     "I584028",
+     "I619969",
+     "I621300",
+     "I651326",
+     "I660318",
+     "I700609",
+     "I700610",
+     "I716245",
+     "I723210",
+     "I724003",
+     "I743496",
+     "I757880",
+     "I757889",
+     "I764438",
+     "I770463",
+     "I804503",
+     "I830797",
+     "I838216",
+     "I838406",
+     "I841197",
+     "I841607",
+     "I850388",
+     "I860548",
+     "I890374",
+     "I890375",
+     "I915821",
+     "I938570",
+     "I940590",
+     "I940591",
+     "I958016",
+     "I985824",
+     "I996613"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "missing_products",
+   "params": {
+    "n_products": 100
+   },
+   "week": 124,
+   "seed": 12406,
+   "status": "INVESTIGATE",
+   "history_reason": "missing_entities",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 100,
+     "expected_lost": 131155.89425,
+     "expected_period_total": 3565758.0752499998,
+     "share": 0.0367820506837959,
+     "threshold": 3565.75807525,
+     "material": true,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {
+    "products": [
+     "I1009997",
+     "I1012788",
+     "I1017349",
+     "I1047695",
+     "I1047699",
+     "I105577",
+     "I1065599",
+     "I1072173",
+     "I1079331",
+     "I1080756",
+     "I1084882",
+     "I1105212",
+     "I1109325",
+     "I1112839",
+     "I1114566",
+     "I1114754",
+     "I1119216",
+     "I1127860",
+     "I1146785",
+     "I1146796",
+     "I1148972",
+     "I1150362",
+     "I115894",
+     "I1160796",
+     "I1162933",
+     "I1165988",
+     "I1168717",
+     "I1176559",
+     "I1177984",
+     "I1228995",
+     "I1239294",
+     "I1239844",
+     "I1239871",
+     "I1239881",
+     "I1239905",
+     "I1239954",
+     "I1260241",
+     "I1282207",
+     "I1310081",
+     "I1345068",
+     "I1349806",
+     "I1369793",
+     "I1400328",
+     "I1402040",
+     "I1412204",
+     "I1456346",
+     "I1456995",
+     "I1457178",
+     "I1457185",
+     "I1457341",
+     "I1464256",
+     "I158789",
+     "I164088",
+     "I179564",
+     "I210798",
+     "I214860",
+     "I279157",
+     "I370042",
+     "I404334",
+     "I407552",
+     "I413557",
+     "I507927",
+     "I511172",
+     "I552050",
+     "I557257",
+     "I582864",
+     "I583795",
+     "I584026",
+     "I584028",
+     "I586824",
+     "I598414",
+     "I627887",
+     "I651525",
+     "I663084",
+     "I681606",
+     "I723210",
+     "I732007",
+     "I750855",
+     "I759651",
+     "I759894",
+     "I770456",
+     "I781796",
+     "I799461",
+     "I816679",
+     "I819934",
+     "I820006",
+     "I829658",
+     "I838217",
+     "I838832",
+     "I839367",
+     "I839544",
+     "I843607",
+     "I847569",
+     "I849095",
+     "I876225",
+     "I878715",
+     "I939129",
+     "I986193",
+     "I987768",
+     "I987769"
+    ]
+   },
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 109,
+   "seed": 10907,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "revision_week"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 2,
+     "expected_lost": 5.5,
+     "expected_period_total": 3729992.2276250003,
+     "share": 1.4745339036542759e-06,
+     "threshold": 3729.9922276250004,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [
+    106
+   ],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 113,
+   "seed": 11307,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "revision_week"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 3,
+     "expected_lost": 2706.25,
+     "expected_period_total": 3426743.207625,
+     "share": 0.0007897440327533741,
+     "threshold": 3426.7432076249997,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [
+    110
+   ],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 117,
+   "seed": 11707,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "revision_week"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 6,
+     "expected_lost": 1697.25,
+     "expected_period_total": 3478588.5,
+     "share": 0.0004879134166056146,
+     "threshold": 3478.5885000000003,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [
+    114
+   ],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 121,
+   "seed": 12107,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "revision_week"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 7,
+     "expected_lost": 423.375,
+     "expected_period_total": 3534918.702,
+     "share": 0.00011976937397752917,
+     "threshold": 3534.918702,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [
+    118
+   ],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "week_restatement",
+   "params": {
+    "factor": 0.9
+   },
+   "week": 125,
+   "seed": 12507,
+   "status": "INVESTIGATE",
+   "history_reason": "none",
+   "review_checks": [
+    "revision_week",
+    "temporal"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 4,
+     "expected_lost": 44.75,
+     "expected_period_total": 3615354.839,
+     "share": 1.2377761517975303e-05,
+     "threshold": 3615.354839,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [
+    {
+     "series": "commodity_id:HOME AND KITCHEN II",
+     "metric": "units",
+     "adjusted_p": 0.0012629425990504958,
+     "relative_residual": 2.4280701754385965,
+     "flags": [
+      "robust_z",
+      "ewma",
+      "change_point",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [
+    122
+   ],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 106,
+   "seed": 10608,
+   "status": "INVESTIGATE",
+   "history_reason": "unexplained_value_change",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {
+    "commodity": [
+     "BABY CARE",
+     "CELEBRATION",
+     "HOME CARE",
+     "LADIESWEAR",
+     "MAGAZINES",
+     "PET SUPPLIES",
+     "PLAYERS AND ELECTRONICS",
+     "SCHOOL AND OFFICE SUPPLIES"
+    ]
+   }
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 110,
+   "seed": 11008,
+   "status": "INVESTIGATE",
+   "history_reason": "unexplained_value_change",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 5,
+     "expected_lost": 9608.611625,
+     "expected_period_total": 3711848.734125,
+     "share": 0.0025886323267063447,
+     "threshold": 3711.848734125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 114,
+   "seed": 11408,
+   "status": "INVESTIGATE",
+   "history_reason": "unexplained_value_change",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {},
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 118,
+   "seed": 11808,
+   "status": "INVESTIGATE",
+   "history_reason": "unexplained_value_change",
+   "review_checks": [
+    "historical_revision",
+    "temporal"
+   ],
+   "missing_entities": {
+    "store": {
+     "entities": 1,
+     "expected_lost": 37748.569375,
+     "expected_period_total": 3439019.520125,
+     "share": 0.010976549901533543,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.02232921960025852
+    },
+    "product": {
+     "entities": 1,
+     "expected_lost": 75.0,
+     "expected_period_total": 3439019.520125,
+     "share": 2.1808541522112076e-05,
+     "threshold": 3439.019520125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.016078530508718016
+    }
+   },
+   "anomalies": [
+    {
+     "series": "state_id:Cotopaxi",
+     "metric": "units",
+     "adjusted_p": 5.1737415062396646e-05,
+     "relative_residual": -0.15963141866689706,
+     "flags": [
+      "robust_z",
+      "share_shift"
+     ]
+    }
+   ],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {
+    "store": [
+     "S12"
+    ]
+   }
+  },
+  {
+   "family": "recalculation",
+   "params": {
+    "sigma": 0.004
+   },
+   "week": 122,
+   "seed": 12208,
+   "status": "INVESTIGATE",
+   "history_reason": "unexplained_value_change",
+   "review_checks": [
+    "historical_revision"
+   ],
+   "missing_entities": {
+    "product": {
+     "entities": 2,
+     "expected_lost": 4144.75,
+     "expected_period_total": 3482936.651125,
+     "share": 0.0011900159018571963,
+     "threshold": 3482.936651125,
+     "material": false,
+     "baseline_weeks": 52,
+     "baseline_max": 0.01148560358768872
+    }
+   },
+   "anomalies": [],
+   "week_revisions": [],
+   "truth": {},
+   "detected": true,
+   "real_absences": {}
+  }
+ ]
+}

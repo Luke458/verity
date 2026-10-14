@@ -349,7 +349,10 @@ def inject_market_movement(
     fact = state["fact"]
     if "commodity_id" not in fact.columns:
         raise ValueError("market_movement requires a coded stage")
-    commodity = str(params.get("commodity_id") or _pick(ctx.rng, fact["commodity_id"].dropna()))
+    # Only a category that trades in the target week can move; one that has
+    # left the table would make the fault a no-op.
+    trading = fact.loc[fact["week"] == ctx.current_week, "commodity_id"].dropna()
+    commodity = str(params.get("commodity_id") or _pick(ctx.rng, trading))
     factor = float(params.get("factor", 0.8))
     mask = (fact["commodity_id"] == commodity) & (fact["week"] == ctx.current_week)
     new_fact = fact.copy()

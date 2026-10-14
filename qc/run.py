@@ -24,8 +24,11 @@ from .attribution import (
     WeekRevision,
     assess_history,
     explain_revision,
+    explained_closures,
     like_for_like,
+    standing_closures,
     week_revisions,
+    without_entities,
 )
 from .config import DatasetConfig
 from .contracts import ContractCheck, ContractResult, validate_contracts
@@ -442,7 +445,8 @@ def run_qc(
     # Approved closures and moves restate both versions like-for-like. An
     # absence that only follows from an approved closure (a product sold only
     # in the closed store) is not a further absence like-for-like.
-    temporal_previous, temporal_current, restatement = like_for_like(previous, current, events, attribution)
+    standing = standing_closures(current, approved_events, config, pair.current_max_week)
+    temporal_previous, temporal_current, restatement = like_for_like(previous, current, events, attribution, standing)
     absences = (
         classify_entity_changes(temporal_previous, temporal_current, pair, config)
         if restatement["excluded"]
@@ -455,7 +459,13 @@ def run_qc(
         config,
         reconstruction_score=counterfactual.reconciliation_score,
         absences=absences,
-        absence_baseline=absence_baseline(previous, config),
+        # Approved closures are changes, not churn: the baseline leaves out
+        # every entity an approval covered within its window, closed or not.
+        absence_baseline=absence_baseline(without_entities(temporal_previous, explained_closures(
+            approved_events, config,
+            None if pair.current_max_week is None else pair.current_max_week - config.entity_absence_baseline_weeks,
+            pair.current_max_week,
+        )), config),
     )
     historical_status = history["status"]
     try:

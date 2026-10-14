@@ -384,7 +384,7 @@ def collect_findings(
                         "temporal",
                         str(entry["series_id"]),
                         "UNAVAILABLE",
-                        required=result.temporal_required,
+                        required=result.temporal_required and bool(entry.get("required", True)),
                         metric=str(entry.get("metric", "")),
                         level=_series_level(str(entry["series_id"])),
                         period=entry.get("target_week"),

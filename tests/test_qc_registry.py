@@ -115,3 +115,36 @@ def test_a_category_emptied_by_an_approved_move_is_its_consequence():
     assert _move_consequences([move, shrunk], [_move()], CONFIG, 10) == {}
     # An unapproved move explains nothing.
     assert _move_consequences([move, emptied], [_move(approved_by=None)], CONFIG, 10) == {}
+
+
+def test_an_approved_closure_keeps_restating_later_refreshes_while_it_stands():
+    from qc.attribution import standing_closures
+
+    history = pd.DataFrame({
+        "store_id": ["S001", "S002", "S001", "S002", "S002"], "product_id": ["P1"] * 5,
+        "commodity_id": ["C01"] * 5, "week": [9, 9, 10, 10, 11], "dollar": [1.0, 2.0, 1.0, 2.0, 2.0],
+    })
+    # Week 11: S001 closed at week 10's refresh and is still absent; it is no
+    # longer "latest missing", but the approval still stands.
+    assert standing_closures(history, [_closure()], CONFIG, 11) == {"store:S001": "close"}
+    assert standing_closures(history, [_closure()], CONFIG, 13) == {}  # entry out of effect
+    reopened = pd.concat([history, history.iloc[[0]].assign(week=11)])
+    assert standing_closures(reopened, [_closure()], CONFIG, 11) == {}  # trading again
+    assert standing_closures(history, [_closure(confirmed=False)], CONFIG, 11) == {}  # not approved
+    previous, current, record = like_for_like(
+        history.loc[history["week"] <= 10], history, [], AttributionResult(), {"store:S001": "close"}
+    )
+    assert set(previous["store_id"]) == set(current["store_id"]) == {"S002"}
+    assert record["excluded"] == [{"entity": "store:S001", "approval_id": "close"}]
+
+
+def test_an_approved_closure_stays_out_of_the_absence_baseline_after_the_entity_returns():
+    from qc.attribution import explained_closures, without_entities
+
+    # S001 closed under an approval for weeks 10-12, then traded again.
+    assert explained_closures([_closure()], CONFIG, 1, 20) == {"store:S001": "close"}
+    assert explained_closures([_closure()], CONFIG, 13, 20) == {}  # approval ended before the window
+    assert explained_closures([_closure()], CONFIG, 1, 9) == {}  # and began after it
+    assert explained_closures([_closure(approved_by=None)], CONFIG, 1, 20) == {}
+    frame = pd.DataFrame({"store_id": ["S001", "S002"], "product_id": ["P1", "P1"]})
+    assert without_entities(frame, {"store:S001": "close", "state:X": "x"})["store_id"].tolist() == ["S002"]

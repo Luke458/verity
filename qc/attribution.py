@@ -523,30 +523,104 @@ def explain_revision(
     )
 
 
+def standing_closures(
+    current: pd.DataFrame,
+    registry: list[dict[str, Any]],
+    config: DatasetConfig,
+    latest_week: int | None,
+) -> dict[str, str]:
+    """Approved closures still in force: "type:id" -> approval.
+
+    A closure approved when the entity went missing stays in force while its
+    entry is in effect and the entity has no rows in the latest week, so later
+    refreshes keep comparing like-for-like instead of reading the closed
+    entity's history back into every baseline. An entity that trades again is
+    no longer closed.
+    """
+    week = config.week_column
+    if latest_week is None or week not in current.columns:
+        return {}
+    latest = current.loc[current[week] == latest_week]
+    standing: dict[str, str] = {}
+    for item in registry:
+        if not _usable(item, config) or item.get("classification") != LATEST_MISSING or not _in_effect(item, latest_week):
+            continue
+        column = f"{item.get('entity_type')}_id"
+        if column not in current.columns:
+            continue
+        trading = set(latest[column].astype(str))
+        for entity_id in (str(value) for value in item.get("entity_ids", [])):
+            if entity_id not in trading:
+                standing.setdefault(f"{item['entity_type']}:{entity_id}", str(item.get("event_id")))
+    return standing
+
+
+def explained_closures(
+    registry: list[dict[str, Any]],
+    config: DatasetConfig,
+    first_week: int | None,
+    last_week: int | None,
+) -> dict[str, str]:
+    """Entities an approved closure covered at some week from ``first_week`` to
+    ``last_week``: "type:id" -> approval.
+
+    Their absences in those weeks were explained, so they are no evidence of
+    how much the feed churns on its own, even once the entity trades again.
+    """
+    if first_week is None or last_week is None:
+        return {}
+    explained: dict[str, str] = {}
+    for item in registry:
+        start, end = item.get("effective_from_week"), item.get("effective_to_week")
+        if not _usable(item, config) or item.get("classification") != LATEST_MISSING:
+            continue
+        if type(start) is not int or type(end) is not int or start > last_week or end < first_week:
+            continue
+        for entity_id in (str(value) for value in item.get("entity_ids", [])):
+            explained.setdefault(f"{item.get('entity_type')}:{entity_id}", str(item.get("event_id")))
+    return explained
+
+
+def without_entities(frame: pd.DataFrame, entities: dict[str, str]) -> pd.DataFrame:
+    """``frame`` without the rows of the "type:id" entities it has a column for."""
+    by_column: dict[str, set[str]] = {}
+    for key in entities:
+        entity_type, entity_id = key.split(":", 1)
+        by_column.setdefault(f"{entity_type}_id", set()).add(entity_id)
+    for column, ids in sorted(by_column.items()):
+        if column in frame.columns:
+            frame = frame.loc[~frame[column].astype(str).isin(ids)]
+    return frame
+
+
 def like_for_like(
     previous: pd.DataFrame,
     current: pd.DataFrame,
     events: list[LifecycleEvent],
     attribution: AttributionResult,
+    standing: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Restate both versions so approved changes do not move the latest week.
 
     An approved closure removes the closed entities from every week, so the
-    latest week is compared with the history of the entities still trading.
-    An approved category move assigns the moved products' previous rows to
-    their new category, so both categories are compared on the current
-    mapping. Only changes the registry matched in this refresh are applied;
-    with no approvals the frames are returned unchanged.
+    latest week is compared with the history of the entities still trading:
+    those the registry matched in this refresh, and those whose earlier
+    approved closure still stands (``standing_closures``). An approved
+    category move assigns the moved products' previous rows to their new
+    category, so both categories are compared on the current mapping. With no
+    approvals the frames are returned unchanged.
     """
-    excluded: list[dict[str, str]] = []
     restated: list[dict[str, Any]] = []
-    for key, approval in attribution.matched_absences.items():
-        entity_type, entity_id = key.split(":", 1)
-        column = f"{entity_type}_id"
-        if column in previous.columns and column in current.columns:
-            previous = previous.loc[previous[column].astype(str) != entity_id]
-            current = current.loc[current[column].astype(str) != entity_id]
-            excluded.append({"entity": key, "approval_id": approval})
+    closures = {**(standing or {}), **attribution.matched_absences}
+    applicable = {
+        key: approval for key, approval in closures.items()
+        if f"{key.split(':', 1)[0]}_id" in previous.columns and f"{key.split(':', 1)[0]}_id" in current.columns
+    }
+    if applicable:
+        previous, current = without_entities(previous, applicable), without_entities(current, applicable)
+    excluded: list[dict[str, str]] = [
+        {"entity": key, "approval_id": approval} for key, approval in sorted(applicable.items())
+    ]
     if {"product_id", "commodity_id"} <= set(previous.columns):
         for event in events:
             moved_by = attribution.matched_moves.get(event.entity_id) if event.classification == RECLASSIFIED else None

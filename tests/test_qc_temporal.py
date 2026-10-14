@@ -442,3 +442,34 @@ def test_share_tested_leaves_report_what_they_could_detect(tmp_path):
     summary = result.temporal.to_dict()["sensitivity"]
     assert "commodity_id:dollar" in summary
     assert 0.0 < summary["commodity_id:dollar"]["median_detectable_change"] < 1.0
+
+
+def test_dormant_and_new_leaves_are_reported_but_not_required():
+    # Commodity C1 trades throughout; C2 stopped two weeks before the target
+    # (dormant); C3 appeared three weeks before it (new); C4 trades throughout
+    # but is absent from the target week only (missing: still required).
+    values = _noisy_values(60, seed=3)
+    rows = []
+    for week, value in values.items():
+        rows.append({"week": week, "commodity_id": "C1", "dollar": value, "units": 1})
+        if week <= 58:
+            rows.append({"week": week, "commodity_id": "C2", "dollar": value / 2, "units": 1})
+        if week >= 58:
+            rows.append({"week": week, "commodity_id": "C3", "dollar": value / 3, "units": 1})
+        rows.append({"week": week, "commodity_id": "C4", "dollar": value / 4, "units": 1})
+    current = _fact(rows + [{"week": 61, "commodity_id": c, "dollar": values[60] / d, "units": 1}
+                            for c, d in (("C1", 1), ("C3", 3))])
+    previous = current.loc[current["week"] <= 60]
+    config = replace(CONFIG, temporal_entity_columns=("commodity_id",))
+    pair = build_version_pair(previous, current, "V1", "V2", "warehouse", "warehouse", config)
+    result = run_temporal_qc(previous, current, pair, config)
+    reasons = {
+        entry["series_id"]: (entry["reason"], entry["required"])
+        for entry in result.unavailable
+        if entry["metric"] == "dollar"
+    }
+    assert reasons == {
+        "commodity_id:C2": ("dormant series", False),
+        "commodity_id:C3": ("new series", False),
+        "commodity_id:C4": ("missing target observation", True),
+    }

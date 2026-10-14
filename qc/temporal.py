@@ -1752,28 +1752,38 @@ def _run_single_target(
             if week_id == target and math.isfinite(value)
         ]
         series_key = str(series_id)
+        # A leaf the lifecycle no longer expects (absent last week too) or one
+        # that is newer than the history a test needs cannot be tested, but its
+        # absence or arrival is the lifecycle checks' evidence, not missing
+        # temporal evidence: it is reported, not required. The national series
+        # and established leaves stay required.
+        leaf = series_level(series_key) != "national"
         if (
             len(observed) < config.temporal_min_history
             or len(training) < config.temporal_min_history
         ):
+            new_leaf = leaf and bool(observed) and observed[0][0] > target - config.temporal_min_history
             unavailable_series.append(series_key)
             unavailable.append(
                 {
                     "series_id": series_key,
                     "metric": metric,
                     "target_week": target,
-                    "reason": "insufficient observed history",
+                    "reason": "new series" if new_leaf else "insufficient observed history",
+                    "required": not new_leaf,
                 }
             )
             continue
         if not actuals:
+            dormant = leaf and not any(week_id == pair.previous_max_week for week_id, _ in training)
             unavailable_series.append(series_key)
             unavailable.append(
                 {
                     "series_id": series_key,
                     "metric": metric,
                     "target_week": target,
-                    "reason": "missing target observation",
+                    "reason": "dormant series" if dormant else "missing target observation",
+                    "required": not dormant,
                 }
             )
             continue
