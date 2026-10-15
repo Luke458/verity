@@ -87,6 +87,12 @@ share baseline (2026-10-01) added one.
   and one engine defect: a family that vanished in the new week made the
   refresh INCOMPLETE (found by the test, since fixed; 28/100 post hoc). With 49 latest-week leaves
   and gap-laden share histories, a 40% department drop was caught 8/20.
+  Alternatives to the share tests' baseline choice were compared on the
+  spent weeks of both retailers; none beat the current rule on both at a
+  matched false-alarm rate. Each baseline alone already runs 3-4x nominal on
+  Favorita (real shares are heavier-tailed than the t interval), so the
+  share-test false alarms are a position on a trade-off curve
+  (`temporal_fdr_q`), not a defect with a known fix.
 
 - On the `realistic` profile a single-commodity movement of 10% or less is
   within noise at the 1% false-alarm budget (2/20 detected at 10%). The engine

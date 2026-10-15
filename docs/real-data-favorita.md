@@ -313,3 +313,67 @@ can test, such as one to the share tests.
 `realistic`, 640 cases each) are identical case for case to the registered
 engine's, and the registered cohort is unchanged (132 cases, 72/72, 1/60,
 lineage 1.000, cause 0.917).
+
+## The share tests on the spent weeks: no better rule found
+
+The latest-week share tests caused 25 of the 30 test false alarms here and
+about 8% of M5's clean refreshes. Before spending fresh weeks on a change,
+alternatives were compared on the spent weeks only (Favorita 106-125 and
+142-241, M5 106-277), with no engine change
+(`python -m experiments.real.share_rules`). The script runs the engine's
+share test for every province and family leaf, clean and with the family
+cut by 40%, and approximates the refresh decision (one BH family per
+refresh, the 2% materiality floor). On Favorita test weeks it flags the
+engine's 25 share-flagged refreshes and one more (week 215).
+
+**Diagnosis.** Choosing the baseline with the smaller spread is not the main
+cause. Each baseline on its own already gives far more leaf p-values below
+0.01 than the 1% a calibrated test would:
+
+| Leaf tests with p < 0.01 | Favorita (5,572; 56 expected) | M5 (3,440; 34 expected) |
+|---|---|---|
+| Engine (smaller spread) | 215 | 113 |
+| Trailing baseline only | 199 | 81 |
+| Year-over-year baseline only | 172 | 91 |
+| Larger p of the two | 54 | 18 |
+
+The chosen t has sd 1.34 on Favorita and 1.27 on M5, where about 1.04 is
+nominal. Real shares have heavier tails than the t interval allows:
+holidays, families rebuilding after feed gaps, the earthquake and real
+department moves.
+
+**Rules at matched false-alarm rates** (refreshes flagged / mean detection
+of a 40% family cut, at BH q = 0.01, 0.003, 0.001, 0.0003):
+
+| Rule | Favorita (120 refreshes) | M5 (172 refreshes) |
+|---|---|---|
+| Engine | 28 .43, 23 .37, 17 .32, 14 .27 | 12 .82, 7 .78, 7 .72, 5 .67 |
+| Year-over-year only | 24 .26, 18 .22, 12 .19, 10 .16 | 7 .80, 0 .75, 0 .69, 0 .63 |
+| Larger p of the two | 13 .18, 11 .14, 7 .12, 6 .10 | 1 .60, 0 .53, 0 .46, 0 .39 |
+| Per-leaf calibration | 15 .34, 10 .28, 8 .24, 7 .21 | 7 .71, 3 .65, 2 .58, 0 .51 |
+
+Per-leaf calibration divides the leaf's t by the root mean square of its own
+t at the 52 weeks before (in null units, never below 1), so a leaf whose
+share habitually moves more than the test allows gets a wider interval. On
+Favorita it beats the engine at the same alarm rate (15 flagged: .34
+against about .29; 10: .28 against about .21), because its leaves differ
+widely in how erratic they are. On M5, whose 10 leaves are steady, it loses
+(7 flagged: .71 against .78). The year-over-year baseline alone is best on
+M5 and worst on Favorita, whose year-ago weeks hold the coverage gaps. Two
+more variants did no better: 104 origins for the calibration (Favorita 17
+.33, 10 .28; M5 7 .71, 5 .64), and comparing with the single week a year
+earlier instead of the three-week mean, meant for the holiday weeks (engine
+rule: Favorita 32 .43, M5 16 .84; more alarms at the same detection).
+
+**Decision.** No rule beats the engine's on both retailers, so the engine is
+unchanged and the reserve weeks 126-141 stay unrun. On real feeds the share
+tests trade false alarms for detection along a curve, and the engine sits
+at q = 0.01 on it. `temporal_fdr_q` moves along that curve, and the right
+point depends on the feed: at q = 0.001 Favorita's spent weeks would have
+given 17 alarmed refreshes in 120 instead of 28, and caught 40% drops 0.32
+of the time instead of 0.43. That choice belongs to whoever runs the feed;
+it is not tuned here.
+
+**Disclosure.** No statistic was computed for a week in 126-141. Tests of
+weeks from 142 on use 126-141 as training history, as the registered test
+did.

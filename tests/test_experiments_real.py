@@ -184,3 +184,21 @@ def test_favorita_coverage_approvals_end_when_the_entity_trades_again():
     ends = {(e["entity_type"], tuple(e["entity_ids"])): e["effective_to_week"] for e in coverage_change_registry(weekly)}
     assert ends[("commodity", ("BACK",))] == COVERAGE_CHANGE_WEEK + 2
     assert ends[("commodity", ("GONE",))] == COVERAGE_CHANGE_WEEK + 5
+
+
+def test_share_rules_sees_the_engines_choice_and_both_baselines():
+    import numpy as np
+
+    from experiments.real.share_rules import _share_test
+    from qc.temporal import share_shift_test
+
+    rng = np.random.default_rng(4)
+    weeks = list(range(1, 121))
+    parent = [1000.0 + 50 * np.sin(week / 8) for week in weeks]
+    child = [value * (0.2 + 0.01 * rng.standard_normal()) for value in parent]
+    args = (weeks, child, weeks, parent, 150.0, 1000.0, 26)
+    for exact in (False, True):
+        chosen, candidates = _share_test(exact)(*args, target_week=121, season=52)
+        assert set(candidates) == {"trailing", "seasonal"}
+        assert chosen in candidates.values()
+    assert _share_test(False)(*args, target_week=121, season=52)[0] == share_shift_test(*args, target_week=121, season=52)
