@@ -277,3 +277,39 @@ quarter of clean refreshes would need a person to look.
 
 **Not shown.** Favorita has no labelled pipeline faults, so these are
 injected faults in real noise. Weeks 126-141 (reserve) are unrun.
+
+## After the test: the vanished-leaf fix (engine `df6b7cc9db6a`)
+
+**The change.** A leaf with no row in the new week is now reported and not
+required whether it was already absent the week before (dormant) or sold
+then (vanished); only the national series stays required. Its absence is
+the missing-entity check's evidence, which judges it on materiality, as it
+already did for dormant leaves (`qc/temporal.py`). The unit test that pinned
+the old behaviour (a vanished leaf required) was changed with it.
+
+**It cannot change a detection.** INVESTIGATE outranks INCOMPLETE, so the
+change alters a status only when nothing else fails, and no fault is credited
+through INCOMPLETE: store and product outages are credited only through a
+material absence, market movement through its family's share flag,
+restatement and recalculation through the revision checks.
+
+**Effect on the spent test weeks (post hoc).** In weeks 107-241 a province
+or family vanishes from the clean feed twice: BABY CARE at week 151 and
+Santa Elena (store 25's closure) at week 191. Rerun on the fixed engine,
+week 151 is PASS (it was the INCOMPLETE false alarm), and week 191's only
+remaining finding is the material province absence, so the registered rule
+now credits it as a real-event alarm. Apart from the status and the dropped
+temporal finding, both records are identical to the published ones. Clean false alarms would be 28/100 and real-event alarms 2,
+against the registered at most 25 and at most 2. This is post hoc: the
+registered result stays 30/100, failed.
+
+**Why the reserve weeks were not spent on it.** The plan was to confirm the
+fix on the unrun weeks 126-141, as the M5 price fix was confirmed. Nothing
+vanishes in those weeks' clean feed (an existence check, as before), so the
+run could not exercise the change; the weeks stay unrun for a change they
+can test, such as one to the share tests.
+
+**Synthetic check.** Synthetic sweeps (seeds 5001-5010, `small` and
+`realistic`, 640 cases each) are identical case for case to the registered
+engine's, and the registered cohort is unchanged (132 cases, 72/72, 1/60,
+lineage 1.000, cause 0.917).

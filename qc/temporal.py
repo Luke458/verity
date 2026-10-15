@@ -1752,11 +1752,12 @@ def _run_single_target(
             if week_id == target and math.isfinite(value)
         ]
         series_key = str(series_id)
-        # A leaf the lifecycle no longer expects (absent last week too) or one
-        # that is newer than the history a test needs cannot be tested, but its
-        # absence or arrival is the lifecycle checks' evidence, not missing
-        # temporal evidence: it is reported, not required. The national series
-        # and established leaves stay required.
+        # A leaf with no target observation (dormant, or vanished this week) or
+        # one newer than the history a test needs cannot be tested, but its
+        # absence or arrival is the lifecycle checks' evidence, judged there on
+        # materiality, not missing temporal evidence: it is reported, not
+        # required. The national series and established leaves with a target
+        # observation stay required.
         leaf = series_level(series_key) != "national"
         if (
             len(observed) < config.temporal_min_history
@@ -1775,15 +1776,22 @@ def _run_single_target(
             )
             continue
         if not actuals:
-            dormant = leaf and not any(week_id == pair.previous_max_week for week_id, _ in training)
+            traded_last_week = any(week_id == pair.previous_max_week for week_id, _ in training)
+            reason = (
+                "missing target observation"
+                if not leaf
+                else "vanished series"
+                if traded_last_week
+                else "dormant series"
+            )
             unavailable_series.append(series_key)
             unavailable.append(
                 {
                     "series_id": series_key,
                     "metric": metric,
                     "target_week": target,
-                    "reason": "dormant series" if dormant else "missing target observation",
-                    "required": not dormant,
+                    "reason": reason,
+                    "required": not leaf,
                 }
             )
             continue

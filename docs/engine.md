@@ -261,7 +261,11 @@ baseline. Series are built for every configured temporal measure (present
 measures are assessed, absent optional measures are reported and absent required
 measures yield INCOMPLETE) at the national level and for configured entity
 columns (banner, commodity); snapshot measures are compared within a period and
-never summed across time.
+never summed across time. An entity leaf that cannot be tested because it has
+no row in the new period (dormant, or vanished this week) or is younger than
+`temporal_min_history` is reported but not required: its absence or arrival is
+the missing-entity check's evidence, judged there on materiality. The national
+series stays required.
 
 Evidence per series:
 

@@ -444,10 +444,11 @@ def test_share_tested_leaves_report_what_they_could_detect(tmp_path):
     assert 0.0 < summary["commodity_id:dollar"]["median_detectable_change"] < 1.0
 
 
-def test_dormant_and_new_leaves_are_reported_but_not_required():
+def test_dormant_vanished_and_new_leaves_are_reported_but_not_required():
     # Commodity C1 trades throughout; C2 stopped two weeks before the target
     # (dormant); C3 appeared three weeks before it (new); C4 trades throughout
-    # but is absent from the target week only (missing: still required).
+    # but is absent from the target week only (vanished). Each absence or
+    # arrival is the lifecycle checks' evidence, so none is required here.
     values = _noisy_values(60, seed=3)
     rows = []
     for week, value in values.items():
@@ -471,5 +472,5 @@ def test_dormant_and_new_leaves_are_reported_but_not_required():
     assert reasons == {
         "commodity_id:C2": ("dormant series", False),
         "commodity_id:C3": ("new series", False),
-        "commodity_id:C4": ("missing target observation", True),
+        "commodity_id:C4": ("vanished series", False),
     }
