@@ -42,7 +42,11 @@ from experiments.real.m5 import (
     _sha256,
     _summary,
     _wilson,
+    add_share_arguments,
     score,
+    share_settings,
+    share_tag,
+    worker_threads,
 )
 from qc.config import DatasetConfig
 
@@ -254,7 +258,7 @@ def score_favorita(records: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
-def run_case(weekly_path: str, case: dict[str, Any]) -> dict[str, Any]:
+def run_case(weekly_path: str, case: dict[str, Any], share: dict[str, str] | None = None) -> dict[str, Any]:
     from qc.run import run_qc
     from qcgen.faults import INJECTORS, FaultContext
 
@@ -280,7 +284,7 @@ def run_case(weekly_path: str, case: dict[str, Any]) -> dict[str, Any]:
     products = weekly[["product_id", "commodity_id"]].drop_duplicates("product_id")
     source = FrameSource({f"W{week - 1:04d}": previous, f"W{week:04d}": current}, products)
     result = run_qc(
-        source, f"W{week:04d}", f"W{week - 1:04d}", CONFIG, registry=_registry(weekly),
+        source, f"W{week:04d}", f"W{week - 1:04d}", replace(CONFIG, **(share or {})), registry=_registry(weekly),
         observed_at="2030-01-01T00:00:00+00:00",
     )
     return {**_summary(result, case, truth), "real_absences": real_absences(weekly, week)}
@@ -290,11 +294,16 @@ def _case_name(case: dict[str, Any]) -> str:
     return f"{case['week']:04d}-{case['family']}-{case['seed']}.json"
 
 
-def run(weekly_path: str, split: str, jobs: int, out: Path) -> dict[str, Any]:
+def run(
+    weekly_path: str, split: str, jobs: int, out: Path, share: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Run every case of ``split``; each record is kept in ``<out>.work`` so a
     crashed worker (this table is large) costs one case, and a rerun resumes."""
     from qc.cohort import code_sha256
 
+    share = share or {}
+    if share:
+        worker_threads(jobs)
     engine = code_sha256()[:12]
     # Cached records are valid only for this engine, adapter and fault injectors.
     import qcgen.faults
@@ -303,12 +312,14 @@ def run(weekly_path: str, split: str, jobs: int, out: Path) -> dict[str, Any]:
         path.read_bytes() for path in (
             Path(__file__), Path(__file__).with_name("m5.py"), Path(qcgen.faults.__file__))
     )).hexdigest()[:12]
-    work = out.with_suffix(".work") / f"{engine}-{adapter}"
+    # The engine-baseline cache keeps its existing name; others are labelled.
+    suffix = "" if not share else f"-{share_tag(share)}"
+    work = out.with_suffix(".work") / f"{engine}-{adapter}{suffix}"
     work.mkdir(parents=True, exist_ok=True)
     todo = [case for case in cases(split) if not (work / _case_name(case)).exists()]
     context = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=jobs, mp_context=context) as pool:
-        futures = {pool.submit(run_case, weekly_path, case): case for case in todo}
+        futures = {pool.submit(run_case, weekly_path, case, share): case for case in todo}
         for future in as_completed(futures):
             (work / _case_name(futures[future])).write_text(json.dumps(future.result(), default=str))
     records = [json.loads((work / _case_name(case)).read_text()) for case in cases(split)]
@@ -318,6 +329,7 @@ def run(weekly_path: str, split: str, jobs: int, out: Path) -> dict[str, Any]:
         "split": split,
         "weeks": [SPLITS[split].start, SPLITS[split].stop - 1],
         "engine": engine,
+        "share_baseline": share or {"share_baseline": "engine"},
         "summary": score_favorita(records),
         "records": records,
     }
@@ -337,11 +349,13 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--split", choices=sorted(SPLITS), required=True)
     r.add_argument("--jobs", type=int, default=4)
     r.add_argument("--out", type=Path, required=True)
+    add_share_arguments(r)
     args = parser.parse_args(argv)
     if args.command == "build":
         print(json.dumps(build(args.raw, args.out), indent=1))
     else:
-        print(json.dumps(run(args.weekly, args.split, args.jobs, args.out)["summary"], indent=1))
+        share = share_settings(args.share_baseline, args.share_model, args.share_revision)
+        print(json.dumps(run(args.weekly, args.split, args.jobs, args.out, share)["summary"], indent=1))
     return 0
 
 

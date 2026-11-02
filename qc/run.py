@@ -251,6 +251,12 @@ def _finalize(
     }
     result.machine["statistical"] = {
         "forecaster": config.forecaster,
+        "share_baseline": config.share_baseline,
+        **(
+            {"share_model": config.share_model, "share_model_revision": config.share_model_revision}
+            if config.share_baseline == "timestral"
+            else {}
+        ),
         "min_annual_history": config.temporal_min_annual_history,
         "interval_alpha": config.temporal_interval_alpha,
         "calibration_origins": config.temporal_calibration_origins,

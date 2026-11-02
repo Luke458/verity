@@ -1506,6 +1506,54 @@ def share_shift_test(
     return min(candidates, key=lambda item: item[0])[1]
 
 
+def _pretrained_share_tests(
+    evidence: Sequence[SeriesTemporalEvidence],
+    items: dict[str, dict[str, Any]],
+    national: SeriesTemporalEvidence,
+    parent_item: dict[str, Any],
+    config: DatasetConfig,
+) -> dict[str, ShareTest]:
+    """Score every leaf's share against one batched pretrained forecast (``share_baseline: timestral``)."""
+    from . import share_model
+
+    parent_actual = float(national.adjusted_actual)
+    if not (math.isfinite(parent_actual) and parent_actual > 0.0):
+        return {}
+    leaves = [
+        leaf
+        for leaf in evidence
+        if leaf.level != "national"
+        and leaf.series_id in items
+        and math.isfinite(float(leaf.adjusted_actual))
+    ]
+    built = share_model.share_rows(
+        [(items[leaf.series_id]["train_weeks"], items[leaf.series_id]["train_values"]) for leaf in leaves],
+        parent_item["train_weeks"],
+        parent_item["train_values"],
+    )
+    if built is None:
+        return {}
+    rows, counts, last_week = built
+    keep = [index for index, count in enumerate(counts) if count >= MIN_SHARE_HISTORY]
+    if not keep:
+        return {}
+    horizon = max(1, int(national.target_week) - last_week)
+    model = share_model.load_share_model(config.share_model, config.share_model_revision)
+    quantiles, levels = model.forecast(rows[keep], horizon)
+    tests: dict[str, ShareTest] = {}
+    for position, index in enumerate(keep):
+        leaf = leaves[index]
+        observed = float(leaf.adjusted_actual) / parent_actual
+        scored = share_model.quantile_p(observed, quantiles[position], levels)
+        if scored is None:
+            continue
+        z, p, median, relative = scored
+        tests[leaf.series_id] = ShareTest(
+            z, p, (observed - median) * parent_actual, counts[index], "timestral", relative, median
+        )
+    return tests
+
+
 def _attach_share_tests(
     evidence: list[SeriesTemporalEvidence],
     pending: Sequence[dict[str, Any]],
@@ -1518,21 +1566,32 @@ def _attach_share_tests(
     if national is None or parent_item is None:
         return
     window = max(config.temporal_window * 2, MIN_SHARE_HISTORY)
+    pretrained = (
+        _pretrained_share_tests(evidence, items, national, parent_item, config)
+        if config.share_baseline == "timestral"
+        else None
+    )
     for leaf in evidence:
         item = items.get(leaf.series_id)
         if leaf.level == "national" or item is None:
             continue
-        tested = share_shift_test(
-            item["train_weeks"],
-            item["train_values"],
-            parent_item["train_weeks"],
-            parent_item["train_values"],
-            leaf.adjusted_actual,
-            national.adjusted_actual,
-            window,
-            target_week=int(leaf.target_week),
-            season=config.temporal_season,
-        )
+        if pretrained is not None:
+            # The pretrained forecast replaces the single-week baselines; a
+            # leaf it cannot score falls back to its forecast p-value, as an
+            # untestable leaf does under the engine baselines.
+            tested = pretrained.get(leaf.series_id)
+        else:
+            tested = share_shift_test(
+                item["train_weeks"],
+                item["train_values"],
+                parent_item["train_weeks"],
+                parent_item["train_values"],
+                leaf.adjusted_actual,
+                national.adjusted_actual,
+                window,
+                target_week=int(leaf.target_week),
+                season=config.temporal_season,
+            )
         if tested is not None:
             leaf.share_t, leaf.share_p, leaf.share_impact, leaf.share_n = tested[:4]
             leaf.share_method = tested.method

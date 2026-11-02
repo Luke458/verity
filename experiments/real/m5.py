@@ -28,6 +28,7 @@ import argparse
 import hashlib
 import json
 import multiprocessing
+import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -254,7 +255,45 @@ def _detected(
     return status != "PASS"
 
 
-def run_case(weekly_path: str, case: dict[str, Any]) -> dict[str, Any]:
+# Hub commits of the Timestral weights the share-baseline comparison runs
+# (docs/timestral-share.md); a bare model name resolves to its pin here.
+SHARE_MODEL_REVISIONS = {
+    "mistralai/Timestral-28M": "49b26409ac87b5935539a5d8ffe7f397b720db47",
+    "mistralai/Timestral-209M": "9874d252ab0aae16f7f7c999f98f98d6ad7d8365",
+}
+
+
+def share_settings(baseline: str, model: str | None = None, revision: str | None = None) -> dict[str, str]:
+    """Config overrides for ``share_baseline``; empty for the engine default."""
+    if baseline == "engine":
+        return {}
+    model = model or DatasetConfig().share_model
+    return {
+        "share_baseline": baseline,
+        "share_model": model,
+        "share_model_revision": revision or SHARE_MODEL_REVISIONS.get(model, ""),
+    }
+
+
+def share_tag(share: dict[str, str]) -> str:
+    """Short label separating cached records and reports by share baseline."""
+    if not share:
+        return "engine"
+    return f"{share['share_model'].rsplit('/', 1)[-1]}@{share['share_model_revision'][:8] or 'main'}"
+
+
+def add_share_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--share-baseline", choices=("engine", "timestral"), default="engine")
+    parser.add_argument("--share-model", default=None, help="Hub id, e.g. mistralai/Timestral-209M")
+    parser.add_argument("--share-revision", default=None, help="Hub commit; defaults to the pin")
+
+
+def worker_threads(jobs: int) -> None:
+    """Split the cores between workers before they import torch (spawned children inherit it)."""
+    os.environ.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // max(jobs, 1))))
+
+
+def run_case(weekly_path: str, case: dict[str, Any], share: dict[str, str] | None = None) -> dict[str, Any]:
     from qc.run import run_qc
     from qcgen.faults import INJECTORS, FaultContext
 
@@ -275,7 +314,8 @@ def run_case(weekly_path: str, case: dict[str, Any]) -> dict[str, Any]:
         truth = dict(ground.affected)
     products = weekly[["product_id", "commodity_id"]].drop_duplicates("product_id")
     source = FrameSource({f"W{week - 1:04d}": previous, f"W{week:04d}": current}, products)
-    result = run_qc(source, f"W{week:04d}", f"W{week - 1:04d}", CONFIG, observed_at="2030-01-01T00:00:00+00:00")
+    config = replace(CONFIG, **(share or {}))
+    result = run_qc(source, f"W{week:04d}", f"W{week - 1:04d}", config, observed_at="2030-01-01T00:00:00+00:00")
     return _summary(result, case, truth)
 
 
@@ -316,17 +356,23 @@ def score(records: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
-def run(weekly_path: str, split: str, jobs: int, out: Path) -> dict[str, Any]:
+def run(
+    weekly_path: str, split: str, jobs: int, out: Path, share: dict[str, str] | None = None
+) -> dict[str, Any]:
     todo = cases(split)
+    share = share or {}
+    if share:
+        worker_threads(jobs)
     context = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=jobs, mp_context=context) as pool:
-        records = list(pool.map(run_case, [weekly_path] * len(todo), todo))
+        records = list(pool.map(run_case, [weekly_path] * len(todo), todo, [share] * len(todo)))
     from qc.cohort import code_sha256
 
     report = {
         "split": split,
         "weeks": [SPLITS[split].start, SPLITS[split].stop - 1],
         "engine": code_sha256()[:12],
+        "share_baseline": share or {"share_baseline": "engine"},
         "summary": score(records),
         "records": records,
     }
@@ -365,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--split", choices=sorted(SPLITS), required=True)
     r.add_argument("--jobs", type=int, default=4)
     r.add_argument("--out", type=Path, required=True)
+    add_share_arguments(r)
     rel = sub.add_parser("release")
     rel.add_argument("--raw", type=Path, required=True)
     rel.add_argument("--out", type=Path, required=True)
@@ -372,7 +419,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build":
         print(json.dumps(build(args.raw, args.out), indent=1))
     elif args.command == "run":
-        report = run(args.weekly, args.split, args.jobs, args.out)
+        share = share_settings(args.share_baseline, args.share_model, args.share_revision)
+        report = run(args.weekly, args.split, args.jobs, args.out, share)
         print(json.dumps(report["summary"], indent=1))
     else:
         record = release(args.raw, args.out)

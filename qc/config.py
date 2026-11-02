@@ -189,6 +189,10 @@ class DatasetConfig:
             raise ValueError("temporal_interval_alpha must be in (0, 1)")
         if not 0 < self.temporal_fdr_q < 1:
             raise ValueError("temporal_fdr_q must be in (0, 1)")
+        if self.share_baseline not in ("engine", "timestral"):
+            raise ValueError("share_baseline must be engine or timestral")
+        if self.share_baseline == "timestral" and not self.share_model:
+            raise ValueError("share_baseline timestral needs a share_model")
         if self.temporal_sustained_weeks < 1:
             raise ValueError("temporal_sustained_weeks must be at least 1")
         if not 0 < self.temporal_sustained_share < 1:
@@ -306,6 +310,15 @@ class DatasetConfig:
         0.99,
     )
     forecaster: str = "baseline"
+    # Leaf share baseline (temporal.share_shift_test): ``engine`` is the
+    # trailing / seasonal pair; ``timestral`` forecasts each leaf's share with
+    # a pretrained Timestral model (qc.share_model, optional dependency) and
+    # replaces the single-week test only. Experimental; see
+    # docs/timestral-share.md.
+    share_baseline: str = "engine"
+    share_model: str = "mistralai/Timestral-28M"
+    # Hub commit of the weights; empty follows the repo's main branch.
+    share_model_revision: str = ""
 
     # Attach rule-based cause labels (they never change the status).
     decision_enabled: bool = True
