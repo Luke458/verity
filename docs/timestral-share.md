@@ -259,17 +259,45 @@ faulty period is used.
 
 ## Registered predictions (before the test run)
 
-*To be written by the author before the M5 test (weeks 178-277) and Favorita
-test (weeks 142-241) splits run with `share_baseline: timestral`. Both arms
-run on the registering commit.*
+Written 2026-11-03 by Claude at the author's direction. The author chose the
+model (209M) and delegated the operating point and these predictions. They
+are committed before either arm runs on the M5 test (weeks 178-277) or the
+Favorita test (weeks 142-241), and both arms run on the registering commit.
 
-1. Model size registered for the test:
-2. M5 clean false alarms (engine arm, Timestral arm):
-3. Favorita clean false alarms (engine arm, Timestral arm):
-4. Market movement detection at 10% / 20% / 40%, per dataset and arm:
-5. Missing stores / products, restatement, recalculation: unchanged (these
-   checks do not read the share test).
-6. What counts as a failed registration:
+**What this test can and cannot show.** The engine has run these splits
+before. The share-rule harness has computed Timestral's latest-week
+statistics on them (2026-11-03). On those weeks at q = 0.01 it gave M5:
+engine 8/100 alarmed clean refreshes, 209M 1/100, 40% cut detection 0.86
+against 0.96; Favorita: engine 26/100, 209M 33/100, 0.50 against 0.68. The
+predictions below are built from those numbers and from the spent splits,
+where the full engine roughly halved the harness's alarm gap. So the test
+checks whether the full engine reproduces the harness at 100 refreshes per
+retailer. It is not a first look at Timestral on unseen weeks.
+
+**Arms.** `share_baseline: engine` and `share_baseline: timestral` with
+`mistralai/Timestral-209M@9874d252ab0a`. Both use engine defaults otherwise,
+including `temporal_fdr_q` = 0.01. The operating point stays the global q:
+at the same q the full engine already gave equal clean alarms on the spent
+splits, and q remains a per-feed choice, as decided on 2026-10-15
+(`docs/real-data-favorita.md`). No share-only weight is added.
+
+1. **Model:** Timestral-209M.
+2. **M5 clean false alarms:** the Timestral arm raises no more than the
+   engine arm (harness: 1 against 8).
+3. **Favorita clean false alarms:** the Timestral arm raises at least as many
+   as the engine arm and at most 7 more (harness: +7; spent splits: +1).
+4. **Market movement:** pooled over 10%, 20% and 40% (60 cases per
+   retailer), the Timestral arm catches at least as many as the engine arm on
+   each retailer. Over both retailers it has more Timestral-only than
+   engine-only detections.
+5. **Unchanged:** missing stores, missing products (10 and 100), week
+   restatement and recalculation detect the same number of cases in both
+   arms. These checks do not read the share test.
+6. **Failed registration:** any of 2-5 fails. Whatever the outcome, the
+   default stays `engine`, because Timestral needs torch and a model
+   download. If all hold, the doc recommends Timestral-209M as the share
+   baseline for feeds that can carry that dependency. If any fail, the
+   result is recorded as it is and Timestral stays experimental.
 
 ## Results
 
