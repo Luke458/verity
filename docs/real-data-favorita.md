@@ -52,7 +52,7 @@ faults (market movement 5/10/20/40% in one family, one store missing, 10 or
 The injectors' integer rounding of units would destroy fractional sales, so
 the adapter carries units through the injectors' unrounded dollar path and
 takes them back. Splits: dev weeks 106-125 (each fault every 4th week);
-reserve 126-141, unrun; **test 142-241** (100 clean refreshes, 2015-09 to
+reserve 126-141, unrun (until 2026-11-02, below); **test 142-241** (100 clean refreshes, 2015-09 to
 2017-08; each fault every 5th week, 20 per fault).
 
 **Clean is not quite clean here.** Favorita's own history has real events,
@@ -377,3 +377,7 @@ it is not tuned here.
 **Disclosure.** No statistic was computed for a week in 126-141. Tests of
 weeks from 142 on use 126-141 as training history, as the registered test
 did.
+
+**Reserve spent, 2026-11-02.** The Timestral share-baseline comparison
+(`docs/timestral-share.md`) ran weeks 126-141 with both arms as exploratory
+dev, not as a registered confirmation. No unrun Favorita weeks remain.

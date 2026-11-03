@@ -145,9 +145,14 @@ faulty period is used.
   have seen these series. The share series are aggregations the benchmarks do
   not use, which lowers the risk without removing it. A held-out retailer the
   model cannot have seen would settle it.
-- **Spent weeks.** Every split of both datasets has been run before with the
-  engine baselines. The comparison below is like-for-like (both arms on the
-  same engine commit and cases), not a first look at unseen data.
+- **Spent weeks.** Every split of both datasets had already been run with the
+  engine baselines, except Favorita's reserve weeks 126-141. Those were held
+  unrun to confirm a share-test change (`docs/real-data-favorita.md`). The
+  2026-11-02 comparison above ran them as exploratory dev, unregistered,
+  with both arms. That spent the reserve, which was a mistake, and no unrun
+  weeks remain on either retailer. Any registered test of this change is
+  therefore like-for-like (both arms on the same engine commit and cases),
+  not a first look at unseen data.
 - **Normal tails.** The p-value beyond the outermost quantiles (1% / 99%) is
   extrapolated from a normal shape. It is checked by the clean rates above,
   not assumed.
