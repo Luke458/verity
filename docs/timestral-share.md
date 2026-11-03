@@ -149,6 +149,28 @@ against 0.47; median relative spread 0.114 against 0.141), and the hybrid
 adds a little (0.67). The full-engine HOBBIES_2 misses on M5 confirm were
 those weeks, not a seasonal weakness in general. The simpler rule stays.
 
+**A feed Timestral cannot have seen** (harness, `share_rules.py
+build-synthetic`): qcgen's `realistic` history assumptions (category
+seasonality, 4% market and 3% category weekly shocks, a third of products
+intermittent), run over 278 weeks (M5's length) on the `full` universe, 5
+states x 15 categories, seeds 101 and 202; spent weeks 106-278, 173 clean
+refreshes each. A 40% cut is caught by every rule (0.94-1.00), so the
+curves use 10% and 20% cuts (`tests --drop`):
+
+| seed, cut | engine q 0.01 | Timestral q 0.01 | engine q 0.001 | Timestral q 0.001 |
+|---|---|---|---|---|
+| 101, 20% | 1/173, 0.75 | 0/173, 0.88 | 0, 0.50 | 0, 0.77 |
+| 202, 20% | 4/173, 0.79 | 2/173, 0.90 | 0, 0.55 | 0, 0.78 |
+| 101, 10% | 1/173, 0.07 | 0/173, 0.13 | 0, 0.02 | 0, 0.05 |
+| 202, 10% | 4/173, 0.07 | 2/173, 0.12 | 0, 0.02 | 0, 0.04 |
+
+Leaf p < 0.01 among 6,920 clean tests (69 expected): engine 83 and 92,
+Timestral 73 and 71. Timestral is no worse on false alarms, catches more and
+is closer to nominal on a feed it cannot have memorised, and this generator
+was written alongside the engine, so if anything it suits the engine's
+baselines. Contamination does not explain the real-data gain. This does not
+rule out that real feeds differ from qcgen in ways that matter.
+
 **Full engine at q = 0.001** (2026-11-03, `runall-q.sh`; `--fdr-q` sets
 `temporal_fdr_q`, which also tightens the national tests):
 
@@ -214,8 +236,9 @@ faulty period is used.
 - **Possible contamination.** Mistral does not publish Timestral's training
   data. M5 and Favorita are common forecasting benchmarks, so the model may
   have seen these series. The share series are aggregations the benchmarks do
-  not use, which lowers the risk without removing it. A held-out retailer the
-  model cannot have seen would settle it.
+  not use, and on synthetic qcgen feeds it cannot have seen Timestral keeps
+  its advantage (above). That makes contamination an unlikely explanation,
+  though a held-out real retailer would still be the stronger check.
 - **Spent weeks.** Every split of both datasets had already been run with the
   engine baselines, except Favorita's reserve weeks 126-141. Those were held
   unrun to confirm a share-test change (`docs/real-data-favorita.md`). The

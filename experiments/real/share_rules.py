@@ -7,7 +7,7 @@
 ``tests`` runs the engine's ``share_shift_test`` for every province and family
 leaf and every week from 54 on, from that week's raw history (training weeks
 before it, the leaf and national totals as the actuals): once clean, and once
-with the family's week cut by 40% (as the market-movement injector does). It
+with the family's week cut by 40% (``--drop``; as the market-movement injector does). It
 keeps the chosen test and both of its baselines. No statistic is computed for a
 week of Favorita's unrun reserve split (126-141).
 
@@ -52,7 +52,10 @@ DATASETS: dict[str, dict[str, Any]] = {
         "weeks": [week for week in range(54, 242) if not 126 <= week <= 141],
         "spent": [*range(106, 126), *range(142, 242)],
     },
+    # A qcgen feed no pretrained model can have seen (``build-synthetic``), M5's length.
+    "synthetic": {"metrics": ("dollar", "units"), "weeks": range(54, 279), "spent": range(106, 279)},
 }
+SYNTHETIC_WEEKS = 278
 LEAVES = ("state_id", "commodity_id")
 DROP = 0.4
 WINDOW = 26  # the engine's: 2 x temporal_window
@@ -89,7 +92,7 @@ def _share_test(exact_year_ago: bool):
     return run
 
 
-def leaf_tests(weekly: pd.DataFrame, dataset: str, exact_year_ago: bool = False) -> pd.DataFrame:
+def leaf_tests(weekly: pd.DataFrame, dataset: str, exact_year_ago: bool = False, drop: float = DROP) -> pd.DataFrame:
     spec = DATASETS[dataset]
     run = _share_test(exact_year_ago)
     rows = []
@@ -107,15 +110,15 @@ def leaf_tests(weekly: pd.DataFrame, dataset: str, exact_year_ago: bool = False)
                     if len(history) < 26:
                         continue
                     child, total = float(series[week]), float(national[week])
-                    for drop in (0.0, DROP) if column == "commodity_id" else (0.0,):
+                    for cut in (0.0, drop) if column == "commodity_id" else (0.0,):
                         chosen, candidates = run(
                             history.index, history.values, parent.index, parent.values,
-                            child * (1 - drop), total - drop * child, WINDOW, target_week=week, season=52,
+                            child * (1 - cut), total - cut * child, WINDOW, target_week=week, season=52,
                         )
                         if chosen is None:
                             continue
                         row = {
-                            "metric": metric, "leaf": f"{column}:{leaf}", "week": week, "drop": drop,
+                            "metric": metric, "leaf": f"{column}:{leaf}", "week": week, "drop": cut,
                             "level": float(history.iloc[-13:].mean()),
                             "t": chosen.t, "p": chosen.p, "n": chosen.n, "impact": chosen.impact,
                         }
@@ -127,6 +130,28 @@ def leaf_tests(weekly: pd.DataFrame, dataset: str, exact_year_ago: bool = False)
                             row[f"{method}_effect"] = test.impact if test else np.nan
                         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def synthetic_weekly(seed: int) -> pd.DataFrame:
+    """A store x product x week feed from qcgen: the ``realistic`` history
+    assumptions (category seasonality, market and category shocks,
+    intermittency) over ``SYNTHETIC_WEEKS`` weeks on the ``full`` universe
+    (5 states, 15 commodities)."""
+    from dataclasses import replace
+
+    from qcgen.config import profile_history, profile_universe
+    from qcgen.dgp import generate_history
+    from qcgen.universe import generate_universe
+
+    rng = np.random.default_rng(seed)
+    universe = generate_universe(profile_universe("full"), rng, horizon_weeks=SYNTHETIC_WEEKS)
+    history = generate_history(universe, replace(profile_history("realistic"), n_weeks=SYNTHETIC_WEEKS), rng)
+    return (
+        history.merge(universe.stores[["store_id", "state_id"]], on="store_id")
+        .merge(universe.products[["product_id", "commodity_id"]], on="product_id")
+        [["week", *LEAVES, "dollar", "units"]]
+        .astype({"dollar": "float64", "units": "float64"})
+    )
 
 
 def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, model: Any) -> pd.DataFrame:
@@ -144,6 +169,7 @@ def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, mod
     rows = {key: i for i, key in enumerate(zip(tests["metric"], tests["leaf"], tests["week"], tests["drop"], strict=True))}
     p, z, impact, spread = (np.full(len(tests), np.nan) for _ in range(4))
     weeks = sorted(int(week) for week in tests["week"].unique())
+    drops = sorted(float(drop) for drop in tests["drop"].unique())
     for metric in spec["metrics"]:
         national = weekly.groupby("week")[metric].sum()
         for column in LEAVES:
@@ -152,7 +178,7 @@ def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, mod
             for week in weeks:
                 names = [
                     leaf for leaf in series
-                    if (metric, f"{column}:{leaf}", week, 0.0) in rows or (metric, f"{column}:{leaf}", week, DROP) in rows
+                    if any((metric, f"{column}:{leaf}", week, drop) in rows for drop in drops)
                 ]
                 if not names:
                     continue
@@ -168,7 +194,7 @@ def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, mod
                 total = float(national[week])
                 for position, leaf in enumerate(names):
                     child = float(series[leaf][week])
-                    for drop in (0.0, DROP):
+                    for drop in drops:
                         row = rows.get((metric, f"{column}:{leaf}", week, drop))
                         if row is None:
                             continue
@@ -222,7 +248,7 @@ def _flags(p: np.ndarray, extra: int, q: float) -> np.ndarray:
 
 def score(tests: pd.DataFrame, rule: str, weeks: Any, q: float) -> dict[str, Any]:
     clean = tests.loc[tests["drop"] == 0.0]
-    cut = tests.loc[tests["drop"] == DROP]
+    cut = tests.loc[tests["drop"] > 0.0]
     extra = clean["metric"].nunique()
     # A rule with its own baseline is judged material on its own impact.
     impact = f"{rule}_impact" if f"{rule}_impact" in tests else "impact"
@@ -256,11 +282,15 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--weekly", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--exact-year-ago", action="store_true")
+    t.add_argument("--drop", type=float, default=DROP, help="the family cut (default 0.4)")
     s = sub.add_parser("score")
     s.add_argument("--dataset", choices=sorted(DATASETS), required=True)
     s.add_argument("--tests", required=True)
     s.add_argument("--origins", type=int, default=52)
     s.add_argument("--qs", type=float, nargs="+", default=list(QS))
+    g = sub.add_parser("build-synthetic")
+    g.add_argument("--seed", type=int, required=True)
+    g.add_argument("--out", required=True)
     m = sub.add_parser("timestral")
     m.add_argument("--dataset", choices=sorted(DATASETS), required=True)
     m.add_argument("--weekly", required=True)
@@ -268,6 +298,11 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--out", required=True)
     m.add_argument("--model", default="mistralai/Timestral-28M")
     args = parser.parse_args(argv)
+    if args.command == "build-synthetic":
+        frame = synthetic_weekly(args.seed)
+        frame.to_parquet(args.out)
+        print(f"{len(frame)} rows, weeks {frame['week'].min()}-{frame['week'].max()} -> {args.out}")
+        return 0
     if args.command == "timestral":
         from experiments.real.m5 import SHARE_MODEL_REVISIONS
         from qc.share_model import load_share_model
@@ -281,7 +316,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "tests":
         columns = ["week", *LEAVES, *DATASETS[args.dataset]["metrics"]]
-        frame = leaf_tests(pd.read_parquet(args.weekly, columns=columns), args.dataset, args.exact_year_ago)
+        frame = leaf_tests(
+            pd.read_parquet(args.weekly, columns=columns), args.dataset, args.exact_year_ago, args.drop
+        )
         frame.to_parquet(args.out)
         print(f"{len(frame)} leaf tests -> {args.out}")
         return 0

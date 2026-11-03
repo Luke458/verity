@@ -265,3 +265,20 @@ def test_share_rules_hybrids_take_the_tightest_candidate():
     assert rules["hybrid_impact"].tolist() == [4.0, 5.0, 9.0]
     assert rules["hybrid3"].tolist() == [0.4, 0.2, 0.9]
     assert rules["hybrid3_impact"].tolist() == [4.0, 2.0, 9.0]
+
+
+def test_share_rules_synthetic_feed_has_the_real_runner_shape():
+    from experiments.real.share_rules import (
+        DATASETS,
+        LEAVES,
+        SYNTHETIC_WEEKS,
+        synthetic_weekly,
+    )
+
+    weekly = synthetic_weekly(3)
+    assert list(weekly.columns) == ["week", *LEAVES, "dollar", "units"]
+    assert weekly["week"].min() == 1 and weekly["week"].max() == SYNTHETIC_WEEKS
+    assert weekly[list(LEAVES)].notna().all().all()
+    # Stores are drawn into the 5 states at random, so a seed can leave one empty.
+    assert 2 <= weekly["state_id"].nunique() <= 5 and weekly["commodity_id"].nunique() == 15
+    assert max(DATASETS["synthetic"]["weeks"]) == SYNTHETIC_WEEKS
