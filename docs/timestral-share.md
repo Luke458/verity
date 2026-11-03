@@ -301,4 +301,53 @@ splits, and q remains a per-feed choice, as decided on 2026-10-15
 
 ## Results
 
-Pending the registered run.
+Run 2026-11-03 on `797a41e` (clean tree), engine `20db19243faa`, both arms
+and both retailers, 100 refreshes per split. Predictions unchanged. Outputs:
+`reports/real/timestral/{m5,fav}-{engine,ts209M}-test.json`.
+
+**All registered predictions hold. P3 holds only at its bound.**
+
+| | M5 engine | M5 209M | Favorita engine | Favorita 209M |
+|---|---|---|---|---|
+| Clean false alarms | 9 | 2 | 28 | 35 |
+| Market movement 10% | 1/20 | 3/20 | 0/20 | 1/20 |
+| Market movement 20% | 9/20 | 17/20 | 3/20 | 7/20 |
+| Market movement 40% | 19/20 | 20/20 | 8/20 | 15/20 |
+| Movement pooled | 29/60 | 40/60 | 11/60 | 23/60 |
+
+Paired, exact McNemar:
+
+| | Engine only | Timestral only | Both | p |
+|---|---|---|---|---|
+| M5 clean | 7 | 0 | 2 | 0.016 |
+| Favorita clean | 8 | 15 | 22 | 0.21 |
+| M5 movement (60) | 0 | 11 | 29 | 0.001 |
+| Favorita movement (60) | 1 | 13 | 10 | 0.002 |
+| Movement, both retailers | 1 | 24 | 39 | 2e-6 |
+
+- **P2 holds.** M5 clean: 2 against 9. One alarm in each arm is the same
+  `historical_revision`, which does not read the share test. Share alarms:
+  1 refresh against 8.
+- **P3 holds at the bound.** Favorita clean: 35 against 28, which is +7, the
+  most the prediction allowed. All the extra alarms are share alarms (32
+  refreshes against 25). The full engine reproduced the harness gap (+7),
+  not the spent splits' +1. So the spent splits were the wrong guide to
+  Favorita's clean cost.
+- **P4 holds.** Timestral catches more on each retailer (40 against 29;
+  23 against 11). The engine caught only one case Timestral missed.
+- **P5 holds.** Missing stores, missing products 10 and 100, restatement and
+  recalculation: 0 discordant cases on both retailers.
+- **Not tested:** the 5% movement, which neither arm detects on either
+  retailer.
+
+**Outcome.** The registration passes. Timestral-209M is the recommended
+share baseline for feeds that can carry torch and a model download. The
+default stays `engine`. The Favorita cost stands: at the same q,
+Timestral roughly doubles movement detection for 7 more alarmed clean
+refreshes per 100. A feed that cannot take that cost should run the
+Timestral arm at a lower q (the full-engine q check above shows that trade
+on the spent splits). That operating point was not registered here.
+
+**Caveat.** As registered, the harness had already read these weeks, and no
+unrun weeks remain on either retailer. This confirms that the full engine
+reproduces the harness. It is not a first look at unseen data.
