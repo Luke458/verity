@@ -202,3 +202,44 @@ def test_share_rules_sees_the_engines_choice_and_both_baselines():
         assert set(candidates) == {"trailing", "seasonal"}
         assert chosen in candidates.values()
     assert _share_test(False)(*args, target_week=121, season=52)[0] == share_shift_test(*args, target_week=121, season=52)
+
+
+def test_share_rules_scores_the_pretrained_baseline_on_the_engines_rows():
+    from statistics import NormalDist
+
+    import numpy as np
+    import pandas as pd
+
+    from experiments.real.share_rules import DROP, leaf_tests, timestral_tests
+
+    levels = np.array([0.1, 0.5, 0.9])
+
+    class LastShare:
+        """Stub: the last observed share with a 2% relative sigma."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def forecast(self, context, horizon):
+            self.calls += 1
+            last = np.array([row[np.isfinite(row)][-1] for row in context])
+            z = np.array([NormalDist().inv_cdf(level) for level in levels])
+            return last[:, None] * (1 + 0.02 * z[None, :]), levels
+
+    rng = np.random.default_rng(7)
+    weekly = pd.DataFrame(
+        [
+            {"week": week, "state_id": state, "commodity_id": family,
+             "units": 100.0 * (1 + 0.005 * rng.standard_normal())}
+            for week in range(1, 61) for state in ("A", "B") for family in ("X", "Y")
+        ]
+    )
+    tests = leaf_tests(weekly, "favorita")
+    model = LastShare()
+    scored = timestral_tests(weekly, "favorita", tests, model)
+    assert scored["timestral"].notna().all()
+    # One batched forecast per leaf type and week, shared by the clean and cut rows.
+    assert model.calls == 2 * tests["week"].nunique()
+    clean, cut = scored[scored["drop"] == 0.0], scored[scored["drop"] == DROP]
+    assert (clean["timestral"] > 0.01).all()
+    assert (cut["timestral"] < 1e-6).all() and (cut["timestral_impact"] < 0).all()

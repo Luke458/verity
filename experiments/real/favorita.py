@@ -258,7 +258,7 @@ def score_favorita(records: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
-def run_case(weekly_path: str, case: dict[str, Any], share: dict[str, str] | None = None) -> dict[str, Any]:
+def run_case(weekly_path: str, case: dict[str, Any], share: dict[str, Any] | None = None) -> dict[str, Any]:
     from qc.run import run_qc
     from qcgen.faults import INJECTORS, FaultContext
 
@@ -295,7 +295,7 @@ def _case_name(case: dict[str, Any]) -> str:
 
 
 def run(
-    weekly_path: str, split: str, jobs: int, out: Path, share: dict[str, str] | None = None
+    weekly_path: str, split: str, jobs: int, out: Path, share: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Run every case of ``split``; each record is kept in ``<out>.work`` so a
     crashed worker (this table is large) costs one case, and a rerun resumes."""
@@ -354,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build":
         print(json.dumps(build(args.raw, args.out), indent=1))
     else:
-        share = share_settings(args.share_baseline, args.share_model, args.share_revision)
+        share = share_settings(args.share_baseline, args.share_model, args.share_revision, args.fdr_q)
         print(json.dumps(run(args.weekly, args.split, args.jobs, args.out, share)["summary"], indent=1))
     return 0
 

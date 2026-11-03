@@ -126,6 +126,58 @@ def leaf_tests(weekly: pd.DataFrame, dataset: str, exact_year_ago: bool = False)
     return pd.DataFrame(rows)
 
 
+def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, model: Any) -> pd.DataFrame:
+    """Add the pretrained share baseline's p, z and impact to every row of ``tests``.
+
+    Each (metric, leaf type, week) is one batched forecast from the same
+    history the engine rule saw (weeks before ``week``); the clean and the cut
+    observation of a leaf are scored against the same quantiles, with the cut
+    taken out of the parent as in ``leaf_tests``. A row the model cannot score
+    stays NaN (p = 1 in ``score``).
+    """
+    from qc import share_model
+
+    spec = DATASETS[dataset]
+    rows = {key: i for i, key in enumerate(zip(tests["metric"], tests["leaf"], tests["week"], tests["drop"], strict=True))}
+    p, z, impact = (np.full(len(tests), np.nan) for _ in range(3))
+    weeks = sorted(int(week) for week in tests["week"].unique())
+    for metric in spec["metrics"]:
+        national = weekly.groupby("week")[metric].sum()
+        for column in LEAVES:
+            grouped = weekly.groupby([column, "week"])[metric].sum()
+            series = {leaf: grouped[leaf] for leaf in grouped.index.get_level_values(0).unique()}
+            for week in weeks:
+                names = [
+                    leaf for leaf in series
+                    if (metric, f"{column}:{leaf}", week, 0.0) in rows or (metric, f"{column}:{leaf}", week, DROP) in rows
+                ]
+                if not names:
+                    continue
+                parent = national[national.index < week]
+                histories = [series[leaf][series[leaf].index < week] for leaf in names]
+                built = share_model.share_rows(
+                    [(history.index, history.to_numpy()) for history in histories], parent.index, parent.to_numpy()
+                )
+                if built is None:
+                    continue
+                context, _, last_week = built
+                quantiles, levels = model.forecast(context, max(1, week - last_week))
+                total = float(national[week])
+                for position, leaf in enumerate(names):
+                    child = float(series[leaf][week])
+                    for drop in (0.0, DROP):
+                        row = rows.get((metric, f"{column}:{leaf}", week, drop))
+                        if row is None:
+                            continue
+                        parent_now = total - drop * child
+                        scored = share_model.quantile_p(child * (1 - drop) / parent_now, quantiles[position], levels)
+                        if scored is None:
+                            continue
+                        z[row], p[row], median, _ = scored
+                        impact[row] = (child * (1 - drop) / parent_now - median) * parent_now
+    return tests.assign(timestral=p, timestral_z=z, timestral_impact=impact)
+
+
 def add_rules(tests: pd.DataFrame, origins: int = 52, min_origins: int = 20) -> pd.DataFrame:
     tests = tests.copy()
     both = tests["trailing_p"].notna() & tests["seasonal_p"].notna()
@@ -158,13 +210,15 @@ def score(tests: pd.DataFrame, rule: str, weeks: Any, q: float) -> dict[str, Any
     clean = tests.loc[tests["drop"] == 0.0]
     cut = tests.loc[tests["drop"] == DROP]
     extra = clean["metric"].nunique()
+    # A rule with its own baseline is judged material on its own impact.
+    impact = f"{rule}_impact" if f"{rule}_impact" in tests else "impact"
     flagged, hits, cases = [], 0, 0
     for week in weeks:
         now = clean.loc[clean["week"] == week]
         if now.empty:
             continue
         p = now[rule].fillna(1.0).to_numpy()
-        material = (now["impact"].abs() >= 0.02 * now["level"]).to_numpy()
+        material = (now[impact].abs() >= 0.02 * now["level"]).to_numpy()
         if (_flags(p, extra, q) & material).any():
             flagged.append(int(week))
         for _, row in cut.loc[cut["week"] == week].iterrows():
@@ -173,7 +227,7 @@ def score(tests: pd.DataFrame, rule: str, weeks: Any, q: float) -> dict[str, Any
                 continue
             moved = p.copy()
             moved[mask] = 1.0 if pd.isna(row[rule]) else row[rule]
-            hits += bool(_flags(moved, extra, q)[mask].any() and abs(row["impact"]) >= 0.02 * row["level"])
+            hits += bool(_flags(moved, extra, q)[mask].any() and abs(row[impact]) >= 0.02 * row["level"])
             cases += 1
     refreshes = clean.loc[clean["week"].isin(list(weeks)), "week"].nunique()
     return {"rule": rule, "q": q, "flagged": len(flagged), "refreshes": refreshes,
@@ -192,7 +246,25 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--dataset", choices=sorted(DATASETS), required=True)
     s.add_argument("--tests", required=True)
     s.add_argument("--origins", type=int, default=52)
+    s.add_argument("--qs", type=float, nargs="+", default=list(QS))
+    m = sub.add_parser("timestral")
+    m.add_argument("--dataset", choices=sorted(DATASETS), required=True)
+    m.add_argument("--weekly", required=True)
+    m.add_argument("--tests", required=True, help="a ``tests`` table; the output adds the timestral rule")
+    m.add_argument("--out", required=True)
+    m.add_argument("--model", default="mistralai/Timestral-28M")
     args = parser.parse_args(argv)
+    if args.command == "timestral":
+        from experiments.real.m5 import SHARE_MODEL_REVISIONS
+        from qc.share_model import load_share_model
+
+        columns = ["week", *LEAVES, *DATASETS[args.dataset]["metrics"]]
+        model = load_share_model(args.model, SHARE_MODEL_REVISIONS[args.model])
+        frame = timestral_tests(pd.read_parquet(args.weekly, columns=columns), args.dataset,
+                                pd.read_parquet(args.tests), model)
+        frame.to_parquet(args.out)
+        print(f"{int(frame['timestral'].notna().sum())}/{len(frame)} rows scored -> {args.out}")
+        return 0
     if args.command == "tests":
         columns = ["week", *LEAVES, *DATASETS[args.dataset]["metrics"]]
         frame = leaf_tests(pd.read_parquet(args.weekly, columns=columns), args.dataset, args.exact_year_ago)
@@ -203,9 +275,11 @@ def main(argv: list[str] | None = None) -> int:
     spent = DATASETS[args.dataset]["spent"]
     clean = tests.loc[(tests["drop"] == 0.0) & tests["week"].isin(list(spent))]
     print(f"clean leaf tests {len(clean)}; chosen t sd {clean['t'].std():.2f}")
-    for rule in ("current", "trailing", "seasonal", "larger", "bonferroni", "calibrated"):
+    rules = ["current", "trailing", "seasonal", "larger", "bonferroni", "calibrated"]
+    rules += ["timestral"] if "timestral" in tests else []
+    for rule in rules:
         below = int((clean[rule] < 0.01).sum())
-        curve = [score(tests, rule, spent, q) for q in QS]
+        curve = [score(tests, rule, spent, q) for q in args.qs]
         points = " | ".join(f"q {c['q']}: {c['flagged']}/{c['refreshes']} {c['detection_40']:.2f}" for c in curve)
         print(f"{rule:10s} leaf p<0.01 {below:4d} (expected {0.01 * len(clean):.0f})  {points}")
     return 0

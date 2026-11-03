@@ -263,29 +263,35 @@ SHARE_MODEL_REVISIONS = {
 }
 
 
-def share_settings(baseline: str, model: str | None = None, revision: str | None = None) -> dict[str, str]:
-    """Config overrides for ``share_baseline``; empty for the engine default."""
+def share_settings(
+    baseline: str, model: str | None = None, revision: str | None = None, fdr_q: float | None = None
+) -> dict[str, Any]:
+    """Config overrides for ``share_baseline`` (and ``temporal_fdr_q``); empty for the engine default."""
+    settings: dict[str, Any] = {} if fdr_q is None else {"temporal_fdr_q": fdr_q}
     if baseline == "engine":
-        return {}
+        return settings
     model = model or DatasetConfig().share_model
     return {
         "share_baseline": baseline,
         "share_model": model,
         "share_model_revision": revision or SHARE_MODEL_REVISIONS.get(model, ""),
+        **settings,
     }
 
 
-def share_tag(share: dict[str, str]) -> str:
-    """Short label separating cached records and reports by share baseline."""
-    if not share:
-        return "engine"
-    return f"{share['share_model'].rsplit('/', 1)[-1]}@{share['share_model_revision'][:8] or 'main'}"
+def share_tag(share: dict[str, Any]) -> str:
+    """Short label separating cached records and reports by share baseline and q."""
+    tag = "engine"
+    if "share_model" in share:
+        tag = f"{share['share_model'].rsplit('/', 1)[-1]}@{share['share_model_revision'][:8] or 'main'}"
+    return f"{tag}-q{share['temporal_fdr_q']:g}" if "temporal_fdr_q" in share else tag
 
 
 def add_share_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--share-baseline", choices=("engine", "timestral"), default="engine")
     parser.add_argument("--share-model", default=None, help="Hub id, e.g. mistralai/Timestral-209M")
     parser.add_argument("--share-revision", default=None, help="Hub commit; defaults to the pin")
+    parser.add_argument("--fdr-q", type=float, default=None, help="temporal_fdr_q; defaults to the engine's")
 
 
 def worker_threads(jobs: int) -> None:
@@ -293,7 +299,7 @@ def worker_threads(jobs: int) -> None:
     os.environ.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // max(jobs, 1))))
 
 
-def run_case(weekly_path: str, case: dict[str, Any], share: dict[str, str] | None = None) -> dict[str, Any]:
+def run_case(weekly_path: str, case: dict[str, Any], share: dict[str, Any] | None = None) -> dict[str, Any]:
     from qc.run import run_qc
     from qcgen.faults import INJECTORS, FaultContext
 
@@ -357,7 +363,7 @@ def score(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def run(
-    weekly_path: str, split: str, jobs: int, out: Path, share: dict[str, str] | None = None
+    weekly_path: str, split: str, jobs: int, out: Path, share: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     todo = cases(split)
     share = share or {}
@@ -419,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build":
         print(json.dumps(build(args.raw, args.out), indent=1))
     elif args.command == "run":
-        share = share_settings(args.share_baseline, args.share_model, args.share_revision)
+        share = share_settings(args.share_baseline, args.share_model, args.share_revision, args.fdr_q)
         report = run(args.weekly, args.split, args.jobs, args.out, share)
         print(json.dumps(report["summary"], indent=1))
     else:
