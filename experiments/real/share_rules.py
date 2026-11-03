@@ -122,6 +122,9 @@ def leaf_tests(weekly: pd.DataFrame, dataset: str, exact_year_ago: bool = False)
                         for method in ("trailing", "seasonal"):
                             test = candidates.get(method)
                             row[f"{method}_p"] = test.p if test else np.nan
+                            # Relative spread and impact, for the min-spread hybrids in ``add_rules``.
+                            row[f"{method}_spread"] = float(test.spread) if test else np.nan
+                            row[f"{method}_effect"] = test.impact if test else np.nan
                         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -139,7 +142,7 @@ def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, mod
 
     spec = DATASETS[dataset]
     rows = {key: i for i, key in enumerate(zip(tests["metric"], tests["leaf"], tests["week"], tests["drop"], strict=True))}
-    p, z, impact = (np.full(len(tests), np.nan) for _ in range(3))
+    p, z, impact, spread = (np.full(len(tests), np.nan) for _ in range(4))
     weeks = sorted(int(week) for week in tests["week"].unique())
     for metric in spec["metrics"]:
         national = weekly.groupby("week")[metric].sum()
@@ -173,9 +176,9 @@ def timestral_tests(weekly: pd.DataFrame, dataset: str, tests: pd.DataFrame, mod
                         scored = share_model.quantile_p(child * (1 - drop) / parent_now, quantiles[position], levels)
                         if scored is None:
                             continue
-                        z[row], p[row], median, _ = scored
+                        z[row], p[row], median, spread[row] = scored
                         impact[row] = (child * (1 - drop) / parent_now - median) * parent_now
-    return tests.assign(timestral=p, timestral_z=z, timestral_impact=impact)
+    return tests.assign(timestral=p, timestral_z=z, timestral_impact=impact, timestral_spread=spread)
 
 
 def add_rules(tests: pd.DataFrame, origins: int = 52, min_origins: int = 20) -> pd.DataFrame:
@@ -194,6 +197,17 @@ def add_rules(tests: pd.DataFrame, origins: int = 52, min_origins: int = 20) -> 
         rms.append(math.sqrt(float(np.mean(past**2))) if len(past) >= min_origins else np.nan)
     df = (tests["n"] - 1).clip(lower=3)
     scale = (pd.Series(rms, index=tests.index) / np.sqrt(df / (df - 2))).clip(lower=1.0).fillna(1.0)
+    if "timestral_spread" in tests and "seasonal_spread" in tests:
+        # Timestral against the seasonal baseline, and against both engine
+        # baselines: whichever candidate has the smallest relative spread.
+        for rule, others in (("hybrid", ("seasonal",)), ("hybrid3", ("trailing", "seasonal"))):
+            best = tests["timestral_spread"].where(tests["timestral"].notna(), np.inf)
+            tests[rule], tests[f"{rule}_impact"] = tests["timestral"], tests["timestral_impact"]
+            for method in others:
+                tighter = tests[f"{method}_spread"].fillna(np.inf) < best
+                tests.loc[tighter, rule] = tests.loc[tighter, f"{method}_p"]
+                tests.loc[tighter, f"{rule}_impact"] = tests.loc[tighter, f"{method}_effect"]
+                best = best.where(~tighter, tests[f"{method}_spread"])
     tests["calibrated"] = [
         temporal.student_t_two_sided_p(t / factor, int(freedom))
         for t, factor, freedom in zip(tests["t"], scale, df, strict=True)
@@ -276,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     clean = tests.loc[(tests["drop"] == 0.0) & tests["week"].isin(list(spent))]
     print(f"clean leaf tests {len(clean)}; chosen t sd {clean['t'].std():.2f}")
     rules = ["current", "trailing", "seasonal", "larger", "bonferroni", "calibrated"]
-    rules += ["timestral"] if "timestral" in tests else []
+    rules += [rule for rule in ("timestral", "hybrid", "hybrid3") if rule in tests]
     for rule in rules:
         below = int((clean[rule] < 0.01).sum())
         curve = [score(tests, rule, spent, q) for q in args.qs]

@@ -137,6 +137,18 @@ Student-t tail on Timestral's z (3, 5 or 10 df) only moves the operating
 point along a lower curve (Favorita 10 df: 9 alarms, 0.22), so the normal
 tail stays. 209M is a little better on M5 and level on Favorita.
 
+**Seasonal hybrid** (harness only, `hybrid` and `hybrid3` in
+`share_rules.py`): Timestral or the seasonal baseline, or Timestral or
+either engine baseline, whichever has the smaller relative spread. The
+hybrid picks an engine baseline for 11-15% of cut rows. The curve barely
+moves (Favorita q 0.001: 31/120, 0.57 against Timestral's 29, 0.56; M5 7/172
+against 4 at q 0.01, same detection), and it raises more clean alarms at
+the same q (`hybrid3` most). On HOBBIES_2 over all spent weeks Timestral
+alone already beats the seasonal baseline (40% cuts at p < 1e-3: 0.62
+against 0.47; median relative spread 0.114 against 0.141), and the hybrid
+adds a little (0.67). The full-engine HOBBIES_2 misses on M5 confirm were
+those weeks, not a seasonal weakness in general. The simpler rule stays.
+
 **Full engine at q = 0.001** (2026-11-03, `runall-q.sh`; `--fdr-q` sets
 `temporal_fdr_q`, which also tightens the national tests):
 
@@ -190,9 +202,8 @@ faulty period is used.
    with the engine.
 2. **Model size.** 209M is a little better on M5 and level on Favorita, at
    about 6x the CPU (395 against 70 ms per refresh, single test).
-3. **Seasonal leaves.** HOBBIES_2 still loses to the year-over-year baseline.
-   A hybrid (Timestral as a third candidate in the engine's min-spread
-   choice) may keep it; to be scored on the harness first.
+3. **Settled: seasonal leaves.** A min-spread hybrid with the engine's
+   baselines does not improve the curve; Timestral alone stays.
 4. **One rule for both datasets.** A per-dataset choice made after seeing
    these splits would not be a registered test.
 5. **Settled: tails.** Heavier tails move the operating point along a lower

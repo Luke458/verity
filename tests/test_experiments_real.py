@@ -243,3 +243,25 @@ def test_share_rules_scores_the_pretrained_baseline_on_the_engines_rows():
     clean, cut = scored[scored["drop"] == 0.0], scored[scored["drop"] == DROP]
     assert (clean["timestral"] > 0.01).all()
     assert (cut["timestral"] < 1e-6).all() and (cut["timestral_impact"] < 0).all()
+
+
+def test_share_rules_hybrids_take_the_tightest_candidate():
+    import numpy as np
+    import pandas as pd
+
+    from experiments.real.share_rules import add_rules
+
+    tests = pd.DataFrame({
+        "metric": "units", "leaf": ["a", "b", "c"], "week": 100, "drop": 0.0, "level": 1.0,
+        "t": 0.0, "p": 0.5, "n": 30, "impact": 0.0,
+        "trailing_p": [0.1, 0.2, 0.3], "trailing_spread": [0.30, 0.05, 0.30], "trailing_effect": [1.0, 2.0, 3.0],
+        "seasonal_p": [0.4, 0.5, np.nan], "seasonal_spread": [0.10, 0.08, np.nan], "seasonal_effect": [4.0, 5.0, np.nan],
+        "timestral": [0.7, 0.8, 0.9], "timestral_spread": [0.20, 0.10, 0.20], "timestral_impact": [7.0, 8.0, 9.0],
+    })
+    # Two weeks per leaf: the calibrated rule reads each leaf's past weeks.
+    rules = add_rules(pd.concat([tests.assign(week=99), tests]), min_origins=1).query("week == 100")
+    # a: seasonal is tightest; b: trailing is tightest, seasonal beats Timestral; c: no seasonal test.
+    assert rules["hybrid"].tolist() == [0.4, 0.5, 0.9]
+    assert rules["hybrid_impact"].tolist() == [4.0, 5.0, 9.0]
+    assert rules["hybrid3"].tolist() == [0.4, 0.2, 0.9]
+    assert rules["hybrid3_impact"].tolist() == [4.0, 2.0, 9.0]
