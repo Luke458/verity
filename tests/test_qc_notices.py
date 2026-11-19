@@ -9,7 +9,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from qc.cli import main
-from qc.notices import NONE, Candidate, SystemOneMatcher, load_notices
+from qc.notices import (
+    NONE,
+    Candidate,
+    ExtractMatcher,
+    PatternMatcher,
+    load_notices,
+    reading_from_answers,
+)
 from qcgen.config import suite_config
 from qcgen.scenarios import build_scenario
 
@@ -122,21 +129,60 @@ def test_closure_and_move_notices_draft_entries_that_explain_once_approved(tmp_p
     assert approved["status"] == ("INVESTIGATE" if remaining else "PASS_WITH_EXPLANATION")
 
 
-class _Service(BaseHTTPRequestHandler):
-    """A canned System One service: picks c0, fails the dataset check for "[Other]" notices."""
+def _answers(**values):
+    return {name: {"value": value, "confidence": 0.9} for name, value in values.items()}
+
+
+def test_reading_from_extracted_fields():
+    names = {"C04": "First Aid"}
+    reading = reading_from_answers(
+        _answers(data_source="the sales feed", change="store closed, not trading or sending no sales", planned=False,
+                 stores=["Store 16", "S004"], products=[], categories=["First Aid"], first_week=104, last_week=None),
+        "synthetic-retail", names,
+    )
+    assert not reading.other_dataset and not reading.planned
+    assert reading.change_type == "missing_stores"
+    assert reading.ids == {"S016", "S004", "C04"} and reading.spans == [(104, None)]
+    # A named source sharing no word with the dataset is another dataset; none named is not.
+    other = reading_from_answers(_answers(data_source="Wholesale shipments"), "synthetic-retail", {})
+    assert other.other_dataset and other.change_type is None
+    assert not reading_from_answers(_answers(data_source=None), "synthetic-retail", {}).other_dataset
+
+
+def test_a_merge_explains_a_new_store_only_through_its_new_id():
+    merge = [
+        Candidate("c0", "ENTITY_REMOVED", "store", ["S005"], [1, 103], "stores removed entirely: S005"),
+        Candidate("c1", "ENTITY_REPLACED", "store", ["S005", "S900"], [], "S005 replaced by S900"),
+        Candidate("c2", "NEW_ENTITY_HISTORICAL_BACKFILL", "store", ["S900"], [1, 103], "new: S900"),
+    ]
+    backfill = [merge[2]]
+    patterns = PatternMatcher()
+    # The right direction explains the merge's own changes.
+    assert patterns.match("Consolidation - S005 replaced by S900.", merge, "ds", 104, {}).candidate == "c0"
+    assert patterns.match("Consolidation - S005 replaced by S900.", backfill, "ds", 104, {}).candidate == "c2"
+    # S900 named as the old id cannot explain S900 arriving with history (the confirm run's defect).
+    assert patterns.match("Consolidation - S900 replaced by S969.", backfill, "ds", 104, {}).candidate == NONE
+    assert patterns.match("S900 now trades as S969.", merge, "ds", 104, {}).candidate == NONE
+    # No direction read (no forward phrase): the old rule, any shared id.
+    assert patterns.match("Consolidation of S900 and S969 in the store master.", backfill, "ds", 104, {}).candidate == "c2"
+
+    # The extraction reading has no direction field: it keeps the any-shared-id rule.
+    answers = _answers(change="store merged into or replaced by another store", planned=False, stores=["S900", "S969"])
+    assert reading_from_answers(answers, "ds", {}, latest_week=104).merge_targets is None
+
+
+class _Extract(BaseHTTPRequestHandler):
+    """A canned Extract service, wrapped like Workers AI ("result")."""
 
     requests: list[dict] = []
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        _Service.requests.append(body)
-        if "match" in body["questions"]:
-            answers = {"match": {"type": "choice", "choice": "c0", "probabilities": {"c0": 0.8, "none": 0.2}}}
-        else:
-            other = body["state"]["notice"].startswith("[Other]")
-            answers = {q: {"type": "noul", "noul": 0.1 if (other and q == "same_dataset") else 0.9}
-                       for q in body["questions"]}
-        payload = json.dumps({"model": body["model"], "answers": answers}).encode()
+        _Extract.requests.append({"body": body, "auth": self.headers.get("Authorization")})
+        other = body["state"].startswith("[Other]")
+        answers = _answers(data_source="Other feed" if other else None, change="store closed, not trading or sending no sales",
+                           planned=False, stores=["S005"], first_week=104)
+        payload = json.dumps({"result": {"model": "clairic-flash", "answers": answers}, "success": True}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -147,21 +193,25 @@ class _Service(BaseHTTPRequestHandler):
         pass
 
 
-def test_systemone_matcher_speaks_the_protocol_and_checks_veto():
-    server = HTTPServer(("127.0.0.1", 0), _Service)
+def test_extract_matcher_reads_then_decides_deterministically():
+    server = HTTPServer(("127.0.0.1", 0), _Extract)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        matcher = SystemOneMatcher(f"http://127.0.0.1:{server.server_port}", "lux")
+        matcher = ExtractMatcher(f"http://127.0.0.1:{server.server_port}", token="t0ken")
         cands = [Candidate("c0", "LATEST_WEEK_MISSING", "store", ["S005"], [104], "stores missing: S005")]
-        assert matcher.match("S005 closed for refit.", cands, "ds", 104, {}).candidate == "c0"
-        assert matcher.match("[Other] S005 closed for refit.", cands, "ds", 104, {}).candidate == NONE
-        choice = _Service.requests[0]
-        assert choice["model"] == "lux" and set(choice["questions"]["match"]["criteria"]) == {"c0", NONE}
-        assert set(_Service.requests[1]["questions"]) == {"same_dataset", "in_effect", "same_kind", "weeks_cover"}
+        found = matcher.match("S005 closed for refit.", cands, "ds", 104, {})
+        assert found.candidate == "c0" and found.details["extracted"]["stores"]["value"] == ["S005"]
+        assert matcher.match("[Other] S005 closed.", cands, "ds", 104, {}).candidate == NONE
+        # Another store's closure: the rules find no observed change that fits.
+        other_store = [Candidate("c0", "LATEST_WEEK_MISSING", "store", ["S009"], [104], "stores missing: S009")]
+        assert matcher.match("S005 closed for refit.", other_store, "ds", 104, {}).candidate == NONE
+        sent = _Extract.requests[0]
+        assert sent["auth"] == "Bearer t0ken" and sent["body"]["model"] == "clairic-flash"
+        assert "candidates" not in json.dumps(sent["body"]) and sent["body"]["state"] == "S005 closed for refit."
     finally:
         server.shutdown()
     with pytest.raises(ValueError):
-        SystemOneMatcher("http://decisions.example.com", "lux")
+        ExtractMatcher("http://extract.example.com")
 
 
 def test_notice_files_in_three_formats(tmp_path):
@@ -173,3 +223,11 @@ def test_notice_files_in_three_formats(tmp_path):
         path = tmp_path / name
         path.write_text(body)
         assert [n["text"] for n in load_notices(path)] == ["first notice", "second notice"]
+    # A text file whose first notice has a [tag] is lines, not a broken JSON list.
+    tagged = tmp_path / "inbox.txt"
+    tagged.write_text("[Wholesale shipments] S004 closed.\n{braces} in a second notice\n")
+    assert [n["text"] for n in load_notices(tagged)] == ["[Wholesale shipments] S004 closed.", "{braces} in a second notice"]
+    broken = tmp_path / "broken.json"
+    broken.write_text("[not json")
+    with pytest.raises(json.JSONDecodeError):
+        load_notices(broken)

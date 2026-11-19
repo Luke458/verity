@@ -183,7 +183,12 @@ reworded by a second local model, it found 89% of the true matches, against
 52% for hand-written patterns, at a similar false-explanation rate (11% vs
 9%). The predictions were again registered first
 ([notice-matching.md](notice-matching.md)). About four in ten of its
-suggestions are still wrong, so it drafts and a person approves.
+suggestions are still wrong, so it drafts and a person approves. An
+extraction model, Clairic-flash, did better later in the same role. It only
+read each notice into typed fields, and the patterns' own rules decided the
+match. On a registered confirm split it found 80% of true matches at 2.7%
+false explanations, against 88% at 10.2% for the decision model, which was
+then removed from `qc notices`.
 
 Drafting exposed a gap. The registry could not express two of the commonest
 notices, a store closure and a category move, so the model's correct matches

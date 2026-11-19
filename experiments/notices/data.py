@@ -21,7 +21,7 @@ import numpy as np
 
 from .notices import CHANGE_TYPES, candidates, notices_for, world_from_dims
 
-SPLITS = {"dev": range(8101, 8111), "test": range(8201, 8221)}
+SPLITS = {"dev": range(8101, 8111), "test": range(8201, 8221), "confirm": range(8301, 8321)}
 # Faults with a notice template, two without one, and clean refreshes.
 FAMILIES = (*CHANGE_TYPES, "coding_error", "market_movement", "clean", "clean")
 DATA_VERSION = 1

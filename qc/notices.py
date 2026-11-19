@@ -7,11 +7,12 @@ express that change, it writes an **unapproved** registry entry that cites the
 notice. A person sets ``approved_by``/``approved_at`` and ``confirmed`` before
 the engine will use it; nothing here changes a status.
 
-Two matchers: ``PatternMatcher`` (deterministic, the default) and
-``SystemOneMatcher``, which asks any decision service speaking the System One
-protocol (``POST /v1/systemone``) one choice question and four yes/no checks,
-and keeps a match only if every check holds. docs/notice-matching.md
-measures both.
+Two matchers share the same deterministic rules (``decide``) and differ in how
+they read a notice: ``PatternMatcher`` (regexes, the default) and
+``ExtractMatcher``, which asks an extraction service (System One: Extract, for
+example Clairic-flash) to fill ``NOTICE_FIELDS``. docs/notice-matching.md
+measures both, and a decision model that chose among the candidates itself
+(removed after it lost on false explanations).
 """
 
 from __future__ import annotations
@@ -155,6 +156,10 @@ CUES: tuple[tuple[str, str], ...] = (
     (r"\bclosed?\b|\bclosures?\b|\bdid not trade\b|\bno sales feed\b|\brefit\b|\brenovations?\b", "missing_stores"),
 )
 FUTURE = re.compile(r"\bwill\b|\bto be\b|\bplanned\b", re.IGNORECASE)
+# Phrases that name the old id before the new one ("S005 merged into S900").
+MERGE_FORWARD = re.compile(
+    r"\b(?:merged into|replaced by|now trades as|rebranded (?:to|as)|consolidated into)\b", re.IGNORECASE
+)
 WEEKS = re.compile(r"\b(?:weeks?|wk)\s*(\d+)(?:\s*(?:-|to|through)\s*(\d+))?", re.IGNORECASE)
 
 
@@ -166,6 +171,77 @@ def _ids(text: str, names: Mapping[str, str]) -> set[str]:
     found |= set(re.findall(r"\bC\d{2}\b", text))
     found |= {cid for cid, name in names.items() if cid.startswith("C") and name.lower() in text.lower()}
     return found
+
+
+@dataclass
+class Reading:
+    """What a notice says, in the terms the matching rules use."""
+
+    other_dataset: bool
+    change_type: str | None  # an ACCEPTS key, or None when no known kind of change
+    planned: bool
+    ids: set[str]
+    spans: list[tuple[int, int | None]]  # stated week ranges, first one used
+    merge_targets: set[str] | None = None  # a merge's new ids; None when the direction is not read
+
+
+def _merge_fits(reading: Reading, cand: Candidate) -> bool:
+    """A merge explains a new entity only through its new id, a removal only through an old one."""
+    targets = reading.merge_targets
+    if targets is None:
+        return True
+    shared = reading.ids & {part for e in cand.entity_ids for part in e.split("->")}
+    if cand.classification == NEW_BACKFILL:
+        return bool(shared & targets)
+    if cand.classification == REMOVED:
+        return bool(shared - targets)
+    if cand.classification == REPLACED:  # entity_ids are (old, new) pairs
+        pairs = zip(cand.entity_ids[0::2], cand.entity_ids[1::2], strict=False)
+        return any((old in shared and old not in targets) or new in targets for old, new in pairs)
+    return True
+
+
+def decide(reading: Reading, cands: Sequence[Candidate], latest_week: int) -> Match:
+    """Deterministic rules: another dataset, kind of change, tense, a shared entity id, weeks."""
+    if reading.other_dataset:
+        return Match(NONE, {"reason": "another dataset"})
+    change_type = reading.change_type
+    if change_type is None:
+        return Match(NONE, {"reason": "no change cue"})
+    if reading.planned:
+        return Match(NONE, {"reason": "not yet in effect"})
+    spans = reading.spans
+    for cand in cands:
+        if cand.classification not in ACCEPTS[change_type]:
+            continue
+        if not reading.ids & {part for e in cand.entity_ids for part in e.split("->")}:
+            continue
+        if change_type == "entity_merge" and not _merge_fits(reading, cand):
+            continue
+        if spans and cand.weeks and change_type in ("new_store_backfill", "history_truncation"):
+            start, end = spans[0]
+            end = end if end is not None else latest_week
+            if not (start <= min(cand.weeks) and max(cand.weeks) <= end + 1):
+                continue
+        if spans and change_type in ("missing_stores", "missing_products", "commodity_remap"):
+            if spans[0][0] > latest_week:
+                continue
+        return Match(cand.key, {"change_type": change_type})
+    return Match(NONE, {"reason": "no observed change fits", "change_type": change_type})
+
+
+def read_patterns(text: str, dataset: str, names: Mapping[str, str]) -> Reading:
+    tag = re.match(r"^\[(.+?)\]", text)
+    forward = MERGE_FORWARD.search(text)
+    after = _ids(text[forward.end():], names) if forward else set()
+    return Reading(
+        other_dataset=bool(tag and tag.group(1) != dataset),
+        change_type=next((t for pattern, t in CUES if re.search(pattern, text, re.IGNORECASE)), None),
+        planned=bool(FUTURE.search(text)),
+        ids=_ids(text, names),
+        spans=[(int(a), int(b) if b else None) for a, b in WEEKS.findall(text)],
+        merge_targets=after or None,
+    )
 
 
 class PatternMatcher:
@@ -180,129 +256,150 @@ class PatternMatcher:
     def match(
         self, text: str, cands: Sequence[Candidate], dataset: str, latest_week: int, names: Mapping[str, str]
     ) -> Match:
-        tag = re.match(r"^\[(.+?)\]", text)
-        if tag and tag.group(1) != dataset:
-            return Match(NONE, {"reason": "another dataset"})
-        change_type = next((t for pattern, t in CUES if re.search(pattern, text, re.IGNORECASE)), None)
-        if change_type is None:
-            return Match(NONE, {"reason": "no change cue"})
-        if FUTURE.search(text):
-            return Match(NONE, {"reason": "not yet in effect"})
-        ids = _ids(text, names)
-        spans = [(int(a), int(b) if b else None) for a, b in WEEKS.findall(text)]
-        for cand in cands:
-            if cand.classification not in ACCEPTS[change_type]:
-                continue
-            if not ids & {part for e in cand.entity_ids for part in e.split("->")}:
-                continue
-            if spans and cand.weeks and change_type in ("new_store_backfill", "history_truncation"):
-                start, end = spans[0]
-                end = end if end is not None else latest_week
-                if not (start <= min(cand.weeks) and max(cand.weeks) <= end + 1):
-                    continue
-            if spans and change_type in ("missing_stores", "missing_products", "commodity_remap"):
-                if spans[0][0] > latest_week:
-                    continue
-            return Match(cand.key, {"change_type": change_type})
-        return Match(NONE, {"reason": "no observed change fits", "change_type": change_type})
+        return decide(read_patterns(text, dataset, names), cands, latest_week)
 
 
 DATASET_DESCRIPTION = "weekly point-of-sale sales of a pharmacy chain, by store and product"
-QUESTION = (
-    "Which of the changes observed in this refresh does the notice describe? Choose none if the "
-    "notice does not account for any of them: it is about other stores or products, a different "
-    "kind of change, other weeks, something that has not happened yet, or another dataset."
-)
 
 
-def choice_request(
-    text: str, cands: Sequence[Candidate], dataset: str, latest_week: int
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """System One state and question: which observed change does the notice describe?"""
-    state = {"dataset being checked": dataset, "latest week in this refresh": latest_week, "notice": text}
-    criteria = {c.key: c.description for c in cands}
-    criteria[NONE] = "None of the observed changes"
-    return state, {"match": {"type": "choice", "instructions": QUESTION, "criteria": criteria}}
+# An extraction model reads the notice into the fields ``decide`` needs; the
+# matching rules stay deterministic and identical to the pattern baseline's.
+NOTICE_SCHEMA_VERSION = 2
+CHANGE_PHRASES = {
+    "store closed, not trading or sending no sales": "missing_stores",
+    "products discontinued, delisted or out of stock": "missing_products",
+    "new store added with past history": "new_store_backfill",
+    "sales history deleted or withdrawn": "history_truncation",
+    "products moved to another category": "commodity_remap",
+    "store merged into or replaced by another store": "entity_merge",
+    "something else": None,
+}
+NOTICE_FIELDS: dict[str, Any] = {
+    "data_source": {
+        "type": "text",
+        "instructions": "The name of the dataset, data feed or data source the notice says is affected, as "
+        "written, including a [tag] at the start of the notice (for example 'Wholesale shipments', 'loyalty "
+        "panel' or 'sales feed'). Null if the notice names none; words such as data, history or records alone "
+        "are not a name.",
+    },
+    "change": {
+        "type": "enum",
+        "enum": list(CHANGE_PHRASES),
+        "instructions": "The kind of change the notice reports.",
+    },
+    "planned": {
+        "type": "boolean",
+        "instructions": "True only if the change itself has not happened yet (planned or upcoming). False if "
+        "it has happened or is in effect; a later reopening, reversal or resupply does not make it planned.",
+    },
+    "stores": {
+        "type": "list",
+        "items": "text",
+        "instructions": "Every store the change applies to, as written (for example 'S012' or 'store 12').",
+    },
+    "products": {
+        "type": "list",
+        "items": "text",
+        "instructions": "Every product the change applies to, as written (for example 'P0042' or 'item 42').",
+    },
+    "categories": {
+        "type": "list",
+        "items": "text",
+        "instructions": "Every product category the notice mentions, as written (a code such as 'C04' or a name).",
+    },
+    "first_week": {"type": "number", "integer": True, "instructions": "The first week number the change applies to."},
+    "last_week": {"type": "number", "integer": True, "instructions": "The last week number the change applies to."},
+}
+_GENERIC = frozenset({
+    "a", "and", "by", "data", "dataset", "entry", "feed", "file", "for", "history", "in", "information",
+    "of", "on", "record", "table", "the", "trading",
+})
 
 
-def check_request(
-    text: str, cand: Candidate, dataset: str, latest_week: int, description: str = DATASET_DESCRIPTION
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Direct yes/no checks on a chosen change; code requires all of them to hold."""
-    state = {
-        "dataset being checked": f"{dataset}: {description}",
-        "latest week in this refresh": latest_week,
-        "notice": text,
-        "observed change": cand.description,
-    }
-    yes_no = {"false": "No", "true": "Yes"}
-    questions = {
-        "same_dataset": {
-            "type": "noul",
-            "instructions": f"Is the notice about the dataset being checked ({dataset})? "
-            "Answer no if it names a different dataset or data source.",
-            "criteria": yes_no,
-        },
-        "in_effect": {
-            "type": "noul",
-            "instructions": f"Had the change in the notice already happened by week {latest_week}? "
-            "Answer no if it is planned for a later week.",
-            "criteria": yes_no,
-        },
-        "same_kind": {
-            "type": "noul",
-            "instructions": "Does the notice describe the same kind of change as the observed change "
-            "(for example a closure, a new store with history, deleted history, a category move or a merge)?",
-            "criteria": yes_no,
-        },
-        "weeks_cover": {
-            "type": "noul",
-            "instructions": "Do the weeks stated in the notice cover the weeks of the observed change? "
-            "Answer yes if either states no weeks.",
-            "criteria": yes_no,
-        },
-    }
-    return state, questions
+def _words(text: str) -> set[str]:
+    words = (w[:-1] if len(w) > 3 and w.endswith("s") else w for w in re.findall(r"[a-z0-9]+", text.lower()))
+    return {w for w in words if w not in _GENERIC}
 
 
-def _endpoint_url(base: str) -> str:
-    from .notify import _validate_webhook_target
-
-    url = base.rstrip("/")
-    url = url if url.endswith("/v1/systemone") else url + "/v1/systemone"
-    _validate_webhook_target(url)  # https, or http to loopback only
-    return url
+def extract_request(text: str) -> dict[str, Any]:
+    """A System One: Extract body for one notice; the candidates are not shown to the model."""
+    return {"state": text, "fields": NOTICE_FIELDS}
 
 
-class SystemOneMatcher:
-    """A System One decision service: one choice, then yes/no checks on the chosen change."""
+def reading_from_answers(
+    answers: Mapping[str, Any],
+    dataset: str,
+    names: Mapping[str, str],
+    description: str = DATASET_DESCRIPTION,
+    latest_week: int | None = None,
+    text: str | None = None,
+) -> Reading:
+    """Extracted values -> ``Reading``.
 
-    name = "systemone"
+    A named source is another dataset when it shares no word with the dataset's
+    name or description; ids normalize as in the patterns. Stated weeks override
+    tense: a change that starts by ``latest_week`` is in effect. With ``text``,
+    ids the patterns find in the notice are added to the model's.
+    """
+    value = {name: (answer or {}).get("value") for name, answer in answers.items()}
+    source = value.get("data_source")
+    words = _words(source) if isinstance(source, str) else set()
+    listed = [
+        *(f"store {s}" for s in value.get("stores") or ()),
+        *(f"product {p}" for p in value.get("products") or ()),
+        *(str(c) for c in value.get("categories") or ()),
+    ]
+    first, last = value.get("first_week"), value.get("last_week")
+    start = first if first is not None else last
+    started = start is not None and latest_week is not None and int(start) <= latest_week
+    return Reading(
+        other_dataset=bool(words) and not words & _words(f"{dataset} {description}"),
+        change_type=CHANGE_PHRASES.get(value.get("change") or "something else"),
+        planned=value.get("planned") is True and not started,
+        ids=_ids(" ; ".join(listed), names) | (_ids(text, names) if text else set()),
+        spans=[(int(start), int(last) if last is not None else None)] if start is not None else [],
+        # NOTICE_FIELDS has no new-id field, so a merge's direction is not read
+        # (the model lists one store for most merges): the old any-shared-id rule.
+    )
+
+
+class ExtractMatcher:
+    """An extraction service (System One: Extract, e.g. Clairic-flash) reads the notice; ``decide`` matches."""
+
+    name = "extract"
 
     def __init__(
         self,
         endpoint: str,
-        model: str,
-        threshold: float = 0.5,
-        timeout: float = 60.0,
+        model: str = "clairic-flash",
+        timeout: float = 120.0,
         dataset_description: str = DATASET_DESCRIPTION,
+        token: str | None = None,
     ):
-        self.url = _endpoint_url(endpoint)
-        self.model, self.threshold, self.timeout = model, threshold, timeout
+        url = endpoint.rstrip("/")
+        self.url = url if "/v1/" in url or "/ai/run/" in url else url + "/v1/extract"
+        from .notify import _validate_webhook_target
+
+        _validate_webhook_target(self.url)  # https, or http to loopback only
+        self.model, self.timeout, self.token = model, timeout, token
         self.dataset_description = dataset_description
 
-    def _ask(self, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
+    def _extract(self, text: str) -> dict[str, Any]:
         import urllib.request
 
         from .notify import _OPENER
 
-        body = json.dumps({"model": self.model, "state": state, "questions": questions}).encode()
-        request = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
+        body = json.dumps({"model": self.model, **extract_request(text)}).encode()
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.url, data=body, headers=headers)
         with _OPENER.open(request, timeout=self.timeout) as response:
             payload = json.loads(response.read())
-        answers = payload.get("answers", payload)
+        payload = payload.get("result", payload)  # Workers AI wraps the body in "result"
+        answers = payload.get("answers")
         if not isinstance(answers, dict):
-            raise ValueError("decision service returned no answers")
+            raise ValueError("extraction service returned no answers")
         return answers
 
     def match(
@@ -310,17 +407,15 @@ class SystemOneMatcher:
     ) -> Match:
         if not cands:
             return Match(NONE)
-        probabilities = self._ask(*choice_request(text, cands, dataset, latest_week))["match"]["probabilities"]
-        best = max(probabilities, key=probabilities.__getitem__)
-        if best == NONE:
-            return Match(NONE, {"probabilities": probabilities})
-        cand = next(c for c in cands if c.key == best)
-        answers = self._ask(*check_request(text, cand, dataset, latest_week, self.dataset_description))
-        checks = {name: float(answer["noul"]) for name, answer in answers.items()}
-        details = {"probabilities": probabilities, "checks": checks}
-        if min(checks.values()) < self.threshold:
-            return Match(NONE, {**details, "reason": "a check failed"})
-        return Match(best, details)
+        answers = self._extract(text)
+        reading = reading_from_answers(answers, dataset, names, self.dataset_description, latest_week)
+        result = decide(reading, cands, latest_week)
+        extracted = {
+            name: {k: a.get(k) for k in ("value", "confidence", "p_null", "span", "spans") if k in a}
+            for name, a in answers.items()
+            if isinstance(a, dict)
+        }
+        return Match(result.candidate, {**result.details, "extracted": extracted})
 
 
 # ---------------------------------------------------------------------------
@@ -329,16 +424,30 @@ class SystemOneMatcher:
 
 
 def load_notices(path: str | Path) -> list[dict[str, str]]:
-    """Notices from JSON (a list of strings or {"id", "text"}), JSONL, or plain text lines."""
-    raw = Path(path).read_text()
+    """Notices from JSON (a list of strings or {"id", "text"}), JSONL, or plain text lines.
+
+    ``.json`` and ``.jsonl`` files must parse. Any other file is read as JSON
+    only if it parses as such, so a text file whose first notice starts with a
+    ``[tag]`` is read as lines.
+    """
+    source = Path(path)
+    raw = source.read_text()
     stripped = raw.lstrip()
-    items: list[Any]
-    if stripped.startswith("["):
-        items = json.loads(raw)
-    elif stripped.startswith("{"):
-        items = [json.loads(line) for line in raw.splitlines() if line.strip()]
-    else:
-        items = [line.strip() for line in raw.splitlines() if line.strip()]
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    items: list[Any] = lines
+    if source.suffix == ".json" or (source.suffix != ".jsonl" and stripped.startswith("[")):
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            if source.suffix == ".json":
+                raise
+    elif source.suffix == ".jsonl" or stripped.startswith("{"):
+        try:
+            items = [json.loads(line) for line in lines]
+        except json.JSONDecodeError:
+            if source.suffix == ".jsonl":
+                raise
+            items = lines
     notices = []
     for index, item in enumerate(items):
         if isinstance(item, str):
@@ -394,7 +503,11 @@ def draft(
     matches: list[dict[str, Any]] = []
     drafts: dict[str, dict[str, Any]] = {}  # one per observed change, citing every supporting notice
     for notice in notices:
-        found = matcher.match(notice["text"], cands, result.dataset, latest, names) if cands else Match(NONE)
+        found = (
+            matcher.match(notice["text"], cands, result.dataset, latest, names)
+            if cands
+            else Match(NONE, {"reason": "the refresh shows no lifecycle change"})
+        )
         cand = by_key.get(found.candidate)
         targets: list[Candidate] = []
         if cand is not None and cand.classification == REPLACED:

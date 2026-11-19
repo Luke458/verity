@@ -118,7 +118,7 @@ registry entry that would explain it:
 qc notices --scenario-dir data/suites/demo/scenario-0003 \
   --notices inbox.txt --out drafts.json                 # deterministic patterns
 qc notices --scenario-dir ... --notices inbox.txt --out drafts.json \
-  --matcher systemone --endpoint http://127.0.0.1:8090 --model lux
+  --matcher extract --endpoint http://127.0.0.1:8091     # Clairic-flash reads, the rules decide
 ```
 
 Notices are a JSON list, JSONL (`{"id", "text"}`) or one per line. Each is
@@ -140,15 +140,25 @@ historical-revision findings into HUMAN_APPROVED, an approved closure or move
 also clears the latest-week findings of the banners or categories it moved,
 and an unrelated temporal anomaly stays unexplained.
 
-`--matcher systemone` asks any service speaking the System One protocol
-(`POST /v1/systemone`, for example `experiments/labeller/lux.py serve` or a
-llama.cpp server). It asks one choice question and four yes/no checks, and
-keeps a match only when every check clears `--threshold`. The human output
-shows each match's weakest check. Endpoints follow the webhook rules: https,
-or http to loopback, and no redirects. On synthetic notices reworded by an
-LLM, this found 89% of true matches against 52% for the patterns, but about
-four in ten of its suggestions were wrong, mostly notices about another
-dataset ([notice-matching.md](notice-matching.md)). Review every draft.
+`--matcher extract` asks an extraction service (System One: Extract, for
+example Clairic-flash) to read each notice into typed fields: data source,
+kind of change, whether it is planned, stores, products, categories and
+weeks. The pattern matcher's own deterministic rules then pick the observed
+change; the model never sees the candidates. Each match records the extracted
+values with their confidence and character spans, and the human output gives
+the rule that rejected a notice (another dataset, not yet in effect, no
+observed change fits). Endpoints follow the webhook rules: https, or http to
+loopback, and no redirects. Serve Clairic-flash locally
+with `python -m experiments.notices.clairic serve --model ~/models/clairic-flash
+--quant int8` (`POST /v1/extract` on 127.0.0.1:8091; needs the runtime's own
+environment, see the module docstring), or point `--endpoint` at the Workers
+AI model URL with `QC_EXTRACT_TOKEN` set to an API token. On a registered
+confirm split of reworded synthetic notices it found 80% of true matches at
+2.7% false explanations, against 52% at 6.8% for the patterns and 88% at 10.2%
+for a decision model (Decision-2.0-Lux-9B) that chose among the candidates
+itself ([notice-matching.md](notice-matching.md)); that matcher
+(`--matcher systemone`) was removed. About one suggestion in six was wrong:
+review every draft. It takes about 6-8 s per notice on a 16 GB GPU.
 
 ## Scheduling
 
