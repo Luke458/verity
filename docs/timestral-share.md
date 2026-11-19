@@ -303,7 +303,9 @@ splits, and q remains a per-feed choice, as decided on 2026-10-15
 
 Run 2026-11-03 on `797a41e` (clean tree), engine `20db19243faa`, both arms
 and both retailers, 100 refreshes per split. Predictions unchanged. Outputs:
-`reports/real/timestral/{m5,fav}-{engine,ts209M}-test.json`.
+`reports/real/timestral/{m5,fav}-{engine,ts209M}-test.json`; the four
+summaries, per-refresh records and the paired counts below are published in
+[`results/timestral-test.json`](results/timestral-test.json).
 
 **All registered predictions hold. P3 holds only at its bound.**
 

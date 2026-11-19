@@ -316,9 +316,10 @@ class DatasetConfig:
     # replaces the single-week test only. Experimental; see
     # docs/timestral-share.md.
     share_baseline: str = "engine"
-    share_model: str = "mistralai/Timestral-28M"
-    # Hub commit of the weights; empty follows the repo's main branch.
-    share_model_revision: str = ""
+    # The registered arm (docs/timestral-share.md): Timestral-209M at the
+    # commit it was tested on. Empty revision follows the repo's main branch.
+    share_model: str = "mistralai/Timestral-209M"
+    share_model_revision: str = "9874d252ab0aae16f7f7c999f98f98d6ad7d8365"
 
     # Attach rule-based cause labels (they never change the status).
     decision_enabled: bool = True

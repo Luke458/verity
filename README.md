@@ -27,7 +27,10 @@ finding; one final status (`PASS`, `PASS_WITH_EXPLANATION`, `INVESTIGATE`,
 > Ecuador) it again caught every restatement, recalculation and 100-product
 > outage and 18 of 20 store outages, but only 8 of 20 department drops of 40%,
 > and 30 of 100 clean refreshes raised a false alarm, against 25 predicted
-> ([docs/real-data-favorita.md](docs/real-data-favorita.md)). The [case study](docs/case-study.md) tells how it
+> ([docs/real-data-favorita.md](docs/real-data-favorita.md)). An opt-in pretrained share baseline
+> (Timestral-209M) caught more department drops on both retailers at the
+> same test level, cut M5's clean false alarms from 9 to 2 and raised
+> Favorita's from 28 to 35 ([docs/timestral-share.md](docs/timestral-share.md)). The [case study](docs/case-study.md) tells how it
 > got here and [docs/claims.md](docs/claims.md) records the evidence.
 > Backends: local Parquet snapshots and Delta tables via delta-rs.
 
@@ -212,6 +215,7 @@ To reimplement the engine in another stack instead, treat
 | Notice drafting (`qc notices`) | validated on synthetic notices; drafts need approval |
 | Real sales (M5) | measured on real sales with injected faults; false alarms above prediction on test, price check fixed and confirmed on fresh weeks; share tests still over-alarm |
 | Real sales, second retailer (Favorita) | measured on real sales with injected faults; outages and restatements transfer, department drops do not (40%: 8/20); false alarms 30/100, above prediction |
+| Pretrained share baseline (Timestral) | opt-in; measured on real sales with injected faults, registered predictions held: more department drops caught on both retailers, false alarms down on M5 (2 vs 9/100), up on Favorita (35 vs 28/100) |
 
 "Validated on synthetic data" means measured through the full engine against
 the generator's oracle; it is not a real-world accuracy claim. "Implemented,
@@ -242,6 +246,7 @@ data/, reports/     generated output (git-ignored)
 - [docs/evaluation.md](docs/evaluation.md): cohort gate, sweeps, false alarms, detection limits, approvals; each with its registered predictions
 - [docs/real-data.md](docs/real-data.md): the engine on real Walmart sales (M5): false alarms and injected-fault detection, registered before the test run
 - [docs/real-data-favorita.md](docs/real-data-favorita.md): the transfer test on a second retailer (Favorita), with real coverage gaps and store closures
+- [docs/timestral-share.md](docs/timestral-share.md): an opt-in pretrained share baseline (Timestral-209M) against the engine's, registered on both retailers' test splits
 - [docs/weekly-run.md](docs/weekly-run.md): weekly runs, journal, recovery, notifications, grain and calendars
 - [docs/onboarding.md](docs/onboarding.md): profiling a table and field mapping
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families

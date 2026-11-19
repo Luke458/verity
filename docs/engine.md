@@ -337,6 +337,15 @@ family's error rate holds and single-week sensitivity drops slightly.
 It catches slow declines and held drops that one week cannot, on synthetic
 data with modest share noise, and costs some one-week sensitivity, so it is
 off by default ([evaluation.md](evaluation.md#sustained-shifts-a-multi-week-window)).
+Opt-in, `share_baseline: timestral` replaces the trailing and seasonal
+baselines of the single-week share test with a pretrained forecast of each
+leaf's share (`share_model`, default `mistralai/Timestral-209M` at
+`share_model_revision`, the commit the registered test ran). The p-value is
+two-sided normal, its scale taken from the forecast's 10-50 or 50-90
+quantile gap on the side the observed share falls; the BH family, materiality, the sustained
+window and the fallback for unscorable leaves are unchanged. It needs the
+`timestral` extra (torch and a model download), so the default stays
+`engine` ([timestral-share.md](timestral-share.md)).
 Sparse leaves fall back to parent expectation
 times a historically estimated child share and are labelled `parent_share`.
 Structural additions from newly appearing entities are subtracted from the
