@@ -223,3 +223,11 @@ def test_notice_files_in_three_formats(tmp_path):
         path = tmp_path / name
         path.write_text(body)
         assert [n["text"] for n in load_notices(path)] == ["first notice", "second notice"]
+    # A text file whose first notice has a [tag] is lines, not a broken JSON list.
+    tagged = tmp_path / "inbox.txt"
+    tagged.write_text("[Wholesale shipments] S004 closed.\n{braces} in a second notice\n")
+    assert [n["text"] for n in load_notices(tagged)] == ["[Wholesale shipments] S004 closed.", "{braces} in a second notice"]
+    broken = tmp_path / "broken.json"
+    broken.write_text("[not json")
+    with pytest.raises(json.JSONDecodeError):
+        load_notices(broken)

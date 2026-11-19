@@ -424,16 +424,30 @@ class ExtractMatcher:
 
 
 def load_notices(path: str | Path) -> list[dict[str, str]]:
-    """Notices from JSON (a list of strings or {"id", "text"}), JSONL, or plain text lines."""
-    raw = Path(path).read_text()
+    """Notices from JSON (a list of strings or {"id", "text"}), JSONL, or plain text lines.
+
+    ``.json`` and ``.jsonl`` files must parse. Any other file is read as JSON
+    only if it parses as such, so a text file whose first notice starts with a
+    ``[tag]`` is read as lines.
+    """
+    source = Path(path)
+    raw = source.read_text()
     stripped = raw.lstrip()
-    items: list[Any]
-    if stripped.startswith("["):
-        items = json.loads(raw)
-    elif stripped.startswith("{"):
-        items = [json.loads(line) for line in raw.splitlines() if line.strip()]
-    else:
-        items = [line.strip() for line in raw.splitlines() if line.strip()]
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    items: list[Any] = lines
+    if source.suffix == ".json" or (source.suffix != ".jsonl" and stripped.startswith("[")):
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            if source.suffix == ".json":
+                raise
+    elif source.suffix == ".jsonl" or stripped.startswith("{"):
+        try:
+            items = [json.loads(line) for line in lines]
+        except json.JSONDecodeError:
+            if source.suffix == ".jsonl":
+                raise
+            items = lines
     notices = []
     for index, item in enumerate(items):
         if isinstance(item, str):
