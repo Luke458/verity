@@ -13,7 +13,6 @@ from qc.notices import (
     NONE,
     Candidate,
     ExtractMatcher,
-    SystemOneMatcher,
     load_notices,
     reading_from_answers,
 )
@@ -127,48 +126,6 @@ def test_closure_and_move_notices_draft_entries_that_explain_once_approved(tmp_p
     assert not {item for item in remaining if item[0] == "historical_revision" or item[1] in affected}
     assert any(f["check"] == explained_check and f["disposition"] == "HUMAN_APPROVED" for f in approved["findings"])
     assert approved["status"] == ("INVESTIGATE" if remaining else "PASS_WITH_EXPLANATION")
-
-
-class _Service(BaseHTTPRequestHandler):
-    """A canned System One service: picks c0, fails the dataset check for "[Other]" notices."""
-
-    requests: list[dict] = []
-
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        _Service.requests.append(body)
-        if "match" in body["questions"]:
-            answers = {"match": {"type": "choice", "choice": "c0", "probabilities": {"c0": 0.8, "none": 0.2}}}
-        else:
-            other = body["state"]["notice"].startswith("[Other]")
-            answers = {q: {"type": "noul", "noul": 0.1 if (other and q == "same_dataset") else 0.9}
-                       for q in body["questions"]}
-        payload = json.dumps({"model": body["model"], "answers": answers}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, *args):
-        pass
-
-
-def test_systemone_matcher_speaks_the_protocol_and_checks_veto():
-    server = HTTPServer(("127.0.0.1", 0), _Service)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        matcher = SystemOneMatcher(f"http://127.0.0.1:{server.server_port}", "lux")
-        cands = [Candidate("c0", "LATEST_WEEK_MISSING", "store", ["S005"], [104], "stores missing: S005")]
-        assert matcher.match("S005 closed for refit.", cands, "ds", 104, {}).candidate == "c0"
-        assert matcher.match("[Other] S005 closed for refit.", cands, "ds", 104, {}).candidate == NONE
-        choice = _Service.requests[0]
-        assert choice["model"] == "lux" and set(choice["questions"]["match"]["criteria"]) == {"c0", NONE}
-        assert set(_Service.requests[1]["questions"]) == {"same_dataset", "in_effect", "same_kind", "weeks_cover"}
-    finally:
-        server.shutdown()
-    with pytest.raises(ValueError):
-        SystemOneMatcher("http://decisions.example.com", "lux")
 
 
 def _answers(**values):

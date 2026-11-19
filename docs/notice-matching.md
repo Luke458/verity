@@ -349,3 +349,11 @@ Results: [`results/notices-confirm.json`](results/notices-confirm.json) and
 [`results/notices-confirm-rewritten.json`](results/notices-confirm-rewritten.json)
 (methods `clairic`, `patterns`, `lux-checks`; `clairic+ids` and the tuned
 variants were not registered).
+
+**After the confirm run:** `--matcher systemone` (`SystemOneMatcher`) and
+`experiments/labeller/lux.py serve` were removed from the shipped tool. On the
+error this experiment treats as the headline, false explanations, Lux + checks
+was the worst method on both variants (10.2% reworded, 22% templated); its
+only advantage was 10 more true notices out of 120. Its request builders
+(`choice_request`, `check_request`) moved unchanged to
+`experiments/notices/match.py`, so every Lux number here still reproduces.

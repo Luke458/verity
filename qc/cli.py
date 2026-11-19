@@ -209,24 +209,16 @@ def _scenario_names(scenario_dir: Path, version: str) -> dict[str, str]:
 
 def _cmd_notices(args: argparse.Namespace) -> int:
     from .events import save_registry
-    from .notices import (
-        ExtractMatcher,
-        PatternMatcher,
-        SystemOneMatcher,
-        draft,
-        load_notices,
-    )
+    from .notices import ExtractMatcher, PatternMatcher, draft, load_notices
 
-    if args.matcher != "patterns" and not args.endpoint:
-        raise SystemExit(f"--matcher {args.matcher} needs --endpoint")
+    if args.matcher == "extract" and not args.endpoint:
+        raise SystemExit("--matcher extract needs --endpoint")
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     result = _run_scenario(args, config)
     matcher: Any = PatternMatcher()
-    if args.matcher == "systemone":
-        matcher = SystemOneMatcher(args.endpoint, args.model or "decision", threshold=args.threshold)
-    elif args.matcher == "extract":
+    if args.matcher == "extract":
         token = os.environ.get("QC_EXTRACT_TOKEN") or None
-        matcher = ExtractMatcher(args.endpoint, args.model or "clairic-flash", token=token)
+        matcher = ExtractMatcher(args.endpoint, args.model, token=token)
     current = result.version_pair.current_id if result.version_pair is not None else ""
     report = draft(result, load_notices(args.notices), matcher, _scenario_names(Path(args.scenario_dir), current))
     if args.out:
@@ -238,9 +230,8 @@ def _cmd_notices(args: argparse.Namespace) -> int:
     for item in report["matches"]:
         notice, cand = item["notice"], item["candidate"]
         target = cand["description"] if cand else "no observed change"
-        checks = item["details"].get("checks")
-        weakest = f"  (weakest check {min(checks, key=checks.get)} {min(checks.values()):.2f})" if checks else ""
-        print(f"  {notice['id']:<12} {item['action']:<15} {target}{weakest}")
+        reason = item["details"].get("reason")
+        print(f"  {notice['id']:<12} {item['action']:<15} {target}{f'  ({reason})' if reason else ''}")
         print(f"  {'':<12} {notice['text']}")
     drafts = report["registry_drafts"]
     if drafts:
@@ -815,14 +806,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_scenario_arguments(notices)
     notices.add_argument("--notices", required=True, help="notices: JSON list, JSONL or one per line")
-    notices.add_argument("--matcher", choices=("patterns", "systemone", "extract"), default="patterns")
+    notices.add_argument("--matcher", choices=("patterns", "extract"), default="patterns")
     notices.add_argument(
         "--endpoint", default=None,
-        help="System One (decision) or Extract service URL (https, or http to loopback); "
-        "extract sends $QC_EXTRACT_TOKEN as a bearer token when set",
+        help="extraction service URL (https, or http to loopback); sends $QC_EXTRACT_TOKEN as a bearer token when set",
     )
-    notices.add_argument("--model", default=None, help="model name sent to the service")
-    notices.add_argument("--threshold", type=float, default=0.5, help="minimum probability for every check")
+    notices.add_argument("--model", default="clairic-flash", help="model name sent to the extraction service")
     notices.add_argument("--out", default=None, help="write the unapproved drafts as a registry file")
     notices.add_argument("--run-id", default=None)
     notices.add_argument("--json", action="store_true")

@@ -7,11 +7,12 @@ express that change, it writes an **unapproved** registry entry that cites the
 notice. A person sets ``approved_by``/``approved_at`` and ``confirmed`` before
 the engine will use it; nothing here changes a status.
 
-Two matchers: ``PatternMatcher`` (deterministic, the default) and
-``SystemOneMatcher``, which asks any decision service speaking the System One
-protocol (``POST /v1/systemone``) one choice question and four yes/no checks,
-and keeps a match only if every check holds. docs/notice-matching.md
-measures both.
+Two matchers share the same deterministic rules (``decide``) and differ in how
+they read a notice: ``PatternMatcher`` (regexes, the default) and
+``ExtractMatcher``, which asks an extraction service (System One: Extract, for
+example Clairic-flash) to fill ``NOTICE_FIELDS``. docs/notice-matching.md
+measures both, and a decision model that chose among the candidates itself
+(removed after it lost on false explanations).
 """
 
 from __future__ import annotations
@@ -233,119 +234,6 @@ class PatternMatcher:
 
 
 DATASET_DESCRIPTION = "weekly point-of-sale sales of a pharmacy chain, by store and product"
-QUESTION = (
-    "Which of the changes observed in this refresh does the notice describe? Choose none if the "
-    "notice does not account for any of them: it is about other stores or products, a different "
-    "kind of change, other weeks, something that has not happened yet, or another dataset."
-)
-
-
-def choice_request(
-    text: str, cands: Sequence[Candidate], dataset: str, latest_week: int
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """System One state and question: which observed change does the notice describe?"""
-    state = {"dataset being checked": dataset, "latest week in this refresh": latest_week, "notice": text}
-    criteria = {c.key: c.description for c in cands}
-    criteria[NONE] = "None of the observed changes"
-    return state, {"match": {"type": "choice", "instructions": QUESTION, "criteria": criteria}}
-
-
-def check_request(
-    text: str, cand: Candidate, dataset: str, latest_week: int, description: str = DATASET_DESCRIPTION
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Direct yes/no checks on a chosen change; code requires all of them to hold."""
-    state = {
-        "dataset being checked": f"{dataset}: {description}",
-        "latest week in this refresh": latest_week,
-        "notice": text,
-        "observed change": cand.description,
-    }
-    yes_no = {"false": "No", "true": "Yes"}
-    questions = {
-        "same_dataset": {
-            "type": "noul",
-            "instructions": f"Is the notice about the dataset being checked ({dataset})? "
-            "Answer no if it names a different dataset or data source.",
-            "criteria": yes_no,
-        },
-        "in_effect": {
-            "type": "noul",
-            "instructions": f"Had the change in the notice already happened by week {latest_week}? "
-            "Answer no if it is planned for a later week.",
-            "criteria": yes_no,
-        },
-        "same_kind": {
-            "type": "noul",
-            "instructions": "Does the notice describe the same kind of change as the observed change "
-            "(for example a closure, a new store with history, deleted history, a category move or a merge)?",
-            "criteria": yes_no,
-        },
-        "weeks_cover": {
-            "type": "noul",
-            "instructions": "Do the weeks stated in the notice cover the weeks of the observed change? "
-            "Answer yes if either states no weeks.",
-            "criteria": yes_no,
-        },
-    }
-    return state, questions
-
-
-def _endpoint_url(base: str) -> str:
-    from .notify import _validate_webhook_target
-
-    url = base.rstrip("/")
-    url = url if url.endswith("/v1/systemone") else url + "/v1/systemone"
-    _validate_webhook_target(url)  # https, or http to loopback only
-    return url
-
-
-class SystemOneMatcher:
-    """A System One decision service: one choice, then yes/no checks on the chosen change."""
-
-    name = "systemone"
-
-    def __init__(
-        self,
-        endpoint: str,
-        model: str,
-        threshold: float = 0.5,
-        timeout: float = 60.0,
-        dataset_description: str = DATASET_DESCRIPTION,
-    ):
-        self.url = _endpoint_url(endpoint)
-        self.model, self.threshold, self.timeout = model, threshold, timeout
-        self.dataset_description = dataset_description
-
-    def _ask(self, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
-        import urllib.request
-
-        from .notify import _OPENER
-
-        body = json.dumps({"model": self.model, "state": state, "questions": questions}).encode()
-        request = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
-        with _OPENER.open(request, timeout=self.timeout) as response:
-            payload = json.loads(response.read())
-        answers = payload.get("answers", payload)
-        if not isinstance(answers, dict):
-            raise ValueError("decision service returned no answers")
-        return answers
-
-    def match(
-        self, text: str, cands: Sequence[Candidate], dataset: str, latest_week: int, names: Mapping[str, str]
-    ) -> Match:
-        if not cands:
-            return Match(NONE)
-        probabilities = self._ask(*choice_request(text, cands, dataset, latest_week))["match"]["probabilities"]
-        best = max(probabilities, key=probabilities.__getitem__)
-        if best == NONE:
-            return Match(NONE, {"probabilities": probabilities})
-        cand = next(c for c in cands if c.key == best)
-        answers = self._ask(*check_request(text, cand, dataset, latest_week, self.dataset_description))
-        checks = {name: float(answer["noul"]) for name, answer in answers.items()}
-        details = {"probabilities": probabilities, "checks": checks}
-        if min(checks.values()) < self.threshold:
-            return Match(NONE, {**details, "reason": "a check failed"})
-        return Match(best, details)
 
 
 # An extraction model reads the notice into the fields ``decide`` needs; the
@@ -573,7 +461,11 @@ def draft(
     matches: list[dict[str, Any]] = []
     drafts: dict[str, dict[str, Any]] = {}  # one per observed change, citing every supporting notice
     for notice in notices:
-        found = matcher.match(notice["text"], cands, result.dataset, latest, names) if cands else Match(NONE)
+        found = (
+            matcher.match(notice["text"], cands, result.dataset, latest, names)
+            if cands
+            else Match(NONE, {"reason": "the refresh shows no lifecycle change"})
+        )
         cand = by_key.get(found.candidate)
         targets: list[Candidate] = []
         if cand is not None and cand.classification == REPLACED:
