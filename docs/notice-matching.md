@@ -1,6 +1,6 @@
 # Experiment: matching free-text notices to findings
 
-**Status: done; test results at the end. Shipped as `qc notices`**
+**Status: done; test results below, then a registered confirm run of an extraction model (Clairic-flash) at the end. Shipped as `qc notices`**
 ([weekly-run.md](weekly-run.md#drafting-explanations-from-notices)); the sandbox
 is `experiments/notices/`.
 Research sandbox; nothing here changes how the engine decides a status.
@@ -183,3 +183,169 @@ not model (banners, regions, promotions, partial weeks).
 
 Results: [`results/notices-test.json`](results/notices-test.json) and
 [`results/notices-test-rewritten.json`](results/notices-test-rewritten.json).
+
+## Clairic-flash: an extraction model reads, the rules decide (2026-11-19)
+
+**Status: confirm run done; 5 of 6 predictions held (results below).** The registration text that follows is as written before the run (sha256 of the file then: `6e0606a5`).
+
+The patterns lose recall on reworded notices because their *reading* breaks
+(regexes for cues, tense, tags and weeks), not because their matching rules
+are wrong. [Clairic-flash](https://huggingface.co/Cloudflare/clairic-flash)
+(Cloudflare, 9B, Apache-2.0, released 2026-11-18, revision `36ad68b`) is an
+extraction model: text and typed fields in, typed values with confidence,
+`p_null` and character spans out (System One: Extract). The new method asks it
+to fill the fields the patterns extract, `qc.notices.NOTICE_FIELDS` (data
+source, kind of change, planned, stores, products, categories, first and last
+week), and passes its reading to the **same** deterministic rules
+(`qc.notices.decide`, shared with `PatternMatcher`, whose 3,060 dev and test
+answers are unchanged by the refactor). The model never sees the candidates,
+so it cannot pick a change; it can only misread the notice. Shipped as
+`qc notices --matcher extract` (`ExtractMatcher`, any Extract endpoint:
+`experiments/notices/clairic.py serve` on loopback, or Workers AI with
+`QC_EXTRACT_TOKEN`).
+
+**Running it on the development GPU** (16 GB, ROCm): the published runtime
+targets NVIDIA (flash-attn3, deep_gemm, flashinfer). Off sm90 it already uses
+SDPA, and its BF16 fast paths are opt-in hooks that `clairic.py` leaves off,
+so the backbone runs as plain eager Transformers. BF16 (19.3 GB) does not fit,
+so the runs use int8 weight-only quantization (torchao) of the decoder's
+linear layers (peak 13.2 GiB; LM head, norms and the joint head unquantized).
+No 8-bit release exists. On the README example the int8, BF16 and unmodified
+CPU fp32 runtimes return identical values and token counts. A larger fp32
+reference was not run: a notice costs several passes over about 5,000 prompt
+tokens (estimated minutes per pass on this CPU, not measured).
+
+### Dev iteration (100 refreshes, 366 notices with observed changes)
+
+| Dev, reworded | patterns | Clairic v1 | **Clairic v2** | Lux + checks |
+|---|---|---|---|---|
+| accuracy | 0.87 | 0.92 | **0.95** | 0.90 |
+| recall | 34/60 | 42/60 | **47/60** | 56/60 |
+| false explanations | 23/366 (6%) | 10/366 (3%) | **4/366 (1%)** | 33/366 (9%) |
+| false expl., other dataset | 19/64 | 7/64 | **1/64** | 22/64 |
+
+| Dev, templated | patterns | Clairic v1 | **Clairic v2** | Lux + checks |
+|---|---|---|---|---|
+| accuracy | 0.98 | 0.89 | **0.98** | 0.80 |
+| recall | 56/60 | 43/60 | **56/60** | 60/60 |
+| false explanations | 4/366 | 25/366 | **5/366** | 73/366 |
+
+v1 is the first schema, scored with the final rules. Changes from v1 to v2,
+all made on dev: a `[tag]` and bare words (data, history, trading) in the
+data-source instruction and the generic-word list; "planned" excludes a later
+reopening or resupply, and stated weeks override tense (a change starting by
+the latest week is in effect); "sending no sales" added to the closure
+option; fuller list instructions. Adding the patterns' id regexes to the
+model's ids gained one notice and was dropped. The int8 model agreed with BF16
+on 142 of 144 fields over the first 18 dev notices (neither difference changed
+a match).
+
+### Registered for the confirm split (written before any method ran on it)
+
+New split `confirm`: seeds 8301-8320, 200 refreshes, 732 notices on refreshes
+with an observed change (120 true, 128 other-dataset, 128 wrong-entity, 128
+wrong-change, 100 wrong-weeks, 128 chatter), reworded by the same
+`rewrite.py` and Qwen3.8-27B. Frozen methods: **patterns** (unchanged);
+**Lux + checks** at 0.5 (the 2026-10-07 method: Decision-2.0-Lux-9B revision
+`1dcd1e7`, whose weights are the 2026-10-03 release, on the same EXL3 4.0 bpw
+backbone); **Clairic** (schema v2, `NOTICE_SCHEMA_VERSION = 2`, int8, model
+ids only, `decide`).
+
+Gates, checked before scoring:
+
+- **G1.** Lux reproduces its stored dev answers (its head was re-downloaded):
+  same chosen option and same check verdicts on ≥ 19 of 20 reworded dev notices.
+- **G2.** Clairic int8 against BF16 on 40 random reworded dev notices (seed 0):
+  the same match on ≥ 38.
+
+Predictions:
+
+1. **Reworded:** Clairic recall ≥ 0.70; patterns recall ≤ 0.65.
+2. **Reworded:** Clairic false explanations ≤ 4%, and fewer than either other method.
+3. **Reworded:** Lux + checks recall is higher than Clairic's (the model that
+   sees the candidates finds more, at a cost).
+4. **Reworded:** Clairic suggestion precision (right / proposed) ≥ 0.85;
+   Lux + checks ≤ 0.70.
+5. **Templated:** Clairic accuracy ≥ patterns' − 0.03, and its false
+   explanations ≤ 3%.
+6. **Reworded:** Clairic falsely explains ≤ 8% of other-dataset notices.
+
+### Confirm results
+
+200 refreshes (seeds 8301-8320), 732 notices on refreshes with an observed
+change; 941 of 1,020 notices were reworded, 79 kept their template text. Both
+gates passed first: Lux reproduced its stored dev answers on 20 of 20 notices
+(G1), and int8 Clairic matched BF16 on 40 of 40 (G2; only 6 of those 40 were
+matches, so G2 is weak on the matches themselves). The run was interrupted
+once (the agent session ended) and resumed from its output file; no notice
+was read twice.
+
+| Confirm, reworded | patterns | **Clairic** | Lux + checks |
+|---|---|---|---|
+| accuracy | 0.85 | **0.94** | 0.88 |
+| recall | 62/120 (0.52) | **96/120 (0.80)** | 106/120 (0.88) |
+| false explanations | 50/732 (6.8%) | **20/732 (2.7%)** | 75/732 (10.2%) |
+| suggestion precision | 0.55 | **0.83** | 0.59 |
+| false expl., other dataset | 39/128 | **9/128** | 50/128 |
+| false expl., wrong change | 6/128 | 11/128 | 19/128 |
+
+| Confirm, templated | patterns | **Clairic** | Lux + checks |
+|---|---|---|---|
+| accuracy | **0.975** | 0.966 | 0.777 |
+| recall | 113/120 | 110/120 | 118/120 |
+| false explanations | **11/732 (1.5%)** | 15/732 (2.0%) | 161/732 (22%) |
+
+Wilson 95% intervals, reworded: Clairic recall 0.72-0.86 against patterns
+0.43-0.60 and Lux 0.81-0.93; false explanations 1.8-4.2% against 5.2-8.9% and
+8.3-12.7%. Suggestion precision is right matches / proposed matches.
+
+**Registered predictions:**
+
+1. **Clairic recall ≥ 0.70, patterns ≤ 0.65: held** (0.80 and 0.52).
+2. **Clairic false explanations ≤ 4% and fewer than either other method: held**
+   (2.7%, against 6.8% and 10.2%).
+3. **Lux + checks recall higher than Clairic's: held** (106 against 96; the
+   intervals overlap).
+4. **Clairic suggestion precision ≥ 0.85, Lux + checks ≤ 0.70: failed.**
+   Clairic 0.83 (96 right of 116 proposed); Lux 0.59. Dev had 0.92 (47/51), a
+   small-sample estimate the prediction leaned on.
+5. **Templated: Clairic accuracy ≥ patterns' − 0.03 and false explanations ≤
+   3%: held** (0.966 against 0.975; 2.0%).
+6. **Clairic falsely explains ≤ 8% of other-dataset notices: held** (9/128, 7.0%).
+
+**What the errors are** (looked at after scoring; nothing was changed). Of
+Clairic's 20 reworded false explanations, 11 are merge notices about the
+wrong id ("S900 replaced by S969" against a refresh where S900 arrived as a
+new store with history). The shared rules accept a merge cue against a
+new-store backfill that shares an id, whichever direction the merge runs; the
+patterns have the same rule and trip it less only because they read fewer
+merge cues. The other 9 are other-dataset notices whose source sits
+mid-sentence ("Heads up on the PBS script volumes data: ...") and was not
+extracted. Of the 24 missed true notices, 9 had their change cue misread
+(closures, deleted history), 7 were rejected as another dataset because a
+non-name was read as the source, and 8 found no observed change (ids or weeks
+misread).
+
+### Conclusion
+
+Letting the model read and the rules decide is the best trade-off measured
+here on reworded notices: recall between the patterns' and Lux's (0.80
+against 0.52 and 0.88) at less than half the patterns' false explanations
+and about a quarter of Lux's, so about five in six suggestions are right
+(Lux: three in five). On templates it matches the patterns. The model never
+sees the candidates, and every decision is a deterministic rule a reviewer
+can read; each draft carries the extracted values, confidences and character
+spans. It is still a suggestion aid behind human approval.
+
+The remaining errors point at two fixes for a later registered test: the
+merge rule should require the notice's direction to match the observed one,
+and the data-source field misses sources named mid-sentence. The cost is
+latency: about 6-8 s per notice on the 16 GB development GPU (int8, ROCm),
+against well under a second for the patterns. That is fine for a weekly inbox
+of notices, but not for bulk text. As before, the notices, rewrites and distractors are
+synthetic.
+
+Results: [`results/notices-confirm.json`](results/notices-confirm.json) and
+[`results/notices-confirm-rewritten.json`](results/notices-confirm-rewritten.json)
+(methods `clairic`, `patterns`, `lux-checks`; `clairic+ids` and the tuned
+variants were not registered).

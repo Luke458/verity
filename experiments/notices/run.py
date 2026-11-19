@@ -4,12 +4,18 @@
     python -m experiments.notices.run infer --data reports/notices --splits dev test \\
         --model ~/models/decision-2.0-lux-9b --exl3 ~/models/lux-backbone-exl3-4.0 \\
         --out reports/notices/lux.jsonl          # GPU; needs torch + exllamav3
+    python -m experiments.notices.run extract --data reports/notices --splits dev \\
+        --model ~/models/clairic-flash --out reports/notices/clairic-dev.jsonl   # GPU; ~/.venvs/clairic
     python -m experiments.notices.run evaluate --data reports/notices --split dev \\
-        [--service lux=reports/notices/lux.jsonl] [--out report.json]
+        [--service lux=reports/notices/lux.jsonl] [--extract clairic=reports/notices/clairic-dev.jsonl] \\
+        [--out report.json]
 
 A service file holds, per notice, the model's probability for every option; the
 evaluation answers its argmax (zero-shot), or "none" when the best non-none
-option falls below a threshold tuned on dev for accuracy.
+option falls below a threshold tuned on dev for accuracy. An extract file holds,
+per notice, an extraction model's answers to ``qc.notices.NOTICE_FIELDS``; the
+evaluation reads them into the pattern baseline's own matching rules
+(``qc.notices.decide``), so the two differ only in how the notice is read.
 """
 
 from __future__ import annotations
@@ -20,7 +26,15 @@ from pathlib import Path
 from typing import Any
 
 from . import data
-from .match import NONE, checked_choice, lux_checks, lux_request, pattern_choice, score
+from .match import (
+    NONE,
+    checked_choice,
+    extract_choice,
+    lux_checks,
+    lux_request,
+    pattern_choice,
+    score,
+)
 
 
 def notice_key(row: dict[str, Any], notice: dict[str, Any]) -> str:
@@ -55,6 +69,55 @@ def infer(args: argparse.Namespace) -> None:
                 print(f"{split}/{row['seed']}/{row['index']}", flush=True)
 
 
+def extract(args: argparse.Namespace) -> None:
+    """Clairic-flash's reading of every notice on a refresh with observed changes."""
+    import time
+
+    from qc.notices import NOTICE_SCHEMA_VERSION, extract_request
+
+    from .clairic import load
+
+    model = load(Path(args.model).expanduser(), args.device, args.offload_layers, args.quant)
+    out = Path(args.out)
+    done = {json.loads(line)["key"] for line in out.read_text().splitlines() if line.strip()} if out.exists() else set()
+    sample: set[str] | None = None
+    if args.limit:  # a random sample of notices (seed 0), e.g. for the CPU reference
+        import random
+
+        keys = [
+            notice_key(row, notice)
+            for split in args.splits
+            for row in data.load(Path(args.data) / f"{split}{args.variant}.jsonl")
+            if row["candidates"]
+            for notice in row["notices"]
+        ]
+        sample = set(random.Random(0).sample(keys, min(args.limit, len(keys))))
+    with out.open("a") as handle:
+        for split in args.splits:
+            for row in data.load(Path(args.data) / f"{split}{args.variant}.jsonl"):
+                if not row["candidates"]:
+                    continue
+                for notice in row["notices"]:
+                    key = notice_key(row, notice)
+                    if key in done or (sample is not None and key not in sample):
+                        continue
+                    started = time.time()
+                    response = model.predict(extract_request(notice["text"]))
+                    record = {
+                        "key": key,
+                        "answers": response["answers"],
+                        "truncated": response["truncated"],
+                        "usage": response["usage"],
+                        "seconds": round(time.time() - started, 2),
+                        "backend": f"clairic-flash:{args.device}:{args.quant or 'bf16'}",
+                        "schema": NOTICE_SCHEMA_VERSION,
+                    }
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                handle.flush()
+                print(f"{split}{args.variant}/{row['seed']}/{row['index']}", flush=True)
+    model.close()
+
+
 def _choice(probabilities: dict[str, float], threshold: float) -> str:
     best = max((k for k in probabilities if k != NONE), key=probabilities.__getitem__, default=NONE)
     if best == NONE or probabilities[best] < threshold or probabilities[best] < probabilities.get(NONE, 0.0):
@@ -77,10 +140,23 @@ def _tune(dev: list[dict[str, Any]], probs: dict[str, dict[str, float]]) -> floa
     return best
 
 
-def evaluate(data_dir: Path, split: str, services: dict[str, Path], variant: str = "") -> dict[str, Any]:
+def evaluate(
+    data_dir: Path, split: str, services: dict[str, Path], variant: str = "", extracts: dict[str, Path] | None = None
+) -> dict[str, Any]:
     rows = data.load(data_dir / f"{split}{variant}.jsonl")
     report: dict[str, Any] = {"split": split + variant, "methods": {}}
     report["methods"]["patterns"] = score([(r, n, pattern_choice(r, n)) for r in rows for n in r["notices"]])
+    for name, path in (extracts or {}).items():
+        read = {r["key"]: r["answers"] for r in map(json.loads, path.read_text().splitlines()) if r}
+        report["methods"][name] = score(
+            [(r, n, extract_choice(r, n, read.get(notice_key(r, n)))) for r in rows for n in r["notices"]]
+        )
+        report["methods"][name]["missing"] = sum(
+            notice_key(r, n) not in read for r in rows if r["candidates"] for n in r["notices"]
+        )
+        report["methods"][f"{name}+ids"] = score(
+            [(r, n, extract_choice(r, n, read.get(notice_key(r, n)), pattern_ids=True)) for r in rows for n in r["notices"]]
+        )
     dev = data.load(data_dir / f"dev{variant}.jsonl")
     for name, path in services.items():
         records = {record["key"]: record for record in map(json.loads, path.read_text().splitlines())}
@@ -157,10 +233,21 @@ def main() -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--checks", action="store_true", help="also ask the yes/no checks on the chosen option")
     p.add_argument("--variant", default="", help='file suffix, e.g. "-rewritten"')
+    p = sub.add_parser("extract")
+    p.add_argument("--data", required=True)
+    p.add_argument("--splits", nargs="+", default=["dev"])
+    p.add_argument("--model", required=True)
+    p.add_argument("--device", default="cuda", help='"cpu" runs the unmodified runtime (fp32 reference)')
+    p.add_argument("--offload-layers", type=int, default=4)
+    p.add_argument("--quant", choices=("int8",), default=None)
+    p.add_argument("--out", required=True)
+    p.add_argument("--limit", type=int, default=None, help="random sample of this many notices (seed 0)")
+    p.add_argument("--variant", default="", help='file suffix, e.g. "-rewritten"')
     p = sub.add_parser("evaluate")
     p.add_argument("--data", required=True)
     p.add_argument("--split", choices=tuple(data.SPLITS), default="dev")
     p.add_argument("--service", action="append", default=[], metavar="NAME=PATH")
+    p.add_argument("--extract", action="append", default=[], metavar="NAME=PATH")
     p.add_argument("--variant", default="", help='file suffix, e.g. "-rewritten"')
     p.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -169,9 +256,12 @@ def main() -> None:
         print(data.build(args.split, directory / f"{args.split}.jsonl", directory / "work", args.jobs))
     elif args.command == "infer":
         infer(args)
+    elif args.command == "extract":
+        extract(args)
     else:
         services = {name: Path(path) for name, _, path in (item.partition("=") for item in args.service)}
-        report = evaluate(Path(args.data), args.split, services, args.variant)
+        extracts = {name: Path(path) for name, _, path in (item.partition("=") for item in args.extract)}
+        report = evaluate(Path(args.data), args.split, services, args.variant, extracts)
         if args.out:
             Path(args.out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         print(_table(report))

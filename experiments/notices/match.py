@@ -12,7 +12,15 @@ from collections.abc import Sequence
 from typing import Any
 
 from qc.conformal import wilson_interval
-from qc.notices import NONE, Candidate, PatternMatcher, check_request, choice_request
+from qc.notices import (
+    NONE,
+    Candidate,
+    PatternMatcher,
+    check_request,
+    choice_request,
+    decide,
+    reading_from_answers,
+)
 
 from .notices import DISTRACTOR_KINDS
 
@@ -25,6 +33,19 @@ def pattern_choice(row: dict[str, Any], notice: dict[str, Any]) -> str:
     """The deterministic baseline (``qc.notices.PatternMatcher``)."""
     names = row.get("commodities", {})
     return PatternMatcher().match(notice["text"], _cands(row), row["dataset"], int(row["latest_week"]), names).candidate
+
+
+def extract_choice(
+    row: dict[str, Any], notice: dict[str, Any], answers: dict[str, Any] | None, pattern_ids: bool = False
+) -> str:
+    """An extraction model's reading through the baseline's rules; no reading answers none.
+    ``pattern_ids`` adds the ids the patterns find in the notice text to the model's."""
+    if answers is None or not row["candidates"]:
+        return NONE
+    names = row.get("commodities", {})
+    text = notice["text"] if pattern_ids else None
+    reading = reading_from_answers(answers, row["dataset"], names, latest_week=int(row["latest_week"]), text=text)
+    return decide(reading, _cands(row), int(row["latest_week"])).candidate
 
 
 def lux_request(row: dict[str, Any], notice: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:

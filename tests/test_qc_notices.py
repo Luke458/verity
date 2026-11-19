@@ -9,7 +9,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from qc.cli import main
-from qc.notices import NONE, Candidate, SystemOneMatcher, load_notices
+from qc.notices import (
+    NONE,
+    Candidate,
+    ExtractMatcher,
+    SystemOneMatcher,
+    load_notices,
+    reading_from_answers,
+)
 from qcgen.config import suite_config
 from qcgen.scenarios import build_scenario
 
@@ -162,6 +169,69 @@ def test_systemone_matcher_speaks_the_protocol_and_checks_veto():
         server.shutdown()
     with pytest.raises(ValueError):
         SystemOneMatcher("http://decisions.example.com", "lux")
+
+
+def _answers(**values):
+    return {name: {"value": value, "confidence": 0.9} for name, value in values.items()}
+
+
+def test_reading_from_extracted_fields():
+    names = {"C04": "First Aid"}
+    reading = reading_from_answers(
+        _answers(data_source="the sales feed", change="store closed, not trading or sending no sales", planned=False,
+                 stores=["Store 16", "S004"], products=[], categories=["First Aid"], first_week=104, last_week=None),
+        "synthetic-retail", names,
+    )
+    assert not reading.other_dataset and not reading.planned
+    assert reading.change_type == "missing_stores"
+    assert reading.ids == {"S016", "S004", "C04"} and reading.spans == [(104, None)]
+    # A named source sharing no word with the dataset is another dataset; none named is not.
+    other = reading_from_answers(_answers(data_source="Wholesale shipments"), "synthetic-retail", {})
+    assert other.other_dataset and other.change_type is None
+    assert not reading_from_answers(_answers(data_source=None), "synthetic-retail", {}).other_dataset
+
+
+class _Extract(BaseHTTPRequestHandler):
+    """A canned Extract service, wrapped like Workers AI ("result")."""
+
+    requests: list[dict] = []
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        _Extract.requests.append({"body": body, "auth": self.headers.get("Authorization")})
+        other = body["state"].startswith("[Other]")
+        answers = _answers(data_source="Other feed" if other else None, change="store closed, not trading or sending no sales",
+                           planned=False, stores=["S005"], first_week=104)
+        payload = json.dumps({"result": {"model": "clairic-flash", "answers": answers}, "success": True}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_extract_matcher_reads_then_decides_deterministically():
+    server = HTTPServer(("127.0.0.1", 0), _Extract)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        matcher = ExtractMatcher(f"http://127.0.0.1:{server.server_port}", token="t0ken")
+        cands = [Candidate("c0", "LATEST_WEEK_MISSING", "store", ["S005"], [104], "stores missing: S005")]
+        found = matcher.match("S005 closed for refit.", cands, "ds", 104, {})
+        assert found.candidate == "c0" and found.details["extracted"]["stores"]["value"] == ["S005"]
+        assert matcher.match("[Other] S005 closed.", cands, "ds", 104, {}).candidate == NONE
+        # Another store's closure: the rules find no observed change that fits.
+        other_store = [Candidate("c0", "LATEST_WEEK_MISSING", "store", ["S009"], [104], "stores missing: S009")]
+        assert matcher.match("S005 closed for refit.", other_store, "ds", 104, {}).candidate == NONE
+        sent = _Extract.requests[0]
+        assert sent["auth"] == "Bearer t0ken" and sent["body"]["model"] == "clairic-flash"
+        assert "candidates" not in json.dumps(sent["body"]) and sent["body"]["state"] == "S005 closed for refit."
+    finally:
+        server.shutdown()
+    with pytest.raises(ValueError):
+        ExtractMatcher("http://extract.example.com")
 
 
 def test_notice_files_in_three_formats(tmp_path):

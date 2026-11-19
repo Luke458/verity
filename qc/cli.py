@@ -209,17 +209,24 @@ def _scenario_names(scenario_dir: Path, version: str) -> dict[str, str]:
 
 def _cmd_notices(args: argparse.Namespace) -> int:
     from .events import save_registry
-    from .notices import PatternMatcher, SystemOneMatcher, draft, load_notices
+    from .notices import (
+        ExtractMatcher,
+        PatternMatcher,
+        SystemOneMatcher,
+        draft,
+        load_notices,
+    )
 
-    if args.matcher == "systemone" and not args.endpoint:
-        raise SystemExit("--matcher systemone needs --endpoint")
+    if args.matcher != "patterns" and not args.endpoint:
+        raise SystemExit(f"--matcher {args.matcher} needs --endpoint")
     config = load_dataset_config(args.config) if args.config else DatasetConfig()
     result = _run_scenario(args, config)
-    matcher: Any = (
-        SystemOneMatcher(args.endpoint, args.model, threshold=args.threshold)
-        if args.matcher == "systemone"
-        else PatternMatcher()
-    )
+    matcher: Any = PatternMatcher()
+    if args.matcher == "systemone":
+        matcher = SystemOneMatcher(args.endpoint, args.model or "decision", threshold=args.threshold)
+    elif args.matcher == "extract":
+        token = os.environ.get("QC_EXTRACT_TOKEN") or None
+        matcher = ExtractMatcher(args.endpoint, args.model or "clairic-flash", token=token)
     current = result.version_pair.current_id if result.version_pair is not None else ""
     report = draft(result, load_notices(args.notices), matcher, _scenario_names(Path(args.scenario_dir), current))
     if args.out:
@@ -808,9 +815,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_scenario_arguments(notices)
     notices.add_argument("--notices", required=True, help="notices: JSON list, JSONL or one per line")
-    notices.add_argument("--matcher", choices=("patterns", "systemone"), default="patterns")
-    notices.add_argument("--endpoint", default=None, help="System One service base URL (https, or http to loopback)")
-    notices.add_argument("--model", default="decision", help="model name sent to the service")
+    notices.add_argument("--matcher", choices=("patterns", "systemone", "extract"), default="patterns")
+    notices.add_argument(
+        "--endpoint", default=None,
+        help="System One (decision) or Extract service URL (https, or http to loopback); "
+        "extract sends $QC_EXTRACT_TOKEN as a bearer token when set",
+    )
+    notices.add_argument("--model", default=None, help="model name sent to the service")
     notices.add_argument("--threshold", type=float, default=0.5, help="minimum probability for every check")
     notices.add_argument("--out", default=None, help="write the unapproved drafts as a registry file")
     notices.add_argument("--run-id", default=None)
