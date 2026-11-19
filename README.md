@@ -247,4 +247,4 @@ data/, reports/     generated output (git-ignored)
 - [docs/synthetic-data.md](docs/synthetic-data.md): the generator and fault families
 - [docs/claims.md](docs/claims.md): evidence for every capability, and what is not claimed
 - [docs/labeller-experiment.md](docs/labeller-experiment.md): learned and zero-shot (Decision-2.0-Lux-9B) cause labellers against the rule baseline
-- [docs/notice-matching.md](docs/notice-matching.md): matching free-text change notices to flagged changes with a decision model
+- [docs/notice-matching.md](docs/notice-matching.md): matching free-text change notices to flagged changes, with a decision model and then an extraction model (Clairic-flash)

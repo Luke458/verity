@@ -12,10 +12,12 @@ its BF16 fast paths (custom matmuls and norms, CUDA graphs) are opt-in hooks;
 Transformers in BF16, which is the runtime's own non-CUDA path at GPU precision.
 
 The BF16 weights (19.3 GB) do not fit a 16 GB card, so ``load`` keeps the
-unused vision tower and the embedding lookup on the CPU and streams the last
-``offload_layers`` decoder layers to the GPU for each forward pass. The model
-files are read unmodified; ``--device cpu`` runs the unmodified runtime (fp32),
-the reference the GPU path is checked against (``fidelity`` in run.py).
+unused vision tower and the embedding lookup on the CPU and either streams the
+last ``offload_layers`` decoder layers to the GPU for each forward pass (BF16)
+or quantizes the decoder's linear layers to int8 (``--quant int8``, the mode
+the registered runs used; gate G2 in gates.py checks it against BF16). The
+model files are read unmodified; ``--device cpu`` runs the unmodified runtime
+(fp32).
 
 Needs the runtime's own dependencies (torch, transformers 5.10.2, xgrammar);
 never imported by the engine.
