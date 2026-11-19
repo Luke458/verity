@@ -13,6 +13,7 @@ from qc.notices import (
     NONE,
     Candidate,
     ExtractMatcher,
+    PatternMatcher,
     load_notices,
     reading_from_answers,
 )
@@ -146,6 +147,28 @@ def test_reading_from_extracted_fields():
     other = reading_from_answers(_answers(data_source="Wholesale shipments"), "synthetic-retail", {})
     assert other.other_dataset and other.change_type is None
     assert not reading_from_answers(_answers(data_source=None), "synthetic-retail", {}).other_dataset
+
+
+def test_a_merge_explains_a_new_store_only_through_its_new_id():
+    merge = [
+        Candidate("c0", "ENTITY_REMOVED", "store", ["S005"], [1, 103], "stores removed entirely: S005"),
+        Candidate("c1", "ENTITY_REPLACED", "store", ["S005", "S900"], [], "S005 replaced by S900"),
+        Candidate("c2", "NEW_ENTITY_HISTORICAL_BACKFILL", "store", ["S900"], [1, 103], "new: S900"),
+    ]
+    backfill = [merge[2]]
+    patterns = PatternMatcher()
+    # The right direction explains the merge's own changes.
+    assert patterns.match("Consolidation - S005 replaced by S900.", merge, "ds", 104, {}).candidate == "c0"
+    assert patterns.match("Consolidation - S005 replaced by S900.", backfill, "ds", 104, {}).candidate == "c2"
+    # S900 named as the old id cannot explain S900 arriving with history (the confirm run's defect).
+    assert patterns.match("Consolidation - S900 replaced by S969.", backfill, "ds", 104, {}).candidate == NONE
+    assert patterns.match("S900 now trades as S969.", merge, "ds", 104, {}).candidate == NONE
+    # No direction read (no forward phrase): the old rule, any shared id.
+    assert patterns.match("Consolidation of S900 and S969 in the store master.", backfill, "ds", 104, {}).candidate == "c2"
+
+    # The extraction reading has no direction field: it keeps the any-shared-id rule.
+    answers = _answers(change="store merged into or replaced by another store", planned=False, stores=["S900", "S969"])
+    assert reading_from_answers(answers, "ds", {}, latest_week=104).merge_targets is None
 
 
 class _Extract(BaseHTTPRequestHandler):

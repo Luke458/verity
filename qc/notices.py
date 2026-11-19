@@ -156,6 +156,10 @@ CUES: tuple[tuple[str, str], ...] = (
     (r"\bclosed?\b|\bclosures?\b|\bdid not trade\b|\bno sales feed\b|\brefit\b|\brenovations?\b", "missing_stores"),
 )
 FUTURE = re.compile(r"\bwill\b|\bto be\b|\bplanned\b", re.IGNORECASE)
+# Phrases that name the old id before the new one ("S005 merged into S900").
+MERGE_FORWARD = re.compile(
+    r"\b(?:merged into|replaced by|now trades as|rebranded (?:to|as)|consolidated into)\b", re.IGNORECASE
+)
 WEEKS = re.compile(r"\b(?:weeks?|wk)\s*(\d+)(?:\s*(?:-|to|through)\s*(\d+))?", re.IGNORECASE)
 
 
@@ -178,6 +182,23 @@ class Reading:
     planned: bool
     ids: set[str]
     spans: list[tuple[int, int | None]]  # stated week ranges, first one used
+    merge_targets: set[str] | None = None  # a merge's new ids; None when the direction is not read
+
+
+def _merge_fits(reading: Reading, cand: Candidate) -> bool:
+    """A merge explains a new entity only through its new id, a removal only through an old one."""
+    targets = reading.merge_targets
+    if targets is None:
+        return True
+    shared = reading.ids & {part for e in cand.entity_ids for part in e.split("->")}
+    if cand.classification == NEW_BACKFILL:
+        return bool(shared & targets)
+    if cand.classification == REMOVED:
+        return bool(shared - targets)
+    if cand.classification == REPLACED:  # entity_ids are (old, new) pairs
+        pairs = zip(cand.entity_ids[0::2], cand.entity_ids[1::2], strict=False)
+        return any((old in shared and old not in targets) or new in targets for old, new in pairs)
+    return True
 
 
 def decide(reading: Reading, cands: Sequence[Candidate], latest_week: int) -> Match:
@@ -195,6 +216,8 @@ def decide(reading: Reading, cands: Sequence[Candidate], latest_week: int) -> Ma
             continue
         if not reading.ids & {part for e in cand.entity_ids for part in e.split("->")}:
             continue
+        if change_type == "entity_merge" and not _merge_fits(reading, cand):
+            continue
         if spans and cand.weeks and change_type in ("new_store_backfill", "history_truncation"):
             start, end = spans[0]
             end = end if end is not None else latest_week
@@ -209,12 +232,15 @@ def decide(reading: Reading, cands: Sequence[Candidate], latest_week: int) -> Ma
 
 def read_patterns(text: str, dataset: str, names: Mapping[str, str]) -> Reading:
     tag = re.match(r"^\[(.+?)\]", text)
+    forward = MERGE_FORWARD.search(text)
+    after = _ids(text[forward.end():], names) if forward else set()
     return Reading(
         other_dataset=bool(tag and tag.group(1) != dataset),
         change_type=next((t for pattern, t in CUES if re.search(pattern, text, re.IGNORECASE)), None),
         planned=bool(FUTURE.search(text)),
         ids=_ids(text, names),
         spans=[(int(a), int(b) if b else None) for a, b in WEEKS.findall(text)],
+        merge_targets=after or None,
     )
 
 
@@ -332,6 +358,8 @@ def reading_from_answers(
         planned=value.get("planned") is True and not started,
         ids=_ids(" ; ".join(listed), names) | (_ids(text, names) if text else set()),
         spans=[(int(start), int(last) if last is not None else None)] if start is not None else [],
+        # NOTICE_FIELDS has no new-id field, so a merge's direction is not read
+        # (the model lists one store for most merges): the old any-shared-id rule.
     )
 
 

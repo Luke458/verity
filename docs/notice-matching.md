@@ -357,3 +357,30 @@ was the worst method on both variants (10.2% reworded, 22% templated); its
 only advantage was 10 more true notices out of 120. Its request builders
 (`choice_request`, `check_request`) moved unchanged to
 `experiments/notices/match.py`, so every Lux number here still reproduces.
+
+### Merge direction (post hoc, after the confirm run)
+
+`decide` now requires a merge notice to run the observed way: it explains a
+new store with history only through the id it names as the new one, and a
+removal only through an id it names as the old one. The patterns read the
+direction from the ids after a forward phrase ("merged into", "replaced by",
+"now trades as", "rebranded to", "consolidated into"); with no such phrase,
+the old rule (any shared id) applies.
+
+Measured only on spent splits, and designed after seeing the confirm errors,
+so biased in its favour. False explanations of the patterns, before and
+after, with recall unchanged on every split:
+
+| Patterns | dev | test | confirm |
+|---|---|---|---|
+| templated | 4 -> 1 | 14 -> 4 | 11 -> 0 |
+| reworded | 23 -> 23 | 65 -> 61 | 50 -> 46 |
+
+**Correction to the error analysis above.** The fix does not reach
+Clairic's 11 merge false explanations. Its reading has no new-id field, and
+for most merge notices it lists one store (the old id), sometimes filing the
+other id under products, so the direction cannot be read and the old rule
+applies. Those errors are a reading gap as well as a rule defect. Closing it
+needs a new-id field in `NOTICE_FIELDS`, which changes the request and needs
+its own registered test. Until then `--matcher extract` is exactly the
+registered method; its confirm answers are unchanged.
