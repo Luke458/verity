@@ -447,6 +447,47 @@ in all 9 material cases). Coding, warehouse and restatement pairs were flagged
    one movement in five is missed, which the closure and move test's
    zero-miss criterion did not allow for.
 
+### Test results (seeds 6501-6520)
+
+All five held.
+
+| | `small` | `realistic` |
+|---|---|---|
+| Merge flagged blind (conserving, 5%, drawn) | 20/20, 20/20, 20/20 | 20/20, 20/20, 20/20 |
+| One `ENTITY_REPLACED` draft for the pair | 20/20 in every arm | 20/20 in every arm |
+| Conserving merge, approved: PASS_WITH_EXPLANATION | **20/20** | **20/20** |
+| 5% rescale, approved: change finding | 20/20 (all material) | 20/20 (all material) |
+| Drawn rescale, approved: change finding when material | 13/13 | 13/13 |
+| Drawn rescale, approved: change finding when immaterial | 0/7 | 3/7 |
+| Coding, warehouse, one-week restatement + approved merge: flagged | 20/20 in every cell (alone 20/20) | 20/20 in every cell (alone 20/20) |
+| Market movement + approved merge: flagged | 20/20 (alone 20/20) | 9/20 (alone 6/20) |
+| Missed market movements at or above the 80% limit | 0 | 0 of 12 missed (alone 0 of 14) |
+| Clean refreshes flagged | 0/20 | 0/20 |
+
+1. **Held.**
+2. **Held.** Every conserving merge was drafted as one pair, covered and
+   explained, with no change finding left on either profile. Its
+   conservation ratio was at least 0.999.
+3. **Held.** The smallest material rescale was 0.14% of the overlap total on
+   `small` and 0.17% on `realistic`. Below the 0.1% line, `small` explained
+   all seven drawn rescales (up to 0.04%). `realistic` flagged three of its
+   seven (0.06%-0.08%), because its late-arriving weeks add their own
+   revision to the gross total the materiality test reads.
+4. **Held.** In 5 of the 40 warehouse pairs, the warehouse error itself cut
+   the merged store's history enough to fail conservation (ratio 0.86-0.90).
+   That approval then covered neither id, and all were flagged anyway.
+5. **Held.** No miss was at or above its run's 80% limit. On `realistic`,
+   one miss alone and one paired were at or above the 50% limit. Detection with an
+   approved merge (9/20) is no lower than without one (6/20). These are
+   different categories on the same worlds, so this is not a paired test.
+
+What this does not show: the generator's merges carry one store to one new
+id. A store merged into an existing store (no new id, so no backfill), or
+split across several, is not drafted or measured.
+
+Results: [`results/replacements-test.json`](results/replacements-test.json)
+(registered in and run on `8b52061`; per-week findings collapsed to a count).
+
 ## Recurrence and slow movements
 
 Every other measurement here scores one version pair. Recurrence is meant to

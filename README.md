@@ -203,7 +203,7 @@ To reimplement the engine in another stack instead, treat
 | Reconciliation | validated on synthetic data |
 | Lineage first divergence | validated on synthetic data |
 | Ratio expectations and reference controls | implemented, not measured |
-| Approved known changes (backfills, closures, category moves) | validated on synthetic data |
+| Approved known changes (backfills, closures, category moves, store replacements) | validated on synthetic data |
 | Temporal QC | validated on synthetic data |
 | Findings and final status | validated on synthetic data |
 | Rule cause labels | validated on synthetic data |
