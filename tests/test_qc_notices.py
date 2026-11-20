@@ -129,6 +129,34 @@ def test_closure_and_move_notices_draft_entries_that_explain_once_approved(tmp_p
     assert approved["status"] == ("INVESTIGATE" if remaining else "PASS_WITH_EXPLANATION")
 
 
+@pytest.mark.parametrize("n_products", [1, 1000])  # some of the category's products, or all of it (a rename)
+def test_an_approved_move_into_a_new_category_is_compared_with_its_restated_history(tmp_path, capsys, n_products):
+    stages = ("source", "coded", "warehouse", "report")
+    built = build_scenario(suite_config("tiny"), 0, tmp_path / "move", "commodity_remap", stages,
+                           params={"commodity_remap": {"to_commodity": "C99", "n_products": n_products}})
+    source = built.oracle["cases"][0]["details"]["from_commodity"]
+    notices = tmp_path / "notices.txt"
+    notices.write_text(f"Products in {source} reclassified into a new category, C99 (range review).\n")
+    drafts = tmp_path / "drafts.json"
+    capsys.readouterr()
+    assert main(["notices", "--scenario-dir", str(built.directory), "--notices", str(notices),
+                 "--out", str(drafts), "--json"]) == 0
+    (entry,) = _approve(drafts)
+    assert (entry["classification"], entry["entity_ids"]) == ("POSSIBLE_RECLASSIFICATION", [f"{source}->C99"])
+
+    def unexplained(report):
+        return {(f["check"], f["scope"], f["metric"]) for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"}
+
+    assert _run(capsys, built.directory)["status"] == "INVESTIGATE"
+    approved = _run(capsys, built.directory, "--registry", str(drafts))
+    # The new category's rows continue the history restated under it, so the
+    # latest week does not set them aside as a new entity's: only the world's
+    # own flags remain.
+    clean = build_scenario(suite_config("tiny"), 0, tmp_path / "clean", "clean", stages)
+    assert unexplained(approved) <= unexplained(_run(capsys, clean.directory))
+    assert {f["disposition"] for f in approved["findings"] if f["check"] == "historical_revision"} == {"HUMAN_APPROVED"}
+
+
 @pytest.mark.parametrize(
     ("factor", "pair_covered", "revision_explained"),
     [

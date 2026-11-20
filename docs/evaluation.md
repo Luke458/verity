@@ -488,6 +488,77 @@ split across several, is not drafted or measured.
 Results: [`results/replacements-test.json`](results/replacements-test.json)
 (registered in and run on `8b52061`; per-week findings collapsed to a count).
 
+## Approving moves into a new category
+
+A category move can create the category it moves into: products reclassified
+into a category the previous version never had. The engine already credits a
+category that an approved move creates as the move's consequence
+(`attribution._move_consequences`, added after the closure and move test).
+The generator could not produce one, so that was never measured. Its
+`commodity_remap` now takes a `to_commodity` the universe lacks (adding it to
+the commodity dimension). It draws the target either way, so the rest of the
+scenario is unchanged.
+
+On development seeds 6401-6405, an approved move into a new category was
+never explained: 0/5 per profile for a partial move, and 0/5 for a *rename*
+(every product of the category moved). Moves into an existing category were
+explained 5/5. The cause is the one approved merges had. The new category
+was credited and restated like-for-like, but the latest-week test still set
+its rows aside as a new entity's (`temporal.new_period_adjustments`). It
+then compared a near-empty new category, and a total missing the moved
+products, against a baseline that held them. A category that an approved
+move creates is now passed to the latest-week test like a replaced id, as
+history continued (`run.py`). After the fix, all 30 development cases
+(three arms, five seeds, two profiles) were explained with no residual
+finding. Blind runs are unchanged: on the cohort plan all 220 cases are
+byte-identical before and after.
+
+`python -m experiments.approvals.new_categories` builds, per profile and seed:
+
+- a move three ways: into an existing category (the generator's own draw,
+  the case the closure and move test measured); into a new category `C99`
+  (the generator's usual one-in-twenty of the source category's products);
+  and a rename into `C99`. Each is assessed blind and with the one entry
+  `qc notices` drafts, approved;
+- the move into a new category with a second fault (coding error, warehouse
+  transform error, market movement, one-week restatement), approved;
+- each second fault alone, and a clean refresh.
+
+On the development seeds, every arm was explained 5/5 on both profiles.
+Coding, warehouse and restatement pairs were flagged 5/5. No missed market
+movement was at or above its run's 50% limit. In one warehouse pair per
+profile, the warehouse error broke the move's conservation, so the approval
+did not cover it; it was flagged anyway.
+
+### Registered predictions (seeds 6601-6620, both profiles)
+
+1. **Blind, every move is flagged:** 20/20 per arm and profile.
+2. **Approved, a move into a new category is explained, partial or a
+   rename.**
+   - `qc notices` drafts exactly one `POSSIBLE_RECLASSIFICATION` entry for
+     the move in 20/20.
+   - The new category is credited as the move's consequence in 20/20, and
+     so is the emptied source category of a rename.
+   - It reaches PASS_WITH_EXPLANATION in at least 17/20 per arm and profile.
+   - No approved run has a finding that its seed's clean refresh lacks and
+     that is a change finding (`historical_revision`, `historical_event` or
+     `revision_week`) or is on the new category.
+3. **A move into an existing category is still explained:** at least 17/20
+   per profile. The fix does not touch it; this is the control.
+4. **Approvals do not hide large faults:** for coding errors, warehouse
+   transform errors and one-week restatements, the approved pair is flagged
+   in at least as many seeds as the second fault alone, minus one.
+5. **Approvals hide nothing the engine claims it can see:** across the 20
+   approved market-movement pairs per profile, at most 2 missed movements
+   are at or above that run's 80%-power `detectable_change`.
+
+Reported, not predicted: blind, a partial move into a new category reports
+every overlap week as a revision (103 on `small`, 101 on `realistic` in
+development). The per-week check counts the new category's backfill as value
+added, which the move did not add. The status is INVESTIGATE either way. A
+rename does not show it, because the emptied category's removal offsets it.
+Changing this would change blind runs, so it is left as a known gap.
+
 ## Recurrence and slow movements
 
 Every other measurement here scores one version pair. Recurrence is meant to

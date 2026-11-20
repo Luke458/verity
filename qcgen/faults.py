@@ -202,11 +202,19 @@ def inject_commodity_remap(
     others = [
         str(v) for v in products["commodity_id"].unique() if str(v) != from_commodity
     ]
-    to_commodity = str(params.get("to_commodity") or _pick(ctx.rng, others))
+    # Drawn even when ``to_commodity`` is given, so the rest of the scenario is
+    # unchanged. A ``to_commodity`` the universe lacks is a new commodity: the
+    # products move into a category the previous version never had.
+    drawn = _pick(ctx.rng, others)
+    to_commodity = str(params.get("to_commodity") or drawn)
 
     new_products = products.copy()
     new_products.loc[new_products["product_id"].isin(selected), "commodity_id"] = to_commodity
     new_state = {**state, "products": new_products}
+    commodities = state.get("commodities")
+    if commodities is not None and to_commodity not in set(commodities["commodity_id"].astype(str)):
+        row = pd.DataFrame({"commodity_id": [to_commodity], "commodity_name": [f"New commodity {to_commodity}"]})
+        new_state = {**new_state, "commodities": pd.concat([commodities, row], ignore_index=True)}
     if "commodity_id" in state["fact"].columns:
         new_fact = state["fact"].copy()
         new_fact.loc[new_fact["product_id"].isin(selected), "commodity_id"] = to_commodity

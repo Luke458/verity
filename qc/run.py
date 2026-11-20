@@ -481,13 +481,10 @@ def run_qc(
     )
     historical_status = history["status"]
     try:
-        # A replaced id's new rows continue its restated history; they are not a
-        # new entity's rows to set aside.
-        replaced = {key for key in relabelled if key not in attribution.move_consequences}
-        temporal = run_temporal_qc(
-            temporal_previous, temporal_current, pair, config,
-            [e for e in events if f"{e.entity_type}:{e.entity_id}" not in replaced],
-        )
+        # A replaced id's new rows, and a category an approved move created,
+        # continue history restated like-for-like; they are not a new entity's
+        # rows to set aside.
+        temporal = run_temporal_qc(temporal_previous, temporal_current, pair, config, valued_events)
     except Exception as exc:  # noqa: BLE001 - preserve completed deterministic checks
         temporal = TemporalResult(
             target_week=pair.current_max_week, anomaly=False, flags=[],

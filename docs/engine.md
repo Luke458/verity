@@ -244,13 +244,17 @@ An approved closure, move or replacement also restates the refresh
 like-for-like before the latest-week test (`attribution.like_for_like`): the
 closed entities leave every week of both versions, the moved products'
 previous rows take their new category, and the replaced id's previous rows
-take the new id. A replaced store's new rows are then not set aside as a new
-store's (`temporal.new_period_adjustments`). A store that is present is never
+take the new id. A replaced store's new rows, and those of a category an
+approved move created, are then not set aside as a new entity's
+(`temporal.new_period_adjustments`): they continue the history restated
+under them. A store that is present is never
 excluded, and products the entry does not cover are never re-assigned. The restatement is recorded in the
 machine output as `like_for_like`; each explained absence is an
 `absence_event` finding with its approval. The effect on detection is
 measured in [evaluation.md](evaluation.md#approving-closures-and-category-moves)
-and, for replacements, [evaluation.md](evaluation.md#approving-store-replacements).
+and, for replacements and moves into a new category,
+[evaluation.md](evaluation.md#approving-store-replacements) and
+[evaluation.md](evaluation.md#approving-moves-into-a-new-category).
 `qc notices` (`qc/notices.py`) drafts entries the same way from free-text change notices
 ([weekly-run.md](weekly-run.md#drafting-explanations-from-notices)).
 
