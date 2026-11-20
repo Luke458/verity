@@ -425,10 +425,16 @@ def run_qc(
             return False
     approved_events = [item for item in registry.events() if approval_available(item)]
     attribution = explain_revision(cubes["base"], events, approved_events, config, pair.current_max_week)
-    # A category emptied or created by an approved move changed no value.
-    valued_events = [e for e in events if f"{e.entity_type}:{e.entity_id}" not in attribution.move_consequences]
+    # A category emptied or created by an approved move changed no value, and
+    # neither did an approved replacement: whatever value it did change is
+    # left to each week's revision. The counterfactual still undoes a
+    # replacement (it restores the old id's rows and drops the new id's).
+    relabelled = attribution.relabelled()
+    valued_events = [e for e in events if f"{e.entity_type}:{e.entity_id}" not in relabelled]
     revisions_by_week = week_revisions(cubes["base"], valued_events, config)
-    counterfactual = reconstruct_counterfactual(previous, current, valued_events, config)
+    counterfactual = reconstruct_counterfactual(
+        previous, current, [e for e in events if f"{e.entity_type}:{e.entity_id}" not in attribution.move_consequences], config
+    )
     reconciliation = run_reconciliation(
         current,
         # One stage serves as both: nothing to balance, other checks still run.
@@ -475,7 +481,13 @@ def run_qc(
     )
     historical_status = history["status"]
     try:
-        temporal = run_temporal_qc(temporal_previous, temporal_current, pair, config, events)
+        # A replaced id's new rows continue its restated history; they are not a
+        # new entity's rows to set aside.
+        replaced = {key for key in relabelled if key not in attribution.move_consequences}
+        temporal = run_temporal_qc(
+            temporal_previous, temporal_current, pair, config,
+            [e for e in events if f"{e.entity_type}:{e.entity_id}" not in replaced],
+        )
     except Exception as exc:  # noqa: BLE001 - preserve completed deterministic checks
         temporal = TemporalResult(
             target_week=pair.current_max_week, anomaly=False, flags=[],

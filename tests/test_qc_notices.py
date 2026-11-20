@@ -129,8 +129,21 @@ def test_closure_and_move_notices_draft_entries_that_explain_once_approved(tmp_p
     assert approved["status"] == ("INVESTIGATE" if remaining else "PASS_WITH_EXPLANATION")
 
 
-def test_a_merge_notice_drafts_the_removal_and_the_backfill(tmp_path, capsys):
-    built, case = _scenario(tmp_path, "entity_merge")
+@pytest.mark.parametrize(
+    ("factor", "pair_covered", "revision_explained"),
+    [
+        (1.0, True, True),  # history carried across unchanged
+        (0.95, True, False),  # the pair conserves value, the 5% it lost is still material
+        (0.8, False, False),  # not conserved: the approval does not cover the pair
+    ],
+)
+def test_a_merge_notice_drafts_one_replacement_that_explains_only_conserved_history(
+    tmp_path, capsys, factor, pair_covered, revision_explained
+):
+    stages = ("source", "coded", "warehouse", "report")
+    built = build_scenario(suite_config("tiny"), 0, tmp_path / "merge", "entity_merge", stages,
+                           params={"entity_merge": {"factor": factor}})
+    case = built.oracle["cases"][0]
     old, new = case["details"]["source_store"], case["details"]["target_store"]
     notices = tmp_path / "notices.txt"
     notices.write_text(f"{old} merged into {new}; its history was carried across.\n")
@@ -139,19 +152,31 @@ def test_a_merge_notice_drafts_the_removal_and_the_backfill(tmp_path, capsys):
     assert main(["notices", "--scenario-dir", str(built.directory), "--notices", str(notices),
                  "--out", str(drafts), "--json"]) == 0
     match = json.loads(capsys.readouterr().out)["matches"][0]
-    assert match["candidate"]["classification"] == "ENTITY_REPLACED" and len(match["drafts"]) == 2
-    entries = _approve(drafts)
-    assert {(e["classification"], tuple(e["entity_ids"])) for e in entries} == {
-        ("ENTITY_REMOVED", (old,)), ("NEW_ENTITY_HISTORICAL_BACKFILL", (new,))}
+    assert match["candidate"]["classification"] == "ENTITY_REPLACED" and len(match["drafts"]) == 1
+    (entry,) = _approve(drafts)
+    assert (entry["classification"], entry["entity_ids"]) == ("ENTITY_REPLACED", [f"{old}->{new}"])
 
     blind = _run(capsys, built.directory)
     approved = _run(capsys, built.directory, "--registry", str(drafts))
-    history = [f["disposition"] for r in (blind, approved) for f in r["findings"] if f["check"] == "historical_revision"]
-    assert history == ["UNEXPLAINED_ANOMALY", "HUMAN_APPROVED"]
-    # The registry does not check that a replacement conserves value, so the
-    # approval also covers the history this merge fault rescaled (by 0.92
-    # here); the latest-week share test still flags it.
-    assert approved["status"] == "INVESTIGATE"
+
+    def dispositions(report, check):
+        return sorted({f["disposition"] for f in report["findings"] if f["check"] == check and f["outcome"] != "PASS"})
+
+    def unexplained(report):
+        return {(f["check"], f["scope"], f["metric"]) for f in report["findings"] if f["disposition"] == "UNEXPLAINED_ANOMALY"}
+
+    assert dispositions(blind, "historical_revision") == ["UNEXPLAINED_ANOMALY"]
+    covered = dispositions(approved, "historical_event")
+    assert covered == (["HUMAN_APPROVED"] if pair_covered else [])
+    if revision_explained:
+        # Approved, the merge leaves only its world's own flags: the new store
+        # is compared with its restated history, not set aside as new.
+        clean = build_scenario(suite_config("tiny"), 0, tmp_path / "clean", "clean", stages)
+        assert dispositions(approved, "historical_revision") == ["HUMAN_APPROVED"]
+        assert unexplained(approved) <= unexplained(_run(capsys, clean.directory))
+    else:
+        assert dispositions(approved, "historical_revision") == ["UNEXPLAINED_ANOMALY"]
+        assert approved["status"] == "INVESTIGATE"
 
 
 def _answers(**values):

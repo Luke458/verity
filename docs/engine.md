@@ -228,15 +228,29 @@ for one of its `entity_ids` (of its `entity_type`), and only within its scope:
 | `NEW_ENTITY_HISTORICAL_BACKFILL`, `ENTITY_REMOVED`, `ENTITY_HISTORY_TRUNCATED` | every rewritten week inside `expected_history_start`..`expected_history_end` | |
 | `LATEST_WEEK_MISSING` (a closure) | the latest week inside `effective_from_week`..`effective_to_week` | |
 | `POSSIBLE_RECLASSIFICATION` (a category move, id `from->to`) | the latest week inside `effective_from_week`..`effective_to_week` | the moved value is conserved (`conservation_ratio` >= `explained_fraction_threshold`); if `product_ids` is given, no other product moved |
+| `ENTITY_REPLACED` (an id replaced by another, `old->new`) | the old id's removal and the new id's backfill, every rewritten week inside `expected_history_start`..`expected_history_end` | both are observed; the history carried across conserves the value removed (the same ratio as a move) |
 
-An approved closure or move also restates the refresh like-for-like before the
-latest-week test (`attribution.like_for_like`): the closed entities leave every
-week of both versions, and the moved products' previous rows take their new
-category. A store that is present is never excluded, and products the entry
-does not cover are never re-assigned. The restatement is recorded in the
+A move, the categories it empties or creates, and an approved replacement
+relabel value without changing it, so they explain none of the revision:
+whatever value they did change stays unexplained, and a refresh whose only
+structural changes are these is judged as if it had none. For a replacement
+the revision cube reads the old id as the new one first, so its cells count
+only the value it changed, not every cell it moved (`attribution._as_replaced`).
+A merge that also rescales the history it carries therefore stays flagged
+when the rescale is material, and so does each week whose revision it pushes
+past `week_revision_ratio`.
+
+An approved closure, move or replacement also restates the refresh
+like-for-like before the latest-week test (`attribution.like_for_like`): the
+closed entities leave every week of both versions, the moved products'
+previous rows take their new category, and the replaced id's previous rows
+take the new id. A replaced store's new rows are then not set aside as a new
+store's (`temporal.new_period_adjustments`). A store that is present is never
+excluded, and products the entry does not cover are never re-assigned. The restatement is recorded in the
 machine output as `like_for_like`; each explained absence is an
 `absence_event` finding with its approval. The effect on detection is
-measured in [evaluation.md](evaluation.md#approving-closures-and-category-moves).
+measured in [evaluation.md](evaluation.md#approving-closures-and-category-moves)
+and, for replacements, [evaluation.md](evaluation.md#approving-store-replacements).
 `qc notices` (`qc/notices.py`) drafts entries the same way from free-text change notices
 ([weekly-run.md](weekly-run.md#drafting-explanations-from-notices)).
 

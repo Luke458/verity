@@ -127,8 +127,9 @@ registry entry: a new entity with history, a removal, or history extended or
 truncated is scoped to the weeks it rewrote; a closure (latest week missing)
 or a category move is scoped to this refresh's latest week, and a move lists
 the products observed moving. Widen `effective_to_week` when a closure is
-known to last. An entity replacement drafts both its removal and its
-backfill. Other matches (a new entity with no history) are annotations. One
+known to last. An entity replacement drafts one `ENTITY_REPLACED` entry
+(`old->new`), scoped to the weeks its removal and backfill rewrote; approved,
+it explains both only if the history carried across kept its value. Other matches (a new entity with no history) are annotations. One
 draft is written per observed change, citing every notice that supports it.
 
 Drafts are **unapproved** (`approved_by: null`, `confirmed: false`) and explain

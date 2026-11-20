@@ -204,7 +204,13 @@ def build_scenario(
     oracle_root: str | Path | None = None,
     magnitude: float | None = None,
     also: tuple[str, ...] = (),
+    params: dict[str, dict] | None = None,
 ) -> ScenarioResult:
+    """One scenario. ``params`` overrides fault parameters by family, e.g.
+    ``{"entity_merge": {"factor": 1.0}}``. A merge ``factor`` leaves the rest of
+    the scenario unchanged (the injector draws its own factor either way); an
+    override that skips a draw another injector would make changes what
+    follows it."""
     scenario_id = f"scenario-{index:04d}"
     seed = config.seed * 1000 + index
     rng = np.random.default_rng(seed)
@@ -236,6 +242,10 @@ def build_scenario(
             magnitude=magnitude if position == 0 else None,
         )
         for position, name in enumerate(families)
+    ]
+    specs = [
+        FaultSpec(spec.family, spec.stage, {**spec.params, **(params or {}).get(spec.family, {})})
+        for spec in specs
     ]
 
     clean_states: dict[str, State] = {"source": source_state}

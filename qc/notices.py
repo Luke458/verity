@@ -31,16 +31,16 @@ from .lifecycle import (
     NEW_BACKFILL,
     RECLASSIFIED,
     REMOVED,
+    REPLACED,
     TRUNCATED,
 )
 
 NONE = "none"
-REPLACED = "ENTITY_REPLACED"
 # Historical changes: the registry scopes them by the weeks they rewrite.
 HISTORY_CLASSES = frozenset({NEW_BACKFILL, REMOVED, EXTENDED, TRUNCATED})
 # Closures and category moves: scoped by the weeks they are in effect.
 EFFECT_CLASSES = frozenset({LATEST_MISSING, RECLASSIFIED})
-REGISTRY_CLASSES = HISTORY_CLASSES | EFFECT_CLASSES
+REGISTRY_CLASSES = HISTORY_CLASSES | EFFECT_CLASSES | {REPLACED}
 PLURALS = {"store": "stores", "product": "products", "commodity": "categories"}
 CLASS_PHRASES = {
     "LATEST_WEEK_MISSING": "missing in the latest week",
@@ -464,12 +464,13 @@ def load_notices(path: str | Path) -> list[dict[str, str]]:
 def registry_draft(cand: Candidate, dataset: str, latest_week: int | None = None) -> dict[str, Any] | None:
     """An unapproved registry entry for an observed change the registry can express.
 
-    A historical change is scoped to the weeks it rewrote. A closure or a
+    A historical change, and a replacement (one ``old->new`` pair, see
+    ``replacement_pairs``), is scoped to the weeks it rewrote. A closure or a
     category move is scoped to the refresh's latest week; the reviewer widens
     ``effective_to_week`` if the change is known to last. A move also lists
     the products observed moving, so the approval covers no others.
     """
-    if cand.classification in HISTORY_CLASSES and cand.weeks:
+    if cand.classification in HISTORY_CLASSES | {REPLACED} and cand.weeks:
         scope: dict[str, Any] = {"expected_history_start": min(cand.weeks), "expected_history_end": max(cand.weeks)}
     elif cand.classification in EFFECT_CLASSES and latest_week is not None:
         scope = {"effective_from_week": latest_week, "effective_to_week": latest_week}
@@ -491,6 +492,24 @@ def registry_draft(cand: Candidate, dataset: str, latest_week: int | None = None
         "approved_by": None,
         "approved_at": None,
     }
+
+
+def replacement_pairs(result: Any, cand: Candidate) -> list[Candidate]:
+    """A replacement candidate as one ``old->new`` candidate per pair.
+
+    Each pair carries the weeks its removal and its backfill rewrote, which
+    scope its registry entry.
+    """
+    weeks: dict[str, set[int]] = {}
+    for event in result.events or ():
+        if event.entity_type == cand.entity_type:
+            weeks.setdefault(str(event.entity_id), set()).update(
+                int(w) for w in (*event.historical_weeks_added, *event.historical_weeks_removed))
+    return [
+        Candidate(cand.key, REPLACED, cand.entity_type, [f"{old}->{new}"],
+                  sorted(weeks.get(old, set()) | weeks.get(new, set())), cand.description)
+        for old, new in zip(cand.entity_ids[0::2], cand.entity_ids[1::2], strict=False)
+    ]
 
 
 def draft(
@@ -515,9 +534,9 @@ def draft(
         cand = by_key.get(found.candidate)
         targets: list[Candidate] = []
         if cand is not None and cand.classification == REPLACED:
-            # A replacement is explained by its removal and its backfill.
-            ids = {part for e in cand.entity_ids for part in e.split("->")}
-            targets = [c for c in cands if c.classification in HISTORY_CLASSES and set(c.entity_ids) & ids]
+            # One entry per pair: it explains the removal and the backfill
+            # together, and only if the history carried across is conserved.
+            targets = replacement_pairs(result, cand)
         elif cand is not None:
             targets = [cand]
         drafted = []

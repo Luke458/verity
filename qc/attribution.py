@@ -22,6 +22,7 @@ from .lifecycle import (
     NEW_RECENT,
     RECLASSIFIED,
     REMOVED,
+    REPLACED,
     TRUNCATED,
     LifecycleEvent,
     _entity_type,
@@ -63,6 +64,8 @@ class AttributionResult:
     matched_moves: dict[str, str] = field(default_factory=dict)
     # Categories emptied or created by an approved move: "commodity:id" -> approval.
     move_consequences: dict[str, str] = field(default_factory=dict)
+    # Ids replaced by an approved entry: "type:old->new" -> approval.
+    matched_replacements: dict[str, str] = field(default_factory=dict)
     per_metric: dict[str, float] = field(default_factory=dict)
     cross_metric_flags: list[str] = field(default_factory=list)
     conservation: dict[str, float] = field(default_factory=dict)
@@ -89,10 +92,24 @@ class AttributionResult:
             "matched_absences": dict(self.matched_absences),
             "matched_moves": dict(self.matched_moves),
             "move_consequences": dict(self.move_consequences),
+            "matched_replacements": dict(self.matched_replacements),
             "per_metric": dict(self.per_metric),
             "cross_metric_flags": list(self.cross_metric_flags),
             "conservation": dict(self.conservation),
         }
+
+    def relabelled(self) -> dict[str, str]:
+        """Structural events that moved value without changing it: "type:id" -> approval.
+
+        The categories approved moves emptied or created, and both ids of an
+        approved replacement.
+        """
+        found = dict(self.move_consequences)
+        for key, approval in self.matched_replacements.items():
+            entity_type, pair = key.split(":", 1)
+            for entity_id in pair.split("->"):
+                found[f"{entity_type}:{entity_id}"] = approval
+        return found
 
 
 def _usable(item: dict[str, Any], config: DatasetConfig) -> bool:
@@ -190,6 +207,74 @@ def _move_consequences(
         if abs(value - moved) <= tolerance * max(abs(value), abs(moved), 1e-9):
             found[f"commodity:{event.entity_id}"] = approval[event.entity_id]
     return found
+
+
+def _replacements(
+    structural: list[LifecycleEvent],
+    registry: list[dict[str, Any]],
+    config: DatasetConfig,
+) -> tuple[dict[str, str], dict[str, float]]:
+    """Replacements an approved entry explains, and each pair's conservation.
+
+    An ``ENTITY_REPLACED`` entry lists ``old->new`` pairs. The pair is
+    observed as the old id's removal and the new id's backfill; the entry
+    explains both only together, when their weeks fall inside its
+    ``expected_history_start``..``expected_history_end`` and the history
+    carried across conserves the value removed (``conservation_ratio`` >=
+    ``explained_fraction_threshold``, as for a move). Returns
+    ``{"type:old->new": approval}`` and ``{"old->new": conservation}`` for
+    every listed pair observed.
+    """
+    removed = {(e.entity_type, e.entity_id): e for e in structural if e.classification == REMOVED}
+    added = {(e.entity_type, e.entity_id): e for e in structural if e.classification == NEW_BACKFILL}
+    found: dict[str, str] = {}
+    ratios: dict[str, float] = {}
+    for item in registry:
+        if not _usable(item, config) or item.get("classification") != REPLACED:
+            continue
+        entity_type = str(item.get("entity_type"))
+        start, end = item.get("expected_history_start"), item.get("expected_history_end")
+        for pair in (str(value) for value in item.get("entity_ids", [])):
+            old_id, arrow, new_id = pair.partition("->")
+            old, new = removed.get((entity_type, old_id)), added.get((entity_type, new_id))
+            if not arrow or old is None or new is None:
+                continue
+            gross = max(abs(old.historical_value_removed), abs(new.historical_value_added))
+            ratio = 1.0 - abs(new.historical_value_added - old.historical_value_removed) / gross if gross > 1e-9 else 1.0
+            ratios[pair] = ratio
+            weeks = (*old.historical_weeks_removed, *new.historical_weeks_added)
+            in_window = bool(weeks) and type(start) is int and type(end) is int and all(start <= w <= end for w in weeks)
+            if in_window and ratio >= config.explained_fraction_threshold:
+                found.setdefault(f"{entity_type}:{pair}", str(item.get("event_id")))
+    return found, ratios
+
+
+def _as_replaced(overlap: pd.DataFrame, replacements: dict[str, str]) -> pd.DataFrame:
+    """The revision cube with each approved replacement's old id read as its new id.
+
+    A replacement moves every one of the old id's cells to the new id. Read as
+    one id, each cell changes only by the value the replacement changed.
+    """
+    frame = overlap
+    for key in replacements:
+        entity_type, pair = key.split(":", 1)
+        old_id, new_id = pair.split("->", 1)
+        column = f"{entity_type}_id"
+        if column in frame.columns and len(frame):
+            ids = frame[column].astype(str)
+            frame = frame.assign(**{column: ids.where(ids != old_id, new_id)})
+    if frame is overlap:
+        return overlap
+    sums = [c for c in frame.columns if c.endswith(("_previous", "_current"))]
+    derived = [c for c in frame.columns if c.endswith(("_delta", "_relative"))]
+    keys = [c for c in frame.columns if c not in sums and c not in derived]
+    grouped = frame.groupby(keys, dropna=False, sort=True)[sums].sum(min_count=1).reset_index()
+    for column in sums:
+        if column.endswith("_previous"):
+            measure = column[: -len("_previous")]
+            if f"{measure}_current" in grouped.columns:
+                grouped[f"{measure}_delta"] = grouped[f"{measure}_current"] - grouped[column]
+    return grouped
 
 
 def match_absences(
@@ -386,6 +471,11 @@ def explain_revision(
                        if column in config.snapshot_metrics and len(overlap) else overlap)[f"{column}_delta"].sum())
         for column in metrics_present
     }
+    structural = [event for event in events if event.classification in EXPLAINABLE_CLASSES]
+    replacements, ratios = _replacements(structural, expected_events or [], config)
+    # Materiality, breadth and contributors read an approved replacement's two
+    # ids as one, so only the value it changed counts, not every cell it moved.
+    overlap = _as_replaced(overlap, replacements)
     if metrics_present and len(overlap):
         changed = (
             overlap[[f"{column}_delta" for column in metrics_present]]
@@ -401,7 +491,6 @@ def explain_revision(
         config.materiality_abs, config.materiality_ratio * abs(previous_total)
     )
 
-    structural = [event for event in events if event.classification in EXPLAINABLE_CLASSES]
     explanation_type = next(
         (
             entity_type
@@ -420,9 +509,21 @@ def explain_revision(
     moves: dict[str, str] = {}
     conservation: dict[str, float] = {}
     consequences = _move_consequences(structural, expected_events or [], config, latest_week)
+    conservation.update(ratios)
+    replaced = AttributionResult(matched_replacements=replacements).relabelled()
 
     for event in structural:
         key = f"{event.entity_type}:{event.entity_id}"
+        if key in replaced:
+            # One id of an approved replacement: the approval covers it, and it
+            # explains none of the revision, so any value the replacement
+            # changed is left to the residual.
+            matched.append(replaced[key])
+            coverage.append({"check": "historical_event", "scope": f"{key}:{event.classification}",
+                             "approval_id": replaced[key],
+                             "weeks": sorted(set((*event.historical_weeks_added, *event.historical_weeks_removed)))})
+            explanations.append(f"replaced_entity:{key}")
+            continue
         if key in consequences:
             # A category emptied or created by an approved move: the move's
             # approval covers it, and its value moved rather than changed.
@@ -515,6 +616,7 @@ def explain_revision(
         matched_absences={f"{t}:{i}": a for (t, i), a in sorted(absences.items())},
         matched_moves=moves,
         move_consequences=dict(consequences),
+        matched_replacements=dict(replacements),
         per_metric=per_metric,
         cross_metric_flags=_cross_metric_flags(
             overlap, per_metric, previous_total, config
@@ -607,8 +709,10 @@ def like_for_like(
     those the registry matched in this refresh, and those whose earlier
     approved closure still stands (``standing_closures``). An approved
     category move assigns the moved products' previous rows to their new
-    category, so both categories are compared on the current mapping. With no
-    approvals the frames are returned unchanged.
+    category, so both categories are compared on the current mapping. An
+    approved replacement assigns the old id's previous rows to the new id, so
+    the new id is compared with its own history rather than as a new entity.
+    With no approvals the frames are returned unchanged.
     """
     restated: list[dict[str, Any]] = []
     closures = {**(standing or {}), **attribution.matched_absences}
@@ -633,6 +737,15 @@ def like_for_like(
             previous = previous.copy()
             previous.loc[rows, "commodity_id"] = event.details["to_commodity"]
             restated.append({"move": event.entity_id, "products": len(products), "approval_id": moved_by})
+    for key, approval in sorted(attribution.matched_replacements.items()):
+        entity_type, pair = key.split(":", 1)
+        old_id, new_id = pair.split("->", 1)
+        column = f"{entity_type}_id"
+        if column not in previous.columns:
+            continue
+        previous = previous.copy()
+        previous.loc[previous[column].astype(str) == old_id, column] = new_id
+        restated.append({"replacement": key, "approval_id": approval})
     return previous, current, {"excluded": excluded, "restated": restated}
 
 
@@ -689,15 +802,16 @@ def assess_history(
             reconstruction_score is not None
             and reconstruction_score >= config.reconstruction_score_threshold
         )
+        relabelled = attribution.relabelled()
         if all(
             event.classification == RECLASSIFIED
-            or f"{event.entity_type}:{event.entity_id}" in attribution.move_consequences
+            or f"{event.entity_type}:{event.entity_id}" in relabelled
             for event in attribution.structural_events
         ):
-            # A category move (and a category it empties or creates) relabels
-            # value without changing it, so it explains none of the revision;
-            # whatever revision remains is judged as if there were no
-            # structural change.
+            # A category move (and a category it empties or creates) and an
+            # approved replacement relabel value without changing it, so they
+            # explain none of the revision; whatever revision remains is judged
+            # as if there were no structural change.
             explained_enough = not _residual_escalates(attribution, config)
         else:
             explained_enough = (

@@ -368,6 +368,85 @@ Results: [`results/approvals-test.json`](results/approvals-test.json)
 (registered run) and
 [`results/approvals-test-after-fix.json`](results/approvals-test-after-fix.json).
 
+## Approving store replacements
+
+A store merge (`entity_merge`) removes one store id and carries its history
+to a new id. `qc notices` matches a merge notice to the engine's replacement
+candidate (`detect_relationships`). The risk is the one closures and moves
+carry, plus one more: an approval that covers a merge should not also cover
+value the merge changed. The generator's merge rescales the history it
+carries by a factor drawn from 0.9-1.1.
+
+Reading the engine on development seeds 6401-6405 found that an approved
+merge was never explained, for three reasons, and fixed them before
+registration:
+
+- **The approval was two unrelated entries.** The removal and the backfill
+  were each approved on their weeks, so nothing compared the value carried
+  across with the value removed.
+- **Each half was credited as explained value.** A merge that carries
+  history unchanged nets to about zero, so its explained fraction was noise
+  and it failed. Gross materiality also counted every moved cell twice. Only
+  a merge that also changed value came out explained, which is backwards.
+- **The latest-week test set the new store aside as new.** Its rows were
+  subtracted as a new entity's (`temporal.new_period_adjustments`) against a
+  baseline that still held the old store. Its banner then looked like it had
+  dropped by the store's share, blind as well as approved, even with history
+  unchanged.
+
+An approval is now one `ENTITY_REPLACED` entry per `old->new` pair
+([engine.md](engine.md#expected-event-registry)). It covers the removal and
+the backfill together, only when the history carried across conserves the
+value removed (ratio >= 0.9, as for a move), and it explains none of the
+revision. Materiality reads the two ids as one, so whatever value the merge
+changed stays unexplained. Like-for-like, the old id's previous rows take
+the new id before the latest-week test. Blind runs are unchanged: on the
+cohort plan all 220 cases (status, historical status, explained fraction,
+reconstruction score, cause and origin) are identical before and after.
+
+`python -m experiments.approvals.replacements` builds, per profile and seed:
+
+- a merge three ways: history carried across unchanged (factor 1.0, the
+  *conserving* merge), rescaled by 5% (0.95), and with the generator's own
+  draw. Each is assessed blind and with the entry `qc notices` drafts,
+  approved;
+- the conserving merge with a second fault (coding error, warehouse
+  transform error, market movement, one-week restatement), approved;
+- each second fault alone, and a clean refresh.
+
+A merge's value change is *material* when the rescale, as a share of the
+overlap total (`|1 - factor|` times the old store's overlap value, over the
+overlap total), exceeds `materiality_ratio` (0.1%). The merge is injected at
+the source stage, so a market movement's category can differ between the
+alone and paired runs; as before, a miss is judged against the run's own
+reported `detectable_change`.
+
+On the development seeds, the conserving merge was explained 5/5 on both
+profiles. Every rescaled merge was flagged (the 5% arm 5/5, and the drawn arm
+in all 9 material cases). Coding, warehouse and restatement pairs were flagged
+5/5. No missed market movement was at or above its run's 50% limit.
+
+### Registered predictions (seeds 6501-6520, both profiles)
+
+1. **Blind, every merge is flagged:** 20/20 per arm and profile.
+2. **Approved, a conserving merge is explained.** `qc notices` drafts exactly
+   one `ENTITY_REPLACED` entry for the pair in 20/20. It reaches
+   PASS_WITH_EXPLANATION in at least 17/20 per profile. No approved
+   conserving run has a change finding (`historical_revision`,
+   `historical_event` or `revision_week`) that its seed's clean refresh does
+   not also have.
+3. **Approved, a material rescale stays flagged:** every approved merge in
+   the 5% and drawn arms whose rescale is material has a change finding.
+   Immaterial rescales are reported, not predicted.
+4. **Approvals do not hide large faults:** for coding errors, warehouse
+   transform errors and one-week restatements, the approved pair is flagged
+   in at least as many seeds as the second fault alone, minus one.
+5. **Approvals hide nothing the engine claims it can see:** across the 20
+   approved market-movement pairs per profile, at most 2 missed movements are
+   at or above that run's 80%-power `detectable_change`. At that limit about
+   one movement in five is missed, which the closure and move test's
+   zero-miss criterion did not allow for.
+
 ## Recurrence and slow movements
 
 Every other measurement here scores one version pair. Recurrence is meant to

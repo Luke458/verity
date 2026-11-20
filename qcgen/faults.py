@@ -410,7 +410,9 @@ def inject_entity_merge(
     target_id = f"S{candidate:03d}"
 
     history = fact.loc[fact["store_id"] == source_id].copy()
-    factor = float(ctx.rng.uniform(0.9, 1.1))
+    # Drawn even when ``factor`` is given, so the rest of the scenario is unchanged.
+    drawn = float(ctx.rng.uniform(0.9, 1.1))
+    factor = float(params.get("factor", drawn))
     history["units"] = np.rint(
         history["units"].to_numpy(dtype=np.float64) * factor
     ).astype(np.int32)

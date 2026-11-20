@@ -396,11 +396,21 @@ count is unchanged on every stored split (both methods, both variants), as
 the gold answers accept any of the three. Between 11 and 33 merge notices
 per split now pick the replacement instead of the removal.
 
-**What approving a merge covers.** Approving both drafts explains the whole
-history revision of the two stores, including any value the merge gained or
-lost. The registry checks conservation for closures and category moves, not
-for replacements. The generator's merge fault carries history across scaled
-by 0.9-1.1; in the test's scenario (0.92) the refresh stays INVESTIGATE only
-because the latest-week share test flags the change
-(`tests/test_qc_notices.py`). A conservation check for replacements is not
-built.
+**What approving a merge covers.** Approving both drafts explained the
+whole history revision of the two stores, including any value the merge
+gained or lost. The registry checked conservation for closures and category
+moves, not for replacements.
+
+### A merge drafts one replacement entry (2026-11-20)
+
+`qc notices` now drafts a merge as one `ENTITY_REPLACED` entry per
+`old->new` pair (`notices.replacement_pairs`), scoped to the weeks its
+removal and backfill rewrote. It covers both only together, and only when
+the history carried across conserves the value removed. Any value the merge
+changed stays unexplained ([engine.md](engine.md#expected-event-registry)).
+Approving the two separate drafts had never explained a merge that carried
+history unchanged, and the latest-week test flagged its banner even blind
+([evaluation.md](evaluation.md#approving-store-replacements)). Matching is
+unchanged: `decide` still picks the replacement candidate, so no measured
+notice count moves. `tests/test_qc_notices.py` approves the draft for
+merges that carry history unchanged, lose 5%, and lose 20%.

@@ -24,6 +24,9 @@ EXTENDED = "ENTITY_HISTORY_EXTENDED"
 TRUNCATED = "ENTITY_HISTORY_TRUNCATED"
 LATEST_MISSING = "LATEST_WEEK_MISSING"
 RECLASSIFIED = "POSSIBLE_RECLASSIFICATION"
+# Registry only: an id replaced by another ("old->new"), observed as the old
+# id's removal and the new id's backfill (``attribution._replacements``).
+REPLACED = "ENTITY_REPLACED"
 
 CHANGED_CLASSES = frozenset(
     {NEW_RECENT, NEW_BACKFILL, REMOVED, EXTENDED, TRUNCATED, LATEST_MISSING, RECLASSIFIED}

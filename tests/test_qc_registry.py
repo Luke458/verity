@@ -1,4 +1,4 @@
-"""Registry scoping for closures and category moves (qc.attribution)."""
+"""Registry scoping for closures, category moves and replacements (qc.attribution)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,20 @@ import pytest
 from qc.attribution import (
     AttributionResult,
     _match_expected,
+    _replacements,
     classify_run,
     like_for_like,
     match_absences,
 )
 from qc.config import DatasetConfig
-from qc.lifecycle import LATEST_MISSING, RECLASSIFIED, LifecycleEvent
+from qc.lifecycle import (
+    LATEST_MISSING,
+    NEW_BACKFILL,
+    RECLASSIFIED,
+    REMOVED,
+    REPLACED,
+    LifecycleEvent,
+)
 
 CONFIG = DatasetConfig()
 APPROVED = {"dataset": CONFIG.name, "confirmed": True, "approved_by": "analyst"}
@@ -70,6 +78,50 @@ def test_closure_matches_only_its_entities_and_weeks(entry, week, matched):
 )
 def test_move_matches_only_a_conserving_move_of_listed_products(entry, event, matched):
     assert (_match_expected(event, [entry], CONFIG, 10) == "move") is matched
+
+
+def _replacement(**extra):
+    return {**APPROVED, "event_id": "merge", "classification": REPLACED, "entity_type": "store",
+            "entity_ids": ["S001->S900"], "expected_history_start": 1, "expected_history_end": 9, **extra}
+
+
+def _merge_events(carried=100.0, weeks=(1, 9)):
+    removed = LifecycleEvent("store", "S001", REMOVED, historical_value_removed=100.0,
+                             historical_weeks_removed=list(weeks))
+    added = LifecycleEvent("store", "S900", NEW_BACKFILL, historical_value_added=carried,
+                           historical_weeks_added=list(weeks))
+    return [removed, added]
+
+
+@pytest.mark.parametrize(
+    ("entry", "events", "matched"),
+    [
+        (_replacement(), _merge_events(), True),
+        (_replacement(), _merge_events(carried=95.0), True),  # conserved within the move tolerance
+        (_replacement(), _merge_events(carried=80.0), False),  # history lost on the way
+        (_replacement(), _merge_events(weeks=(1, 10)), False),  # a week outside the approved history
+        (_replacement(), _merge_events()[:1], False),  # the new id never appeared
+        (_replacement(entity_ids=["S900->S001"]), _merge_events(), False),  # the other direction
+        (_replacement(entity_ids=["S001", "S900"]), _merge_events(), False),  # not a pair
+        (_replacement(confirmed=False), _merge_events(), False),
+    ],
+)
+def test_replacement_covers_both_ids_only_when_conserved(entry, events, matched):
+    found, _ = _replacements(events, [entry], CONFIG)
+    assert found == ({"store:S001->S900": "merge"} if matched else {})
+    # Neither half is explained on its own by the replacement entry.
+    assert all(_match_expected(event, [entry], CONFIG, 10) is None for event in events)
+
+
+def test_an_approved_replacement_is_judged_on_the_value_it_changed():
+    events = _merge_events()
+    relabel = AttributionResult(structural_events=events, matched_replacements={"store:S001->S900": "merge"},
+                                material=False, explained_fraction=0.0)
+    assert relabel.relabelled() == {"store:S001": "merge", "store:S900": "merge"}
+    assert classify_run("PASS", events, relabel, CONFIG, reconstruction_score=1.0) == "PASS_WITH_EXPLANATION"
+    changed = AttributionResult(structural_events=events, matched_replacements={"store:S001->S900": "merge"},
+                                material=True, explained_fraction=0.0)
+    assert classify_run("PASS", events, changed, CONFIG, reconstruction_score=1.0) == "INVESTIGATE"
 
 
 def test_unapproved_absences_still_escalate():
