@@ -129,6 +129,31 @@ def test_closure_and_move_notices_draft_entries_that_explain_once_approved(tmp_p
     assert approved["status"] == ("INVESTIGATE" if remaining else "PASS_WITH_EXPLANATION")
 
 
+def test_a_merge_notice_drafts_the_removal_and_the_backfill(tmp_path, capsys):
+    built, case = _scenario(tmp_path, "entity_merge")
+    old, new = case["details"]["source_store"], case["details"]["target_store"]
+    notices = tmp_path / "notices.txt"
+    notices.write_text(f"{old} merged into {new}; its history was carried across.\n")
+    drafts = tmp_path / "drafts.json"
+    capsys.readouterr()
+    assert main(["notices", "--scenario-dir", str(built.directory), "--notices", str(notices),
+                 "--out", str(drafts), "--json"]) == 0
+    match = json.loads(capsys.readouterr().out)["matches"][0]
+    assert match["candidate"]["classification"] == "ENTITY_REPLACED" and len(match["drafts"]) == 2
+    entries = _approve(drafts)
+    assert {(e["classification"], tuple(e["entity_ids"])) for e in entries} == {
+        ("ENTITY_REMOVED", (old,)), ("NEW_ENTITY_HISTORICAL_BACKFILL", (new,))}
+
+    blind = _run(capsys, built.directory)
+    approved = _run(capsys, built.directory, "--registry", str(drafts))
+    history = [f["disposition"] for r in (blind, approved) for f in r["findings"] if f["check"] == "historical_revision"]
+    assert history == ["UNEXPLAINED_ANOMALY", "HUMAN_APPROVED"]
+    # The registry does not check that a replacement conserves value, so the
+    # approval also covers the history this merge fault rescaled (by 0.92
+    # here); the latest-week share test still flags it.
+    assert approved["status"] == "INVESTIGATE"
+
+
 def _answers(**values):
     return {name: {"value": value, "confidence": 0.9} for name, value in values.items()}
 
@@ -157,8 +182,10 @@ def test_a_merge_explains_a_new_store_only_through_its_new_id():
     ]
     backfill = [merge[2]]
     patterns = PatternMatcher()
-    # The right direction explains the merge's own changes.
-    assert patterns.match("Consolidation - S005 replaced by S900.", merge, "ds", 104, {}).candidate == "c0"
+    # The right direction explains the merge's own changes, as one replacement
+    # when the refresh shows it (drafted as its removal and its backfill).
+    assert patterns.match("Consolidation - S005 replaced by S900.", merge, "ds", 104, {}).candidate == "c1"
+    assert patterns.match("Consolidation - S005 replaced by S900.", merge[:1], "ds", 104, {}).candidate == "c0"
     assert patterns.match("Consolidation - S005 replaced by S900.", backfill, "ds", 104, {}).candidate == "c2"
     # S900 named as the old id cannot explain S900 arriving with history (the confirm run's defect).
     assert patterns.match("Consolidation - S900 replaced by S969.", backfill, "ds", 104, {}).candidate == NONE

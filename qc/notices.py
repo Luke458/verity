@@ -211,6 +211,10 @@ def decide(reading: Reading, cands: Sequence[Candidate], latest_week: int) -> Ma
     if reading.planned:
         return Match(NONE, {"reason": "not yet in effect"})
     spans = reading.spans
+    if change_type == "entity_merge":
+        # A merge is one replacement: drafting it covers both the removal and
+        # the backfill, where either alone would leave the other unexplained.
+        cands = sorted(cands, key=lambda c: c.classification != REPLACED)
     for cand in cands:
         if cand.classification not in ACCEPTS[change_type]:
             continue

@@ -384,3 +384,23 @@ applies. Those errors are a reading gap as well as a rule defect. Closing it
 needs a new-id field in `NOTICE_FIELDS`, which changes the request and needs
 its own registered test. Until then `--matcher extract` is exactly the
 registered method; its confirm answers are unchanged.
+
+### A merge drafts the replacement (2026-11-20)
+
+When a merge notice fits several of a refresh's changes, `decide` now
+prefers the replacement ("S005 replaced by S900") over the removal of S005
+or the backfill of S900. `qc notices` drafts a replacement as both its
+removal and its backfill. Before, it drafted only the removal, so approving
+the draft still left S900's backfilled history unexplained. Every measured
+count is unchanged on every stored split (both methods, both variants), as
+the gold answers accept any of the three. Between 11 and 33 merge notices
+per split now pick the replacement instead of the removal.
+
+**What approving a merge covers.** Approving both drafts explains the whole
+history revision of the two stores, including any value the merge gained or
+lost. The registry checks conservation for closures and category moves, not
+for replacements. The generator's merge fault carries history across scaled
+by 0.9-1.1; in the test's scenario (0.92) the refresh stays INVESTIGATE only
+because the latest-week share test flags the change
+(`tests/test_qc_notices.py`). A conservation check for replacements is not
+built.
