@@ -559,6 +559,47 @@ added, which the move did not add. The status is INVESTIGATE either way. A
 rename does not show it, because the emptied category's removal offsets it.
 Changing this would change blind runs, so it is left as a known gap.
 
+### Test results (seeds 6601-6620)
+
+All five held.
+
+| | `small` | `realistic` |
+|---|---|---|
+| Move flagged blind (existing, new, rename) | 20/20, 20/20, 20/20 | 20/20, 20/20, 20/20 |
+| One `POSSIBLE_RECLASSIFICATION` draft for the move | 20/20 in every arm | 20/20 in every arm |
+| New category credited as the move's consequence (new, rename) | 20/20, 20/20 | 20/20, 20/20 |
+| Emptied category credited (rename) | 20/20 | 20/20 |
+| Approved: PASS_WITH_EXPLANATION (existing, new, rename) | **20/20, 20/20, 20/20** | **20/20, 20/20, 20/20** |
+| Approved runs with a finding their clean refresh lacks | 0 in every arm | 0 in every arm |
+| Coding, warehouse, one-week restatement + approved move: flagged | 20/20 in every cell (alone 20/20) | 20/20 in every cell (alone 20/20) |
+| Market movement + approved move: flagged | 20/20 (alone 20/20) | 12/20 (alone 14/20) |
+| Missed market movements at or above the 80% limit | 0 | 1 of 9 missed (alone 0 of 8) |
+| Clean refreshes flagged | 0/20 | 0/20 |
+
+1. **Held.**
+2. **Held.** Every approved move into a new category, partial or rename, was
+   explained with no finding left on either profile.
+3. **Held.** The control was explained 20/20 on both profiles.
+4. **Held.** In 5 coding and 9 warehouse pairs out of 80, the second fault
+   changed the moved products' value enough to break the move's conservation.
+   That approval then covered nothing, and all were flagged anyway.
+5. **Held.** The one miss at the 80% limit (seed 6607, `realistic`) was a
+   23.7% drop on C04, a category the move did not touch, against a limit of
+   22.8%: the one-in-five miss that limit allows. In 8 paired runs the
+   movement fell on the new category itself; the two misses there were
+   below their limits (35% and 47%; the category holds a few products, so
+   its share is noisy). Detection with an approved move (12/20) is close to
+   detection without one (14/20). These are different categories on the same
+   worlds, so this is not a paired test.
+
+What this does not show: the generator moves products within one source
+category. A new category built from several, or a move into a new category
+that also changes value, is not measured; the second is covered by the
+move's conservation requirement, as the warehouse pairs show.
+
+Results: [`results/new-categories-test.json`](results/new-categories-test.json)
+(registered in and run on `8fa63b8`; per-week findings collapsed to a count).
+
 ## Recurrence and slow movements
 
 Every other measurement here scores one version pair. Recurrence is meant to
